@@ -10,3 +10,6 @@ out/
 .vercel
 .turbo
 coverage/
+.claude/
+tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
