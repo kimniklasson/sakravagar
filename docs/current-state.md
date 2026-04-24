@@ -8,8 +8,8 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 - ✅ Supabase-projekt uppsatt (North EU / Stockholm), PostGIS aktiverat, schema applicerat
 - ✅ Trafikverket-nyckel `trafik-prod` skapad
 - ✅ Scrapern funkar end-to-end — hämtar Deviations (filter `MessageType=Olycka`) och upsertar till Supabase
-- ✅ **GitHub Actions-cron live** på publikt repo `kimniklasson/sakravagar` (privat att börja med, byts till publikt innan frekvensökning). Kör `*/30 * * * *`. Secrets satta: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
-- ✅ Första grön körning på Actions — 4 rader i `events`, alla `roadAccident` med koordinater
+- ✅ **GitHub Actions cron** på repo `kimniklasson/sakravagar` — **publikt sedan 2026-04-24** (bytte från privat pga att schedule-events inte firade på privat free tier, bara push-triggers körde). Kör `*/30 * * * *`. Secrets satta: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
+- ✅ Push- och manual-dispatch-körningar gröna. **Schedule-fireningar ska börja dyka upp nu när repot är publikt** — verifiera genom att kolla Actions-tabben om ~1h och leta efter Event = `schedule`.
 - ✅ **Vercel live** — https://sakravagar.vercel.app/ (root = `web/`, Next.js, env `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`). Auto-deploy på push till `main`.
   - Gotcha löst: Next 15 App Router tillåter inte `ssr: false` i Server Components. Dynamisk MapLibre-import ligger nu i en client wrapper: `web/components/Map/MapLoader.tsx`.
 - ✅ **MVP-heatmap kopplad** — `web/components/Map/layers.ts` hämtar från `/api/events` (som läser `events_public`-vyn) och ritar MapLibre `heatmap`-lager + circle-lager som tonar in vid zoom ≥10.
@@ -31,10 +31,9 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 
 ## Nästa steg
 
-1. **Verifiera heatmap live** på https://sakravagar.vercel.app/ efter deploy. Datat är tunt just nu (~timmars historik) så heatmapen är gles — värdet växer passivt när cron fyller tabellen.
+1. **Verifiera att schedule firar** (~1h efter publikt-byte). Kolla https://github.com/kimniklasson/sakravagar/actions efter körningar med Event = `schedule`.
 2. **Låt cron rulla 2-3 dagar** (passivt) och verifiera att tabellen växer rimligt (~48 körningar/dag).
-3. **Byt GitHub-repo till publikt** innan ev. frekvensökning (privat = 2000 Actions-min/mån tak, publikt = obegränsat).
-4. **Förfina heatmap** när data växt: väg-segmentering (snap mot NVDB), tidsfilter (senaste 30d / år), ev. severity-viktning.
+3. **Förfina heatmap** när data växt: tidsfilter (UI-koppla `?since=`-parametern som redan finns i `/api/events`), severity-viktning (mappa `severity` → `heatmap-weight`), väg-segmentering (snap mot NVDB).
 
 ## Filer att känna till
 
