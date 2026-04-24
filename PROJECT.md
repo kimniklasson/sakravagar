@@ -71,22 +71,25 @@ Visa vägar färgkodade efter olycksfrekvens baserat på egen insamlad historik.
 
 ## Potentiella framtida datalager
 
-Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om den viktas mot fler riskfaktorer. Kandidater, alla i Trafikverkets öppna API (CC0), rankade efter relevans för "rädd förare"-usecaset:
+Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om den viktas mot fler riskfaktorer. Kandidater, rankade efter relevans för "rädd förare"-usecaset:
 
 **Hög prioritet — riskproxy oberoende av historik:**
-- **`RoadData`** — hastighetsgräns, vägklass, antal körfält. 90+ km/h och 2+1-vägar utan mitträcke är överrepresenterade i dödsolyckor. Ger en riskindikator även där vi saknar olyckshistorik. *Fältinnehåll behöver bekräftas via schema-introspection.*
-- **ÅDT (årsdygnstrafik)** — kritisk *normalisering* av olyckstäthet. Utan ÅDT visar heatmappen mest "stora vägar", inte "farliga vägar". Troligen i `RoadData` eller separat objekt — behöver verifieras.
+- **`RoadData` v1** (öppna API:et, verifierat 2026-04-24) — `SpeedLimit` ✅, `RoadWidth`, `BearingCapacity`, `RoadOwner`, `RoadConstruction2009`. 90+ km/h och smala vägar överrepresenterade i dödsolyckor. Också: `RoadGeometry` v1 ger LINESTRING per vägsegment → kan snappa olyckor till segment utan NVDB.
+- **ÅDT (årsdygnstrafik)** — kritisk *normalisering* av olyckstäthet. Utan ÅDT visar heatmappen mest "stora vägar", inte "farliga vägar". **Finns inte i öppna trafikinfo-API:et** (verifierat 2026-04-24 — saknas i `RoadData`, `TrafficFlow` är realtids-punktmätningar ej årsgenomsnitt). **Ligger i Lastkajen** (VTF/NVDB — fordons-, MC- och cykelflöden + hastighetsdata per segment). Licens **CC0** — OK för publik/kommersiell app. Kräver registrering (gratis) och acceptans av villkor. Engångsimport (uppdateras årligen), inte polling → shapefile → PostGIS.
 - **`TrafficSafetyCamera`** — ATK-kameror sätts där dödsolyckor skett historiskt. Proxy för kända farliga sträckor, trivial att lägga in.
 
 **Medelhög — realtidslager, inte del av historisk heatmap:**
 - **`RoadCondition`** — friktion/halka. Användbart för "undvik idag"-vy snarare än statisk karta.
-- **`TrafficFlow`** — trängsel korrelerar med påkörning bakifrån. Bäst som separat realtidslager.
+- **`TrafficFlow`** — realtidsmätningar per site (VehicleFlowRate, AverageVehicleSpeed). Trängsel korrelerar med påkörning bakifrån. Bäst som separat realtidslager.
 - **Vägarbeten** — finns redan i `Situation`, filtreras bort idag. Temporär förhöjd risk, visa som overlay.
 
-**Behöver utredas (ej bekräftat i öppna API:et):**
-- **Viltolyckor / viltstängsel** — viltolyckor ägs av Nationella Viltolycksrådet, separat datakälla. Viltstängsel kan finnas i NVDB via Lastkajen, inte i `api.trafikinfo`. Relevant för nervösa förare i skogsområden men kräver egen integration.
+**Bonus från NVDB i öppna API:et (sedan feb 2025):**
+12 NVDB-mängder tillgängliga via `api.trafikinfo`: `Hastighetsgräns`, `Vägbredd`, `Bärighet`, `AntalKörfält2`, `FunktionellVägklass`, `FörbjudenFärdriktning`, `Gatunamn`, `Höjdhinder_upp_till_45_dm`, `Väghållare`, `Vägnummer`, `Vägtrafiknät`, `ÖvrigtVägnamn`. Överlappar delvis `RoadData`. ÅDT ingår *inte* i denna lista.
 
-**Nästa konkreta steg:** gör schema-recon mot `RoadData` för att bekräfta ÅDT + hastighetsgräns. Billigt steg (några curl-anrop) och bör göras tidigt — kalibrerar vi heatmap-trösklar på onormaliserad data först och lägger till ÅDT senare måste färgskalan göras om.
+**Behöver utredas:**
+- **Viltolyckor / viltstängsel** — viltolyckor ägs av Nationella Viltolycksrådet, separat datakälla. Viltstängsel kan finnas i NVDB via Lastkajen. Relevant för nervösa förare i skogsområden men kräver egen integration.
+
+**Nästa konkreta steg:** ladda ÅDT från Lastkajen (registrera konto, ladda ned VTF-shapefile, importera till PostGIS). Bör göras innan heatmap-färgskalan kalibreras — normalisering mot trafikvolym ändrar trösklarna helt.
 
 ## Öppna frågor / överväganden
 

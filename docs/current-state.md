@@ -33,7 +33,8 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 
 1. **Verifiera att schedule firar** (~1h efter publikt-byte). Kolla https://github.com/kimniklasson/sakravagar/actions efter körningar med Event = `schedule`.
 2. **Låt cron rulla 2-3 dagar** (passivt) och verifiera att tabellen växer rimligt (~48 körningar/dag).
-3. **Förfina heatmap** när data växt: tidsfilter (UI-koppla `?since=`-parametern som redan finns i `/api/events`), severity-viktning (mappa `severity` → `heatmap-weight`), väg-segmentering (snap mot NVDB).
+3. **Ladda ÅDT från Lastkajen** (parallellt spår medan cron rullar). Verifierat 2026-04-24: ÅDT finns *inte* i öppna trafikinfo-API:et — bara i Lastkajen (NVDB-företeelsen `Trafik`). Licens CC0, gratis konto. Beställt 2026-04-24: custom order med `Trafik` + `Trafiksäkerhetsklass-Sträcka Bil` + `Vägtrafiknät`, hela Sverige, GPKG-format, EPSG:3006. Import-pipeline klar: `scripts/import-nvdb.sh` (ogr2ogr). Kör när filen anlänt enligt `scripts/README.md`. **Bör göras innan heatmap-färgskalan kalibreras** — utan ÅDT-normalisering visar heatmappen bara "stora vägar".
+4. **Förfina heatmap** när data växt: tidsfilter (UI-koppla `?since=`-parametern som redan finns i `/api/events`), severity-viktning (mappa `severity` → `heatmap-weight`), väg-segmentering (snap mot `RoadGeometry` v1 — LINESTRING per segment finns i öppna API:et).
 
 ## Filer att känna till
 
