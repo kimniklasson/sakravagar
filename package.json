@@ -13,5 +13,8 @@
     "web": "pnpm --filter @trafik/web run dev",
     "build:web": "pnpm --filter @trafik/web run build",
     "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
   }
 }
