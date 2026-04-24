@@ -1,6 +1,6 @@
 # Trafiksäkerhets-app — projektanteckningar
 
-Senast uppdaterad: 2026-04-23
+Senast uppdaterad: 2026-04-24
 
 ## Idén
 
@@ -69,9 +69,28 @@ Visa vägar färgkodade efter olycksfrekvens baserat på egen insamlad historik.
 6. Verifiera att data flödar in ett par dagar
 7. Sedan: börja tänka på frontend/heatmap
 
+## Potentiella framtida datalager
+
+Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om den viktas mot fler riskfaktorer. Kandidater, alla i Trafikverkets öppna API (CC0), rankade efter relevans för "rädd förare"-usecaset:
+
+**Hög prioritet — riskproxy oberoende av historik:**
+- **`RoadData`** — hastighetsgräns, vägklass, antal körfält. 90+ km/h och 2+1-vägar utan mitträcke är överrepresenterade i dödsolyckor. Ger en riskindikator även där vi saknar olyckshistorik. *Fältinnehåll behöver bekräftas via schema-introspection.*
+- **ÅDT (årsdygnstrafik)** — kritisk *normalisering* av olyckstäthet. Utan ÅDT visar heatmappen mest "stora vägar", inte "farliga vägar". Troligen i `RoadData` eller separat objekt — behöver verifieras.
+- **`TrafficSafetyCamera`** — ATK-kameror sätts där dödsolyckor skett historiskt. Proxy för kända farliga sträckor, trivial att lägga in.
+
+**Medelhög — realtidslager, inte del av historisk heatmap:**
+- **`RoadCondition`** — friktion/halka. Användbart för "undvik idag"-vy snarare än statisk karta.
+- **`TrafficFlow`** — trängsel korrelerar med påkörning bakifrån. Bäst som separat realtidslager.
+- **Vägarbeten** — finns redan i `Situation`, filtreras bort idag. Temporär förhöjd risk, visa som overlay.
+
+**Behöver utredas (ej bekräftat i öppna API:et):**
+- **Viltolyckor / viltstängsel** — viltolyckor ägs av Nationella Viltolycksrådet, separat datakälla. Viltstängsel kan finnas i NVDB via Lastkajen, inte i `api.trafikinfo`. Relevant för nervösa förare i skogsområden men kräver egen integration.
+
+**Nästa konkreta steg:** gör schema-recon mot `RoadData` för att bekräfta ÅDT + hastighetsgräns. Billigt steg (några curl-anrop) och bör göras tidigt — kalibrerar vi heatmap-trösklar på onormaliserad data först och lägger till ÅDT senare måste färgskalan göras om.
+
 ## Öppna frågor / överväganden
 
-- Ska vi även logga icke-olycka-händelser (stopp, vägarbeten)? Troligen nej i början — håll scope tight.
+- Ska vi även logga icke-olycka-händelser (stopp, vägarbeten)? Troligen nej i början — håll scope tight. *Vägarbeten kan bli relevant som overlay senare, se datalager-sektion.*
 - Hur kategorisera allvarlighetsgrad? Kanske via `IconId` eller text i `Message`.
 - Eventuellt parallellt: mejla Transportstyrelsen om STRADA-access för framtida berikning.
 
