@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
-import { addEventsLayer } from "./layers";
+import { addAdtLayer, addEventsLayer } from "./layers";
 
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
@@ -27,6 +27,8 @@ export default function Map() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
     map.on("load", () => {
+      // ADT först så att events-lager (heatmap + circles) renderas ovanpå.
+      addAdtLayer(map);
       void addEventsLayer(map);
     });
 

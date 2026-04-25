@@ -9,9 +9,21 @@ type EventPoint = {
   last_seen: string;
 };
 
+type AdtSegment = {
+  fid: number;
+  adt_total: number;
+  adt_tung: number | null;
+  matar: number | null;
+  geometry: GeoJSON.LineString;
+};
+
 const SOURCE_ID = "events";
 const HEATMAP_LAYER_ID = "events-heatmap";
 const CIRCLE_LAYER_ID = "events-circles";
+
+const ADT_SOURCE_ID = "adt";
+const ADT_LAYER_ID = "adt-lines";
+const ADT_MIN_ZOOM = 8;
 
 export async function addEventsLayer(map: MapLibreMap): Promise<void> {
   const res = await fetch("/api/events");
@@ -99,4 +111,131 @@ export async function addEventsLayer(map: MapLibreMap): Promise<void> {
       ],
     },
   });
+}
+
+// ÅDT-lager: bbox-driven, fyller på via /api/adt vid moveend när zoom ≥ 8.
+// Färgar linjer efter trafikflöde (lågt blått → högt rött). Läggs in före
+// events-lagret så att olyckspunkter renderas ovanpå vägfärgningen.
+export function addAdtLayer(map: MapLibreMap): void {
+  if (map.getSource(ADT_SOURCE_ID)) return;
+
+  map.addSource(ADT_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(HEATMAP_LAYER_ID) ? HEATMAP_LAYER_ID : undefined;
+  map.addLayer(
+    {
+      id: ADT_LAYER_ID,
+      type: "line",
+      source: ADT_SOURCE_ID,
+      minzoom: ADT_MIN_ZOOM,
+      paint: {
+        // Trafikflöde: ColorBrewer RdYlBu inverterad. Skala vald så att
+        // typiska riksvägar (5–15k) hamnar i gult/orange och E-vägar
+        // (>20k) blir röda.
+        "line-color": [
+          "interpolate", ["linear"], ["get", "adt_total"],
+          500, "#2c7bb6",
+          2000, "#abd9e9",
+          5000, "#ffffbf",
+          10000, "#fdae61",
+          20000, "#d7191c",
+        ],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          8, 1,
+          12, 2.5,
+          16, 5,
+        ],
+        "line-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          ADT_MIN_ZOOM, 0,
+          9, 0.7,
+        ],
+      },
+    },
+    beforeId,
+  );
+
+  // Padda bbox 50% i varje riktning så vi cachar mer än viewporten visar.
+  // Då kan användaren panorera/zooma in inom det området utan att vi
+  // refetchar — segmentens position och färg förblir stabila.
+  const BBOX_PADDING = 0.5;
+  type Bbox = { west: number; south: number; east: number; north: number };
+  let cachedBbox: Bbox | null = null;
+  let inFlight = false;
+  let needsRefresh = false;
+
+  const contains = (outer: Bbox, inner: Bbox) =>
+    outer.west <= inner.west &&
+    outer.east >= inner.east &&
+    outer.south <= inner.south &&
+    outer.north >= inner.north;
+
+  const refresh = async (): Promise<void> => {
+    if (map.getZoom() < ADT_MIN_ZOOM) return;
+    if (inFlight) {
+      needsRefresh = true;
+      return;
+    }
+    const b = map.getBounds();
+    const viewport: Bbox = {
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    };
+    if (cachedBbox && contains(cachedBbox, viewport)) return;
+
+    const padW = (viewport.east - viewport.west) * BBOX_PADDING;
+    const padH = (viewport.north - viewport.south) * BBOX_PADDING;
+    const padded: Bbox = {
+      west: viewport.west - padW,
+      south: viewport.south - padH,
+      east: viewport.east + padW,
+      north: viewport.north + padH,
+    };
+
+    inFlight = true;
+    try {
+      const bboxStr = [padded.west, padded.south, padded.east, padded.north]
+        .map((n) => n.toFixed(4))
+        .join(",");
+      const res = await fetch(`/api/adt?bbox=${bboxStr}`);
+      if (!res.ok) {
+        console.error("failed to fetch adt", await res.text());
+        return;
+      }
+      const { segments } = (await res.json()) as { segments: AdtSegment[] };
+      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+        type: "FeatureCollection",
+        features: segments.map((s) => ({
+          type: "Feature",
+          geometry: s.geometry,
+          properties: {
+            fid: s.fid,
+            adt_total: s.adt_total,
+            adt_tung: s.adt_tung,
+            matar: s.matar,
+          },
+        })),
+      };
+      const src = map.getSource(ADT_SOURCE_ID) as GeoJSONSource | undefined;
+      src?.setData(fc);
+      cachedBbox = padded;
+    } finally {
+      inFlight = false;
+      // Viewport kan ha rört sig under fetchen — kolla om vi behöver hämta igen.
+      if (needsRefresh) {
+        needsRefresh = false;
+        void refresh();
+      }
+    }
+  };
+
+  map.on("moveend", () => { void refresh(); });
+  // Trigga vid initialladdning om kartan redan är inzoomad (t.ex. hot-reload).
+  void refresh();
 }
