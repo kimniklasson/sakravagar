@@ -154,8 +154,8 @@ export function addAdtLayer(map: MapLibreMap): void {
         ],
         "line-opacity": [
           "interpolate", ["linear"], ["zoom"],
-          ADT_MIN_ZOOM, 0,
-          9, 0.7,
+          ADT_MIN_ZOOM, 0.3,
+          ADT_MIN_ZOOM + 1, 0.7,
         ],
       },
     },
