@@ -23,7 +23,10 @@ const CIRCLE_LAYER_ID = "events-circles";
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
-const ADT_MIN_ZOOM = 8;
+// Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
+// sån query timeoutar mot Supabase (för många segment). Zoom 9 är ~2°
+// vilket fungerar bra. Användare ser fortfarande heatmap vid zoom 8.
+const ADT_MIN_ZOOM = 9;
 
 export async function addEventsLayer(map: MapLibreMap): Promise<void> {
   const res = await fetch("/api/events");
@@ -159,10 +162,15 @@ export function addAdtLayer(map: MapLibreMap): void {
     beforeId,
   );
 
-  // Padda bbox 50% i varje riktning så vi cachar mer än viewporten visar.
+  // Padda bbox 30% i varje riktning så vi cachar mer än viewporten visar.
   // Då kan användaren panorera/zooma in inom det området utan att vi
-  // refetchar — segmentens position och färg förblir stabila.
-  const BBOX_PADDING = 0.5;
+  // refetchar — segmentens position och färg förblir stabila. 30% är
+  // medvetet konservativt: 50% gjorde queryn tung vid zoom 9 i glesbygd.
+  const BBOX_PADDING = 0.3;
+  // Säkerhetsventil: skippa fetch om paddad bbox spänner över > 8 sq°
+  // (typisk zoom 7-8 trots minzoom). Skyddar mot 500/timeout om någon
+  // nått hit på annat vis (resize, dev hot-reload, etc).
+  const MAX_BBOX_AREA_DEG2 = 8;
   type Bbox = { west: number; south: number; east: number; north: number };
   let cachedBbox: Bbox | null = null;
   let inFlight = false;
@@ -197,6 +205,8 @@ export function addAdtLayer(map: MapLibreMap): void {
       east: viewport.east + padW,
       north: viewport.north + padH,
     };
+    const area = (padded.east - padded.west) * (padded.north - padded.south);
+    if (area > MAX_BBOX_AREA_DEG2) return;
 
     inFlight = true;
     try {
