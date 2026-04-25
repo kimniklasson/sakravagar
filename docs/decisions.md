@@ -54,6 +54,16 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Utvärderas:** Efter 1 månad med riktig data. Beräkna median `aktiv-tid` per händelse. Om median är klart över 30 min → sänk till 60 min (halvera API-trafiken).
 
+## 2026-04-25 — Cron flyttad från GH Actions till Supabase pg_cron
+
+**Valt:** Schemalägg scrapen via `pg_cron` + `pg_net` direkt i Supabase, som anropar en Edge Function `scrape` (Deno-port av Node-scrapern). GH Actions-workflowen behållen som manuell `workflow_dispatch`-knapp.
+
+**Varför:** GitHub Actions schedule är beryktat opålitlig under hög last — observerade 1–2 timmars gap över natten trots `*/30 * * * *`-schema. För en heatmap som lever på färska data är missade fönster värre än lite extra setup. pg_cron kör i databasen och triggar ändå konsekvent. Allt ligger nu inom Supabase = enklare ops, samma stack.
+
+**Övervägt:** External cron (cron-job.org) → `workflow_dispatch` via GitHub API. Fungerar men flyttar bara opålitligheten ett steg — och det är ett extra system att hålla koll på. Cloudflare Workers Cron Triggers — pålitligast men kräver port av scrapern till Workers-runtime utan stark Postgres-klient.
+
+**Konsekvens:** Scraper-koden finns nu i två versioner — `scraper/` (Node, kvar för manuell körning via `workflow_dispatch`) och `supabase/functions/scrape/` (Deno, prod). Håll dem i sync vid förändringar; eller på sikt ta bort Node-versionen om den inte används.
+
 ## 2026-04-24 — Dedupe-strategi
 
 **Valt:** Primärnyckel på `Deviation.Id`. Upsert med `first_seen` bevarad via default, `last_seen` uppdaterad.
