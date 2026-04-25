@@ -6,7 +6,8 @@
 //
 // Auth: vi deployar med --no-verify-jwt och kräver istället en delad
 // hemlighet (SCRAPE_SHARED_SECRET) i Authorization-headern. Det gör att
-// pg_net kan kalla utan att hantera Supabase-JWT.
+// pg_net kan kalla utan att hantera Supabase-JWT. Secret är obligatorisk
+// — saknas den returnerar funktionen 500 (inte tyst öppen).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -93,11 +94,13 @@ function deviationToRow(d: Deviation, now: string): UpsertRow | null {
 
 Deno.serve(async (req: Request) => {
   const sharedSecret = Deno.env.get("SCRAPE_SHARED_SECRET");
-  if (sharedSecret) {
-    const auth = req.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${sharedSecret}`) {
-      return new Response("unauthorized", { status: 401 });
-    }
+  if (!sharedSecret) {
+    console.error("[scrape] SCRAPE_SHARED_SECRET not configured");
+    return new Response("server misconfigured", { status: 500 });
+  }
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${sharedSecret}`) {
+    return new Response("unauthorized", { status: 401 });
   }
 
   const apiKey = Deno.env.get("TRAFIKVERKET_API_KEY");
