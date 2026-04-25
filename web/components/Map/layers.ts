@@ -17,16 +17,37 @@ type AdtSegment = {
   geometry: GeoJSON.LineString;
 };
 
+type TskSegment = {
+  fid: number;
+  klass: string;
+  geometry: GeoJSON.LineString;
+};
+
+type RiskSegment = {
+  fid: number;
+  adt_total: number;
+  events_count: number;
+  risk_per_milj_fordon: number;
+  geometry: GeoJSON.LineString;
+};
+
+export type LayerController = { setVisible: (v: boolean) => void };
+
 const SOURCE_ID = "events";
 const HEATMAP_LAYER_ID = "events-heatmap";
 const CIRCLE_LAYER_ID = "events-circles";
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
+const TSK_SOURCE_ID = "tsk";
+const TSK_LAYER_ID = "tsk-lines";
+const RISK_SOURCE_ID = "risk";
+const RISK_LAYER_ID = "risk-lines";
+
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase (för många segment). Zoom 9 är ~2°
-// vilket fungerar bra. Användare ser fortfarande heatmap vid zoom 8.
-const ADT_MIN_ZOOM = 9;
+// vilket fungerar bra för båda lager.
+const NVDB_MIN_ZOOM = 9;
 
 export async function addEventsLayer(map: MapLibreMap): Promise<void> {
   const res = await fetch("/api/events");
@@ -116,65 +137,31 @@ export async function addEventsLayer(map: MapLibreMap): Promise<void> {
   });
 }
 
-// ÅDT-lager: bbox-driven, fyller på via /api/adt vid moveend när zoom ≥ 8.
-// Färgar linjer efter trafikflöde (lågt blått → högt rött). Läggs in före
-// events-lagret så att olyckspunkter renderas ovanpå vägfärgningen.
-export function addAdtLayer(map: MapLibreMap): void {
-  if (map.getSource(ADT_SOURCE_ID)) return;
+// Delad bbox-driven loader för NVDB-lagren (ADT, TSK).
+//
+// - Padder bbox 30% i varje riktning så små panoreringar inte refetchar.
+// - Säkerhetsventil mot stora bbox (zoom 7-8 hit p.g.a. resize/hot-reload):
+//   skippa fetch om paddad bbox > 8 sq° (timeout-risk på Supabase free tier).
+// - `setEnabled(false)` pausar fetch (när lagret är toggled off).
+//   Vid `setEnabled(true)` triggas refresh; cachen behålls så ingen onödig
+//   fetch sker om viewporten inte hunnit röra sig.
+type Bbox = { west: number; south: number; east: number; north: number };
+type BboxLoader = { setEnabled: (v: boolean) => void };
 
-  map.addSource(ADT_SOURCE_ID, {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] },
-  });
-
-  const beforeId = map.getLayer(HEATMAP_LAYER_ID) ? HEATMAP_LAYER_ID : undefined;
-  map.addLayer(
-    {
-      id: ADT_LAYER_ID,
-      type: "line",
-      source: ADT_SOURCE_ID,
-      minzoom: ADT_MIN_ZOOM,
-      paint: {
-        // Trafikflöde: ColorBrewer RdYlBu inverterad. Skala vald så att
-        // typiska riksvägar (5–15k) hamnar i gult/orange och E-vägar
-        // (>20k) blir röda.
-        "line-color": [
-          "interpolate", ["linear"], ["get", "adt_total"],
-          500, "#2c7bb6",
-          2000, "#abd9e9",
-          5000, "#ffffbf",
-          10000, "#fdae61",
-          20000, "#d7191c",
-        ],
-        "line-width": [
-          "interpolate", ["linear"], ["zoom"],
-          8, 1,
-          12, 2.5,
-          16, 5,
-        ],
-        "line-opacity": [
-          "interpolate", ["linear"], ["zoom"],
-          ADT_MIN_ZOOM, 0.3,
-          ADT_MIN_ZOOM + 1, 0.7,
-        ],
-      },
-    },
-    beforeId,
-  );
-
-  // Padda bbox 30% i varje riktning så vi cachar mer än viewporten visar.
-  // Då kan användaren panorera/zooma in inom det området utan att vi
-  // refetchar — segmentens position och färg förblir stabila. 30% är
-  // medvetet konservativt: 50% gjorde queryn tung vid zoom 9 i glesbygd.
+function createBboxLoader(
+  map: MapLibreMap,
+  opts: {
+    minZoom: number;
+    fetchBbox: (b: Bbox) => Promise<void>;
+  },
+): BboxLoader {
   const BBOX_PADDING = 0.3;
-  // Säkerhetsventil: skippa fetch om paddad bbox spänner över > 8 sq°
-  // (typisk zoom 7-8 trots minzoom). Skyddar mot 500/timeout om någon
-  // nått hit på annat vis (resize, dev hot-reload, etc).
   const MAX_BBOX_AREA_DEG2 = 8;
-  type Bbox = { west: number; south: number; east: number; north: number };
+
   let cachedBbox: Bbox | null = null;
   let inFlight = false;
   let needsRefresh = false;
+  let enabled = true;
 
   const contains = (outer: Bbox, inner: Bbox) =>
     outer.west <= inner.west &&
@@ -183,7 +170,8 @@ export function addAdtLayer(map: MapLibreMap): void {
     outer.north >= inner.north;
 
   const refresh = async (): Promise<void> => {
-    if (map.getZoom() < ADT_MIN_ZOOM) return;
+    if (!enabled) return;
+    if (map.getZoom() < opts.minZoom) return;
     if (inFlight) {
       needsRefresh = true;
       return;
@@ -210,10 +198,85 @@ export function addAdtLayer(map: MapLibreMap): void {
 
     inFlight = true;
     try {
-      const bboxStr = [padded.west, padded.south, padded.east, padded.north]
-        .map((n) => n.toFixed(4))
-        .join(",");
-      const res = await fetch(`/api/adt?bbox=${bboxStr}`);
+      await opts.fetchBbox(padded);
+      cachedBbox = padded;
+    } finally {
+      inFlight = false;
+      if (needsRefresh) {
+        needsRefresh = false;
+        void refresh();
+      }
+    }
+  };
+
+  map.on("moveend", () => { void refresh(); });
+  void refresh();
+
+  return {
+    setEnabled: (v: boolean) => {
+      if (enabled === v) return;
+      enabled = v;
+      if (v) void refresh();
+    },
+  };
+}
+
+function bboxToParam(b: Bbox): string {
+  return [b.west, b.south, b.east, b.north].map((n) => n.toFixed(4)).join(",");
+}
+
+// ÅDT-lager: bbox-driven, fyller på via /api/adt vid moveend när zoom ≥ 9.
+// Färgar linjer efter trafikflöde (lågt blått → högt rött). Läggs in före
+// events-lagret så att olyckspunkter renderas ovanpå vägfärgningen.
+export function addAdtLayer(map: MapLibreMap): LayerController {
+  if (map.getSource(ADT_SOURCE_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  map.addSource(ADT_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(HEATMAP_LAYER_ID) ? HEATMAP_LAYER_ID : undefined;
+  map.addLayer(
+    {
+      id: ADT_LAYER_ID,
+      type: "line",
+      source: ADT_SOURCE_ID,
+      minzoom: NVDB_MIN_ZOOM,
+      paint: {
+        // Trafikflöde: ColorBrewer RdYlBu inverterad. Skala vald så att
+        // typiska riksvägar (5–15k) hamnar i gult/orange och E-vägar
+        // (>20k) blir röda.
+        "line-color": [
+          "interpolate", ["linear"], ["get", "adt_total"],
+          500, "#2c7bb6",
+          2000, "#abd9e9",
+          5000, "#ffffbf",
+          10000, "#fdae61",
+          20000, "#d7191c",
+        ],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          8, 1,
+          12, 2.5,
+          16, 5,
+        ],
+        "line-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          NVDB_MIN_ZOOM, 0.3,
+          NVDB_MIN_ZOOM + 1, 0.7,
+        ],
+      },
+    },
+    beforeId,
+  );
+
+  const loader = createBboxLoader(map, {
+    minZoom: NVDB_MIN_ZOOM,
+    fetchBbox: async (padded) => {
+      const res = await fetch(`/api/adt?bbox=${bboxToParam(padded)}`);
       if (!res.ok) {
         console.error("failed to fetch adt", await res.text());
         return;
@@ -234,18 +297,199 @@ export function addAdtLayer(map: MapLibreMap): void {
       };
       const src = map.getSource(ADT_SOURCE_ID) as GeoJSONSource | undefined;
       src?.setData(fc);
-      cachedBbox = padded;
-    } finally {
-      inFlight = false;
-      // Viewport kan ha rört sig under fetchen — kolla om vi behöver hämta igen.
-      if (needsRefresh) {
-        needsRefresh = false;
-        void refresh();
-      }
-    }
-  };
+    },
+  });
 
-  map.on("moveend", () => { void refresh(); });
-  // Trigga vid initialladdning om kartan redan är inzoomad (t.ex. hot-reload).
-  void refresh();
+  return {
+    setVisible: (v) => {
+      if (map.getLayer(ADT_LAYER_ID)) {
+        map.setLayoutProperty(ADT_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      loader.setEnabled(v);
+    },
+  };
+}
+
+// TSK-lager (TrafikSäkerhetsKlass): bbox-driven, samma fetch-mönster som ADT.
+// Färgkategorier från ColorBrewer RdYlGn — grön = säker, röd = farlig.
+// Bredare line-width än ADT så att ADT-färgen syns som stripa ovanpå när
+// båda lagren är synliga samtidigt.
+export function addTskLayer(map: MapLibreMap): LayerController {
+  if (map.getSource(TSK_SOURCE_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  map.addSource(TSK_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(ADT_LAYER_ID)
+    ? ADT_LAYER_ID
+    : map.getLayer(HEATMAP_LAYER_ID)
+      ? HEATMAP_LAYER_ID
+      : undefined;
+  map.addLayer(
+    {
+      id: TSK_LAYER_ID,
+      type: "line",
+      source: TSK_SOURCE_ID,
+      minzoom: NVDB_MIN_ZOOM,
+      paint: {
+        "line-color": [
+          "match", ["get", "klass"],
+          "Mycket god", "#1a9850",
+          "God",        "#a6d96a",
+          "Mindre god", "#fdae61",
+          "Låg",        "#d7191c",
+          "#999999",
+        ],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          8, 2.5,
+          12, 5,
+          16, 9,
+        ],
+        "line-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          NVDB_MIN_ZOOM, 0.35,
+          NVDB_MIN_ZOOM + 1, 0.65,
+        ],
+      },
+    },
+    beforeId,
+  );
+
+  const loader = createBboxLoader(map, {
+    minZoom: NVDB_MIN_ZOOM,
+    fetchBbox: async (padded) => {
+      const res = await fetch(`/api/tsk?bbox=${bboxToParam(padded)}`);
+      if (!res.ok) {
+        console.error("failed to fetch tsk", await res.text());
+        return;
+      }
+      const { segments } = (await res.json()) as { segments: TskSegment[] };
+      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+        type: "FeatureCollection",
+        features: segments.map((s) => ({
+          type: "Feature",
+          geometry: s.geometry,
+          properties: {
+            fid: s.fid,
+            klass: s.klass,
+          },
+        })),
+      };
+      const src = map.getSource(TSK_SOURCE_ID) as GeoJSONSource | undefined;
+      src?.setData(fc);
+    },
+  });
+
+  return {
+    setVisible: (v) => {
+      if (map.getLayer(TSK_LAYER_ID)) {
+        map.setLayoutProperty(TSK_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      loader.setEnabled(v);
+    },
+  };
+}
+
+// Risk-lager: olyckor per miljon fordon per nvdb-segment, från
+// materialiserad vy `risk_per_segment`. RPC:n returnerar bara segment där
+// events_count > 0 — tomma sträckor ritas inte alls.
+//
+// Färgskalan är preliminär: vi har bara 1-2 dagar data så värdena är
+// mycket högre än de blir när historiken växt (1 olycka på 1 dag på en
+// väg med ÅDT 200 → ~1.4M per miljon fordon, vilket är absurt men tekniskt
+// rätt för det smala datafönstret). Brytpunkterna nedan kommer behöva
+// kalibreras om när vi har 6+ månader data; tills dess är det viktigaste
+// att SE något hända i kartan, inte exakt magnitude.
+export function addRiskLayer(map: MapLibreMap): LayerController {
+  if (map.getSource(RISK_SOURCE_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  map.addSource(RISK_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  // Ovanpå TSK, under ADT — så ADT-färgen syns som tunn stripa när alla
+  // tre är på, och risk-segmenten är synliga som mellanlager.
+  const beforeId = map.getLayer(ADT_LAYER_ID)
+    ? ADT_LAYER_ID
+    : map.getLayer(HEATMAP_LAYER_ID)
+      ? HEATMAP_LAYER_ID
+      : undefined;
+
+  map.addLayer(
+    {
+      id: RISK_LAYER_ID,
+      type: "line",
+      source: RISK_SOURCE_ID,
+      minzoom: NVDB_MIN_ZOOM,
+      paint: {
+        // log10(risk) för att hantera den enorma spridningen vid låg datavolym.
+        // log10(1) = 0, log10(1000) = 3, log10(1e6) = 6.
+        "line-color": [
+          "interpolate", ["linear"],
+          ["log10", ["max", 1, ["get", "risk_per_milj_fordon"]]],
+          0, "#1a9850",
+          2, "#a6d96a",
+          3, "#fdae61",
+          4, "#f46d43",
+          5, "#d7191c",
+        ],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          8, 2,
+          12, 4,
+          16, 7,
+        ],
+        "line-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          NVDB_MIN_ZOOM, 0.45,
+          NVDB_MIN_ZOOM + 1, 0.85,
+        ],
+      },
+    },
+    beforeId,
+  );
+
+  const loader = createBboxLoader(map, {
+    minZoom: NVDB_MIN_ZOOM,
+    fetchBbox: async (padded) => {
+      const res = await fetch(`/api/risk?bbox=${bboxToParam(padded)}`);
+      if (!res.ok) {
+        console.error("failed to fetch risk", await res.text());
+        return;
+      }
+      const { segments } = (await res.json()) as { segments: RiskSegment[] };
+      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+        type: "FeatureCollection",
+        features: segments.map((s) => ({
+          type: "Feature",
+          geometry: s.geometry,
+          properties: {
+            fid: s.fid,
+            adt_total: s.adt_total,
+            events_count: s.events_count,
+            risk_per_milj_fordon: s.risk_per_milj_fordon,
+          },
+        })),
+      };
+      const src = map.getSource(RISK_SOURCE_ID) as GeoJSONSource | undefined;
+      src?.setData(fc);
+    },
+  });
+
+  return {
+    setVisible: (v) => {
+      if (map.getLayer(RISK_LAYER_ID)) {
+        map.setLayoutProperty(RISK_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      loader.setEnabled(v);
+    },
+  };
 }
