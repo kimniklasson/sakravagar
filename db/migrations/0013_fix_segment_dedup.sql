@@ -1,0 +1,22 @@
+-- SUPERSEDED av 0014_correct_dedup_strategy.sql.
+--
+-- Den ursprungliga 0013 byggde om `nvdb_trafik_latest` och `risk_per_segment`
+-- under antagandet att flera fids inom samma `element_id` representerar
+-- "samma fysiska segment, olika mätningar" och borde aggregeras ihop.
+--
+-- Verklig data visade motsatsen: `element_id` är en NVDB-logisk grupperare
+-- för "vägelement" som kan inkludera flera fysiskt olika sträckor (t.ex.
+-- element 12753:300613 består av 5 fids över ~7 km E20). Aggregering på
+-- element_id-nivå slog ihop olika sträckor — Galmetorp-olyckan färgade
+-- Bragnum-sträckan, 5 km bort.
+--
+-- 0014 ersätter helt vad 0013 gjorde:
+--   * `nvdb_trafik_latest` filtrerar äldre matarsperiod per element_id men
+--     behåller alla syskon-fids inom senaste mätperiod.
+--   * `risk_per_segment` aggregerar per fid igen.
+--   * `segment_detail` joinar event_segments via fid = p_fid.
+--
+-- Filen är medvetet behållen i repot för att inte bryta migrationsnumreringen
+-- och git-historiken kring upptäckten. Den är en no-op vid re-deploy.
+
+select 1;
