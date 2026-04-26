@@ -139,7 +139,11 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 
 ## Nästa steg
 
-**Status vid sessionsslut 2026-04-26:** Click-info popup, self-healing snap, korrekt dedup-strategi (0014), legend-widget, tidsfilter, om-modal, realtidsoverlays, segment_detail-perf-fix (0015), TSK borttaget (0016), gamla ÅDT-år rensade (0017), och hit-target-lager för utzoomad klickbarhet är klara. 0013-migrationen är neutraliserad till en `select 1;`-no-op med doc-kommentar — fresh re-deploy hamnar i samma state som 0014 utan att 0013:s fel-premiss körs. Alla MVP-element finns nu på plats; nästa naturliga steg är **återuppta ÅDT-täcknings-diskussionen** (memory: project_adt_coverage_followup.md) eller **kart-stil + färgkalibrering** (punkt 6 nedan) eller att Kim ger en design-spec för redesign av allt UI samtidigt.
+**Status vid sessionsslut 2026-04-26:** Click-info popup, self-healing snap, korrekt dedup-strategi (0014), legend-widget, tidsfilter, om-modal, realtidsoverlays, segment_detail-perf-fix (0015), TSK borttaget (0016), gamla ÅDT-år rensade (0017), och hit-target-lager för utzoomad klickbarhet är klara. 0013-migrationen är neutraliserad till en `select 1;`-no-op med doc-kommentar — fresh re-deploy hamnar i samma state som 0014 utan att 0013:s fel-premiss körs.
+
+**Kommunal ÅDT-utforskning 2026-04-26 — bortvalt nu.** Kim ville utforska Stockholm/Göteborg/Malmö för stadstrafik. Resultat: Göteborg har bara en webbportal `trafikmangder.stadsbyggnad.goteborg.se/1970-2018/` (ingen export, slutar 2018); Stockholm har tekniskt bra format (WFS + OGC API Features + CC0, linjegeometri, heltäckande via interpolation, ÅDT per linje) men datan är från 2014-2015; Malmö ej verifierat. Beslut: skjut till framtida fas — datavintage motiverar inte arbetet just nu. Detaljer i memory `reference_adt_data_sources.md`.
+
+Alla MVP-element finns nu på plats; nästa naturliga steg är **kart-stil + färgkalibrering** (punkt 6 nedan) eller att Kim ger en design-spec för redesign av allt UI samtidigt.
 
 **Kims plan för UI/UX:** Så fort alla element/information finns på plats kommer Kim göra en samlad redesign och leverera screenshots + interaktionsspecifikation. Vi bygger alltså vidare med funktion först, designnit sen — inte värt att polera enskilda komponenter just nu eftersom de kommer ritas om ändå.
 
