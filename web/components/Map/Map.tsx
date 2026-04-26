@@ -42,6 +42,7 @@ export default function Map() {
   const [riskVisible, setRiskVisible] = useState(true);
   const [adtVisible, setAdtVisible] = useState(true);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("all");
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -88,6 +89,16 @@ export default function Map() {
     void addEventsLayer(map, { since: sinceFromWindow(timeWindow) });
   }, [timeWindow]);
 
+  // Stäng om-modalen med Escape.
+  useEffect(() => {
+    if (!aboutOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAboutOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [aboutOpen]);
+
   return (
     <>
       <div ref={containerRef} className={styles.map} />
@@ -131,6 +142,14 @@ export default function Map() {
           <option value="6m">Senaste 6 månaderna</option>
           <option value="1y">Senaste året</option>
         </select>
+        <div className={styles.controlsDivider} />
+        <button
+          type="button"
+          className={styles.controlsAboutLink}
+          onClick={() => setAboutOpen(true)}
+        >
+          Om tjänsten
+        </button>
       </div>
       {(tskVisible || riskVisible || adtVisible) && (
         <div className={styles.legend}>
@@ -192,6 +211,55 @@ export default function Map() {
               <div className={styles.legendNote}>fordon/dygn</div>
             </div>
           )}
+        </div>
+      )}
+      {aboutOpen && (
+        <div
+          className={styles.aboutBackdrop}
+          onClick={() => setAboutOpen(false)}
+          role="presentation"
+        >
+          <div
+            className={styles.aboutModal}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="about-title"
+          >
+            <button
+              type="button"
+              className={styles.aboutClose}
+              onClick={() => setAboutOpen(false)}
+              aria-label="Stäng"
+            >
+              ×
+            </button>
+            <h2 id="about-title" className={styles.aboutTitle}>Om Säkravägar.se</h2>
+            <p>
+              Karta över trafiksäkerhet i Sverige. Kombinerar Trafikverkets aktuella olyckor
+              med vägdata från NVDB för att visa vilka sträckor som är säkrast respektive
+              farligast att köra på.
+            </p>
+            <h3 className={styles.aboutSubtitle}>Lager</h3>
+            <ul className={styles.aboutList}>
+              <li><strong>Säkerhetsklass (TSK)</strong> — Trafikverkets klassning av vägars säkerhetsstandard (Mycket god → Låg).</li>
+              <li><strong>Trafikflöde (ÅDT)</strong> — årsdygnstrafik per vägsegment, dvs. genomsnittligt antal fordon per dygn.</li>
+              <li><strong>Risk</strong> — olyckor per miljon fordon. <em>Preliminär</em> — kalibreras när historiken växer.</li>
+              <li><strong>Olyckor</strong> — pågående och nyligen rapporterade olyckor från Trafikverket. Uppdateras var 30:e minut.</li>
+            </ul>
+            <h3 className={styles.aboutSubtitle}>Tips</h3>
+            <ul className={styles.aboutList}>
+              <li>Klicka på en väg eller olyckspunkt för detaljer.</li>
+              <li>Toggla av/på lager för att jämföra dem.</li>
+              <li>Tidsfilter under lager-toggles begränsar vilka olyckor som visas.</li>
+              <li>Zooma in till nivå 9 eller mer för att se vägfärgning.</li>
+            </ul>
+            <h3 className={styles.aboutSubtitle}>Datakällor</h3>
+            <p className={styles.aboutMuted}>
+              Trafikverket Open API (olyckor) · NVDB via Lastkajen (ÅDT, TSK).
+              Data är preliminär och bör inte användas som enda underlag för vägval.
+            </p>
+          </div>
         </div>
       )}
     </>

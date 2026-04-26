@@ -72,6 +72,99 @@
   outline-offset: 1px;
 }
 
+.controlsAboutLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: #0a7a5f;
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: left;
+}
+
+.controlsAboutLink:hover {
+  color: #075c47;
+}
+
+.aboutBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.aboutModal {
+  position: relative;
+  background: #fff;
+  color: #1a1a1a;
+  border-radius: 8px;
+  padding: 24px 28px 22px;
+  max-width: 480px;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.aboutModal p {
+  margin: 0 0 12px;
+}
+
+.aboutTitle {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.aboutSubtitle {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+}
+
+.aboutList {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.aboutList li {
+  margin-bottom: 4px;
+}
+
+.aboutMuted {
+  color: #6b6b6b;
+  font-size: 12px;
+}
+
+.aboutClose {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: #888;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.aboutClose:hover {
+  color: #222;
+}
+
 .legend {
   position: absolute;
   left: 12px;
