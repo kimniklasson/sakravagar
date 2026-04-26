@@ -16,15 +16,32 @@ import {
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
 
+type TimeWindow = "all" | "7d" | "30d" | "6m" | "1y";
+
+const TIME_WINDOW_DAYS: Record<Exclude<TimeWindow, "all">, number> = {
+  "7d": 7,
+  "30d": 30,
+  "6m": 180,
+  "1y": 365,
+};
+
+function sinceFromWindow(w: TimeWindow): string | null {
+  if (w === "all") return null;
+  const days = TIME_WINDOW_DAYS[w];
+  return new Date(Date.now() - days * 86400_000).toISOString();
+}
+
 export default function Map() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const mapLoadedRef = useRef(false);
   const adtCtrl = useRef<LayerController | null>(null);
   const tskCtrl = useRef<LayerController | null>(null);
   const riskCtrl = useRef<LayerController | null>(null);
   const [tskVisible, setTskVisible] = useState(true);
   const [riskVisible, setRiskVisible] = useState(true);
   const [adtVisible, setAdtVisible] = useState(true);
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("all");
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -45,20 +62,31 @@ export default function Map() {
       tskCtrl.current = addTskLayer(map);
       riskCtrl.current = addRiskLayer(map);
       adtCtrl.current = addAdtLayer(map);
-      void addEventsLayer(map);
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindow) });
       addPopupHandler(map);
+      mapLoadedRef.current = true;
     });
 
     mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
+      mapLoadedRef.current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { tskCtrl.current?.setVisible(tskVisible); }, [tskVisible]);
   useEffect(() => { riskCtrl.current?.setVisible(riskVisible); }, [riskVisible]);
   useEffect(() => { adtCtrl.current?.setVisible(adtVisible); }, [adtVisible]);
+
+  // Re-fetcha events när tidsfönstret ändras. Skippa första rendret —
+  // load-handlern ovan kör redan en fetch med initialt fönster.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoadedRef.current) return;
+    void addEventsLayer(map, { since: sinceFromWindow(timeWindow) });
+  }, [timeWindow]);
 
   return (
     <>
@@ -90,6 +118,19 @@ export default function Map() {
           <span>Trafikflöde (ÅDT)</span>
         </label>
         <div className={styles.controlsHint}>Zooma in (≥9) för att se lagren</div>
+        <div className={styles.controlsDivider} />
+        <div className={styles.controlsTitle}>Tidsfönster</div>
+        <select
+          className={styles.controlsSelect}
+          value={timeWindow}
+          onChange={(e) => setTimeWindow(e.target.value as TimeWindow)}
+        >
+          <option value="all">Alla olyckor</option>
+          <option value="7d">Senaste 7 dagarna</option>
+          <option value="30d">Senaste 30 dagarna</option>
+          <option value="6m">Senaste 6 månaderna</option>
+          <option value="1y">Senaste året</option>
+        </select>
       </div>
       {(tskVisible || riskVisible || adtVisible) && (
         <div className={styles.legend}>

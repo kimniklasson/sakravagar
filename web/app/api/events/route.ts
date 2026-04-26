@@ -36,7 +36,11 @@ export async function GET(req: Request) {
     .order("last_seen", { ascending: false })
     .limit(5000);
 
-  if (since) query = query.gte("last_seen", since);
+  // Filtrera på first_seen (när olyckan började) — matchar hur popupen
+  // presenterar datumet. last_seen är när scrapern senast såg raden, vilket
+  // skulle göra att gamla pågående olyckor felaktigt dyker upp i "senaste 7
+  // dagar".
+  if (since) query = query.gte("first_seen", since);
 
   if (bbox) {
     const nums = bbox.split(",").map(Number);

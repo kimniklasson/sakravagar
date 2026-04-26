@@ -42,8 +42,12 @@ const RISK_LAYER_ID = "risk-lines";
 // vilket fungerar bra för båda lager.
 const NVDB_MIN_ZOOM = 9;
 
-export async function addEventsLayer(map: MapLibreMap): Promise<void> {
-  const res = await fetch("/api/events");
+export async function addEventsLayer(
+  map: MapLibreMap,
+  opts: { since?: string | null } = {},
+): Promise<void> {
+  const url = opts.since ? `/api/events?since=${encodeURIComponent(opts.since)}` : "/api/events";
+  const res = await fetch(url);
   if (!res.ok) {
     console.error("failed to fetch events", await res.text());
     return;

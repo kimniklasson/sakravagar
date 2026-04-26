@@ -50,6 +50,28 @@
   color: #777;
 }
 
+.controlsDivider {
+  height: 1px;
+  background: #e5e5e3;
+  margin: 6px -12px 2px;
+}
+
+.controlsSelect {
+  font-family: inherit;
+  font-size: 12px;
+  color: #222;
+  background: #fff;
+  border: 1px solid #d4d4d2;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.controlsSelect:focus {
+  outline: 2px solid #0a7a5f;
+  outline-offset: 1px;
+}
+
 .legend {
   position: absolute;
   left: 12px;
