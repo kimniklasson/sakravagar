@@ -1,4 +1,4 @@
-# Current state — 2026-04-26 (popup v2 + self-healing snap + korrekt dedup-strategi)
+# Current state — 2026-04-26 (popup v2 + self-healing snap + korrekt dedup-strategi + legend)
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
 
@@ -20,6 +20,8 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
   - Publika vyer `adt_public`, `tsk_public` (och `tsk_rank`) serverar GeoJSON i WGS84 med 6 decimalers precision — redo för MapLibre.
 - ✅ **ADT-lager live i prod (2026-04-25)** — `/api/adt?bbox=...` kallar RPC `adt_in_bbox(min_lng,min_lat,max_lng,max_lat)` (migration 0006). RPC:n transformerar bbox till SWEREF99 3006 så GIST-indexet på `nvdb_trafik.geom` används direkt; bara matchande rader transformeras till 4326 för GeoJSON-output. Dedupar till senaste `matarsperiod` per `element_id` (NVDB lagrar varje års mätning som separat rad). `security definer` + explicit `search_path = public, extensions, pg_temp` så `st_transform`/`st_intersects` hittas (PostGIS ligger i `extensions` på Supabase). Frontend-lagret (`addAdtLayer` i `layers.ts`) ritar `line`-lager med `line-color` interpolate på `adt_total` (blå→röd, brytpunkter 500/2k/5k/10k/20k). Slutgiltiga inställningar: `NVDB_MIN_ZOOM = 9` (zoom 8 timeoutade Supabase pga 7° brett bbox), `BBOX_PADDING = 0.3` (30% paddad cache så små panoreringar inte refetchar), area-guard (skippar fetch om paddad bbox > 8 sq°), `line-opacity` interpolerad mellan `NVDB_MIN_ZOOM` och `NVDB_MIN_ZOOM + 1`. Lagret läggs in *före* events-heatmapen så olyckspunkter renderas ovanpå.
 - ✅ **TSK-lager live (2026-04-25)** — `/api/tsk?bbox=...` kallar RPC `tsk_in_bbox` (migration 0007). Samma mönster som ADT men utan tids-dedup (TSK lagras som en rad per `element_id`). RPC:n ordnar segment så `Låg` (röd) renderas sist → ovanpå övriga klasser i MapLibre. Frontend-lagret `addTskLayer` ritar `line`-lager med `match`-uttryck på `klass` (RdYlGn: `Mycket god`→`#1a9850`, `God`→`#a6d96a`, `Mindre god`→`#fdae61`, `Låg`→`#d7191c`). Bredare line-width (8→2.5, 12→5, 16→9) än ADT så att ADT-färgen syns som en stripa ovanpå när båda lagren är synliga samtidigt. Render-ordning: TSK underst, ADT ovanpå TSK, events-heatmap överst. Bbox-loader-logiken extraherad till delad helper `createBboxLoader` i `layers.ts`.
+- ✅ **Legend-widget (2026-04-26)** — fast panel `bottom-left` (`Map.module.css` `.legend`) som förklarar färgskalorna för varje aktivt lager. Hela widgeten döljs om alla tre lager-toggles är av; varje sektion visas/döljs i takt med sin checkbox. **TSK:** 2×2-grid med 4 kategori-rutor (Mycket god/God/Mindre god/Låg). **Risk:** gradient + "låg → hög"-etiketter + "Preliminär — kalibreras när data mognat"-not. Medvetet inga absoluta tal eftersom log10-värdena är vilseledande vid nuvarande datavolym. **ÅDT:** gradient med exakt samma stops som kartans interpolation (500 vid 0%, 2000 vid 7.69%, 5000 vid 23.08%, 10000 vid 48.72%, 20000 vid 100%) så en färg i legenden visuellt motsvarar samma färg på kartan. Etiketter: "500" / "20 000+" + under-not "fordon/dygn". Positionerad `bottom: 28px` för att inte krocka med MapLibres attribution-control.
+
 - ✅ **Lager-toggle UI (2026-04-25)** — checkbox-panel top-left i kartan (`Map.module.css` `.controls`). Tre toggles (TSK + Risk + ÅDT), alla default på. `addAdtLayer`/`addTskLayer`/`addRiskLayer` returnerar `LayerController { setVisible }`. `setVisible(false)` sätter MapLibre `visibility: none` OCH pausar bbox-loadern (sparar fetches när lagret inte syns). `setVisible(true)` återaktiverar; cachen behålls så det inte sker onödig refetch om viewporten inte hunnit röra sig.
 
 - ✅ **Click-info popup (2026-04-25 sen kväll, uppdaterad 2026-04-26)** — klick på ett NVDB-segment visar segmentdetaljer; klick på en eventcirkel visar event-detaljer.
@@ -94,9 +96,9 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 
 ## Nästa steg
 
-**Status vid sessionsslut 2026-04-26:** Click-info popup är klar och stabil (popup v2 + event-click + dedup + risk-procent + datafönster). Snap-pipeline är self-healing (resnap-cron). Dedup-strategin för `nvdb_trafik_latest` är fixad (0014) så Galmetorp-olyckan landar på rätt sträcka. Sista skuld: 0013-migrationen står kvar i repot med fel premiss (⚠️-flaggad), 0014 fixar staten. Säkert som det är, men en framtida re-deploy från scratch kör 0013 innan 0014 — kan konsolideras vid behov.
+**Status vid sessionsslut 2026-04-26:** Click-info popup, self-healing snap, korrekt dedup-strategi (0014), och legend-widget är klara. 0013-migrationen är neutraliserad till en `select 1;`-no-op med doc-kommentar — fresh re-deploy hamnar i samma state som 0014 utan att 0013:s fel-premiss körs.
 
-**Föreslagen nästa task:** Punkt 2 nedan, **Legend-widget** — färgskalor för TSK / ÅDT / Risk så användaren förstår vad linjerna betyder utan att klicka.
+**Föreslagen nästa task:** Punkt 3 nedan, **Om-tjänsten / info-modal** — kort introduktion vid första besöket som förklarar vad kartan visar och datakällorna. Kan vara minimal: popupen + legenden gör mycket redan. Alternativt hoppa direkt till punkt 4 (tids-filter) om vi tycker att första-gångs-onboarding kan vänta.
 
 **Strategi enligt Kim (2026-04-25):** Färdigställ alla *datalager* på kartan först (TSK + olyckor-per-miljon-fordon). Spara UI/UX/styling/legend till sist eftersom färgval, kart-stil, click-info etc kan påverkas av vilka lager som ska samexistera. Tids-filter och realtidsoverlays är också på listan men kommer efter datalager + kart-stil.
 
@@ -110,7 +112,7 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 
 1. ~~**Click-info popup**~~ ✅ klart 2026-04-25, dedup + risk-procent + event-click tillagt 2026-04-26, se ovan.
 
-2. **Legend / förklaring** — fast widget (förslagsvis bottom-left eller top-right under navigation control) med färgskalor för respektive lager (TSK kategoriskala, ÅDT-gradient, Risk log-gradient). Naturligt efter click-info — popupen ger detaljerad info per segment, legend ger översikt över vad färgerna betyder.
+2. ~~**Legend / förklaring**~~ ✅ klart 2026-04-26, se ovan.
 
 3. **Om-tjänsten / info-modal** — mer omfattande introduktion. Kanske inte nödvändig om popupen + legend räcker (popupen förklarar ju redan att siffrorna gäller hela NVDB-segment).
 

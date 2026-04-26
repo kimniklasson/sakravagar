@@ -91,6 +91,68 @@ export default function Map() {
         </label>
         <div className={styles.controlsHint}>Zooma in (≥9) för att se lagren</div>
       </div>
+      {(tskVisible || riskVisible || adtVisible) && (
+        <div className={styles.legend}>
+          <div className={styles.legendTitle}>Förklaring</div>
+          {tskVisible && (
+            <div className={styles.legendBlock}>
+              <div className={styles.legendSubtitle}>Säkerhetsklass</div>
+              <div className={styles.legendCategorical}>
+                <span className={styles.legendItem}>
+                  <span className={styles.legendSwatch} style={{ background: "#1a9850" }} />
+                  <span>Mycket god</span>
+                </span>
+                <span className={styles.legendItem}>
+                  <span className={styles.legendSwatch} style={{ background: "#a6d96a" }} />
+                  <span>God</span>
+                </span>
+                <span className={styles.legendItem}>
+                  <span className={styles.legendSwatch} style={{ background: "#fdae61" }} />
+                  <span>Mindre god</span>
+                </span>
+                <span className={styles.legendItem}>
+                  <span className={styles.legendSwatch} style={{ background: "#d7191c" }} />
+                  <span>Låg</span>
+                </span>
+              </div>
+            </div>
+          )}
+          {riskVisible && (
+            <div className={styles.legendBlock}>
+              <div className={styles.legendSubtitle}>Olyckor / M fordon</div>
+              <div
+                className={styles.legendGradient}
+                style={{
+                  background:
+                    "linear-gradient(to right, #1a9850 0%, #a6d96a 40%, #fdae61 60%, #f46d43 80%, #d7191c 100%)",
+                }}
+              />
+              <div className={styles.legendGradientLabels}>
+                <span>låg</span>
+                <span>hög</span>
+              </div>
+              <div className={styles.legendNote}>Preliminär — kalibreras när data mognat</div>
+            </div>
+          )}
+          {adtVisible && (
+            <div className={styles.legendBlock}>
+              <div className={styles.legendSubtitle}>Trafikflöde (ÅDT)</div>
+              <div
+                className={styles.legendGradient}
+                style={{
+                  background:
+                    "linear-gradient(to right, #2c7bb6 0%, #abd9e9 7.69%, #ffffbf 23.08%, #fdae61 48.72%, #d7191c 100%)",
+                }}
+              />
+              <div className={styles.legendGradientLabels}>
+                <span>500</span>
+                <span>20 000+</span>
+              </div>
+              <div className={styles.legendNote}>fordon/dygn</div>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
