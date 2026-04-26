@@ -7,12 +7,15 @@ export const dynamic = "force-dynamic";
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-type EventPoint = {
+export type EventPoint = {
   id: string;
   lng: number;
   lat: number;
   icon_id: string | null;
   road_number: string | null;
+  message: string | null;
+  severity: string | null;
+  first_seen: string;
   last_seen: string;
 };
 
@@ -29,7 +32,7 @@ export async function GET(req: Request) {
 
   let query = client
     .from("events_public")
-    .select("id, lng, lat, icon_id, road_number, last_seen")
+    .select("id, lng, lat, icon_id, road_number, message, severity, first_seen, last_seen")
     .order("last_seen", { ascending: false })
     .limit(5000);
 
@@ -58,6 +61,9 @@ export async function GET(req: Request) {
     lat: row.lat as number,
     icon_id: (row.icon_id ?? null) as string | null,
     road_number: (row.road_number ?? null) as string | null,
+    message: (row.message ?? null) as string | null,
+    severity: (row.severity ?? null) as string | null,
+    first_seen: row.first_seen as string,
     last_seen: row.last_seen as string,
   }));
 

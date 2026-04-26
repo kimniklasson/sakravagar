@@ -31,3 +31,156 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+/* Segment-popup (MapLibre Popup, klickad på NVDB-lager).
+   MapLibre renderar popup-DOM utanför Reacts träd så vi kan inte
+   använda CSS Modules — klasserna sätts i layers.ts:s renderSegment(). */
+.seg-popup .maplibregl-popup-content {
+  padding: 0;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.seg-popup .maplibregl-popup-close-button {
+  font-size: 18px;
+  padding: 4px 8px;
+  color: var(--color-text-muted);
+}
+
+.seg-popup-body {
+  padding: 12px 14px;
+  min-width: 240px;
+}
+
+.seg-popup-loading,
+.seg-popup-error,
+.seg-popup-empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.seg-popup-error {
+  color: var(--color-severity-high);
+  font-style: normal;
+}
+
+.seg-popup-road {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.seg-popup-stats {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  margin: 0 0 10px;
+}
+
+.seg-popup-stats dt {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.seg-popup-stats dd {
+  margin: 0;
+}
+
+.seg-popup-muted {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.seg-popup-section-title {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.seg-popup-events {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seg-popup-events li {
+  line-height: 1.35;
+}
+
+.seg-popup-date {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-right: 4px;
+}
+
+.seg-popup-road-tag {
+  display: inline-block;
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  margin-right: 4px;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.seg-popup-msg {
+  color: var(--color-text);
+}
+
+.seg-popup-more {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.seg-popup-footer {
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.seg-popup-warn {
+  color: var(--color-severity-med);
+  font-weight: 600;
+}
+
+.seg-popup-warn-note {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: rgba(224, 161, 82, 0.1);
+  border-left: 2px solid var(--color-severity-med);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.seg-popup-event-date {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.seg-popup-event-severity {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.seg-popup-event-msg {
+  line-height: 1.4;
+  margin-bottom: 4px;
+}

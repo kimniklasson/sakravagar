@@ -7,6 +7,7 @@ import styles from "./Map.module.css";
 import {
   addAdtLayer,
   addEventsLayer,
+  addPopupHandler,
   addRiskLayer,
   addTskLayer,
   type LayerController,
@@ -45,6 +46,7 @@ export default function Map() {
       riskCtrl.current = addRiskLayer(map);
       adtCtrl.current = addAdtLayer(map);
       void addEventsLayer(map);
+      addPopupHandler(map);
     });
 
     mapRef.current = map;

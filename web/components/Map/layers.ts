@@ -1,13 +1,6 @@
-import type { Map as MapLibreMap, GeoJSONSource } from "maplibre-gl";
-
-type EventPoint = {
-  id: string;
-  lng: number;
-  lat: number;
-  icon_id: string | null;
-  road_number: string | null;
-  last_seen: string;
-};
+import maplibregl, { type Map as MapLibreMap, type GeoJSONSource } from "maplibre-gl";
+import type { SegmentDetail } from "@/app/api/segment/route";
+import type { EventPoint } from "@/app/api/events/route";
 
 type AdtSegment = {
   fid: number;
@@ -66,6 +59,9 @@ export async function addEventsLayer(map: MapLibreMap): Promise<void> {
         id: p.id,
         icon_id: p.icon_id,
         road_number: p.road_number,
+        message: p.message,
+        severity: p.severity,
+        first_seen: p.first_seen,
         last_seen: p.last_seen,
       },
     })),
@@ -492,4 +488,262 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
       loader.setEnabled(v);
     },
   };
+}
+
+// Click → popup för segment och events.
+//
+// Prioritetsordning vid klick: events-circles → risk → adt → tsk.
+// Eventcirklarna ligger överst i render-stacken så ett klick rakt på en
+// punkt vinner; klick lite vid sidan om faller igenom till segmentet.
+// Osynliga lager filtreras automatiskt bort eftersom queryRenderedFeatures
+// bara returnerar visible features.
+//
+// Event-popup: all data finns redan på feature.properties, ingen fetch behövs.
+// Segment-popup: behöver RPC-anrop, så vi visar "Laddar…" först.
+//
+// Cursor → pointer på hover så användaren ser att lagren är klickbara.
+//
+// Popupar renderas via setHTML — alla värden från databasen passerar
+// escapeHtml() eftersom de kommer från Trafikverkets API och kan innehålla
+// godtyckliga strängar.
+export function addPopupHandler(map: MapLibreMap): void {
+  const segmentLayerIds = [RISK_LAYER_ID, ADT_LAYER_ID, TSK_LAYER_ID];
+  const eventLayerIds = [CIRCLE_LAYER_ID];
+  const allLayerIds = [...eventLayerIds, ...segmentLayerIds];
+
+  for (const id of allLayerIds) {
+    map.on("mouseenter", id, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", id, () => {
+      map.getCanvas().style.cursor = "";
+    });
+  }
+
+  map.on("click", (e) => {
+    const features = map.queryRenderedFeatures(e.point, { layers: allLayerIds });
+    if (!features.length) return;
+
+    // Eventcirkel vinner alltid om en sådan ligger under klick-punkten,
+    // sen segment i prioritetsordning Risk → ADT → TSK.
+    const eventFeature = features.find((f) => eventLayerIds.includes(f.layer.id));
+    if (eventFeature) {
+      openEventPopup(map, e.lngLat, eventFeature.properties);
+      return;
+    }
+
+    let segmentFeature: (typeof features)[number] | undefined;
+    for (const id of segmentLayerIds) {
+      const f = features.find((x) => x.layer.id === id);
+      if (f) {
+        segmentFeature = f;
+        break;
+      }
+    }
+    if (!segmentFeature) return;
+
+    const fid = Number(segmentFeature.properties?.fid);
+    if (!Number.isFinite(fid)) return;
+    openSegmentPopup(map, e.lngLat, fid);
+  });
+}
+
+function openEventPopup(
+  map: MapLibreMap,
+  lngLat: maplibregl.LngLat,
+  props: Record<string, unknown> | null,
+): void {
+  const popup = new maplibregl.Popup({
+    closeButton: true,
+    closeOnClick: true,
+    maxWidth: "320px",
+    className: "seg-popup",
+  })
+    .setLngLat(lngLat)
+    .setHTML(renderEvent(props ?? {}))
+    .addTo(map);
+  // Hålla popup-referensen "alive" via closure tills användaren stänger den —
+  // MapLibre tar hand om resten.
+  void popup;
+}
+
+function openSegmentPopup(
+  map: MapLibreMap,
+  lngLat: maplibregl.LngLat,
+  fid: number,
+): void {
+  const popup = new maplibregl.Popup({
+    closeButton: true,
+    closeOnClick: true,
+    maxWidth: "320px",
+    className: "seg-popup",
+  })
+    .setLngLat(lngLat)
+    .setHTML(renderLoading())
+    .addTo(map);
+
+  fetch(`/api/segment?fid=${fid}`)
+    .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+    .then(({ ok, body }) => {
+      if (!ok || !body?.segment) {
+        popup.setHTML(renderError(body?.error ?? "okänt fel"));
+        return;
+      }
+      popup.setHTML(renderSegment(body.segment as SegmentDetail));
+    })
+    .catch((err: unknown) => {
+      popup.setHTML(renderError(err instanceof Error ? err.message : String(err)));
+    });
+}
+
+function escapeHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => {
+    switch (c) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      default:  return "&#39;";
+    }
+  });
+}
+
+function renderLoading(): string {
+  return `<div class="seg-popup-body"><div class="seg-popup-loading">Laddar segment…</div></div>`;
+}
+
+function renderError(msg: string): string {
+  return `<div class="seg-popup-body"><div class="seg-popup-error">Kunde inte ladda data: ${escapeHtml(msg)}</div></div>`;
+}
+
+// Trösklar för "tunt underlag"-hint på risk-procenten. Under 30 dagar är
+// uppskattningen för osäker för att tas på allvar; vi visar talet men
+// markerar det och lägger en footnote.
+const DATA_WINDOW_THIN_DAYS = 30;
+
+function formatDataWindow(days: number): string {
+  if (days < 1) {
+    const hours = Math.max(1, Math.round(days * 24));
+    return `${hours} ${hours === 1 ? "timme" : "timmar"}`;
+  }
+  if (days < 30) {
+    return `${days.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} dagar`;
+  }
+  if (days < 365) {
+    const months = Math.round(days / 30);
+    return `${months} ${months === 1 ? "månad" : "månader"}`;
+  }
+  const years = days / 365;
+  return `${years.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} år`;
+}
+
+function formatRiskPct(pct: number): string {
+  // Två signifikanta siffror skalar bra över magnituder:
+  // 0,000023 → "0,000023", 0,52 → "0,52", 12 → "12".
+  return `${pct.toLocaleString("sv-SE", { maximumSignificantDigits: 2 })} %`;
+}
+
+function renderSegment(s: SegmentDetail): string {
+  const adt = typeof s.adt_total === "number"
+    ? `${s.adt_total.toLocaleString("sv-SE")} fordon/dygn`
+    : "okänd";
+  const matarSuffix = s.matar ? ` <span class="seg-popup-muted">(mätår ${escapeHtml(s.matar)})</span>` : "";
+  const tsk = s.tsk_klass ?? "okänd";
+  const eventsCount = s.events_count ?? 0;
+  const langd = typeof s.langd_m === "number" ? Math.round(s.langd_m) : null;
+  const days = typeof s.data_window_days === "number" ? s.data_window_days : 0;
+  const isThinData = days < DATA_WINDOW_THIN_DAYS;
+  const dataWindowText = formatDataWindow(days);
+  const riskPct = s.risk_per_passage_pct;
+
+  const riskRow = eventsCount > 0 && typeof riskPct === "number"
+    ? `<dt>Risk</dt><dd>≈ ${escapeHtml(formatRiskPct(riskPct))} per passage${isThinData ? ' <span class="seg-popup-warn">*</span>' : ""}</dd>`
+    : "";
+
+  // Vägnummer hämtas från events (NVDB själv har inte vägnummer i adt-vyn).
+  // Om olika events i samma segment har olika vägnummer (t.ex. avfart/påfart)
+  // visar vi alla unika.
+  const roadNumbers = Array.from(
+    new Set(s.recent_events.map((e) => e.road_number).filter((r): r is string => !!r)),
+  );
+  const headerRoad = roadNumbers.length
+    ? `<div class="seg-popup-road">${escapeHtml(roadNumbers.join(", "))}</div>`
+    : "";
+
+  const recent = s.recent_events.slice(0, 3).map((ev) => {
+    const date = new Date(ev.first_seen).toLocaleDateString("sv-SE");
+    const rn = ev.road_number ? `<span class="seg-popup-road-tag">${escapeHtml(ev.road_number)}</span>` : "";
+    const msg = ev.message ? escapeHtml(ev.message).slice(0, 100) : "";
+    return `<li><span class="seg-popup-date">${escapeHtml(date)}</span> ${rn}<span class="seg-popup-msg">${msg}</span></li>`;
+  }).join("");
+
+  const moreNote = s.recent_events.length > 3
+    ? `<div class="seg-popup-more">+${s.recent_events.length - 3} äldre olyckor i segmentet</div>`
+    : "";
+
+  const recentBlock = eventsCount > 0
+    ? `<div class="seg-popup-section-title">Senaste olyckor</div>
+       <ul class="seg-popup-events">${recent}</ul>
+       ${moreNote}`
+    : `<div class="seg-popup-empty">Inga registrerade olyckor sedan datainsamlingen startade.</div>`;
+
+  const thinDataNote = eventsCount > 0 && isThinData
+    ? `<div class="seg-popup-warn-note">* Datafönstret är kort — riskvärdet är preliminärt och kan förändras kraftigt när mer historik samlats in.</div>`
+    : "";
+
+  return `
+    <div class="seg-popup-body">
+      ${headerRoad}
+      <dl class="seg-popup-stats">
+        <dt>ÅDT</dt><dd>${escapeHtml(adt)}${matarSuffix}</dd>
+        <dt>Säkerhetsklass</dt><dd>${escapeHtml(tsk)}</dd>
+        <dt>Olyckor</dt><dd>${eventsCount}</dd>
+        ${riskRow}
+        <dt>Datafönster</dt><dd>${escapeHtml(dataWindowText)}</dd>
+      </dl>
+      ${recentBlock}
+      ${thinDataNote}
+      <div class="seg-popup-footer">
+        Siffrorna gäller hela vägsegmentet${langd ? ` (~${langd} m)` : ""}, från korsning till korsning enligt NVDB.
+      </div>
+    </div>
+  `;
+}
+
+// Event-popup. Datan kommer direkt från feature.properties (MapLibre
+// serialiserar properties-objektet) — ingen extra fetch behövs. Eftersom
+// MapLibre kan stringifiera nested values läser vi varje fält defensivt.
+function renderEvent(props: Record<string, unknown>): string {
+  const message = typeof props.message === "string" ? props.message : "";
+  const roadNumber = typeof props.road_number === "string" ? props.road_number : "";
+  const severity = typeof props.severity === "string" ? props.severity : "";
+  const firstSeenRaw = typeof props.first_seen === "string" ? props.first_seen : "";
+  const dateText = firstSeenRaw
+    ? new Date(firstSeenRaw).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+    : "";
+
+  const headerRoad = roadNumber
+    ? `<div class="seg-popup-road">${escapeHtml(roadNumber)}</div>`
+    : "";
+  const dateLine = dateText
+    ? `<div class="seg-popup-date seg-popup-event-date">${escapeHtml(dateText)}</div>`
+    : "";
+  const severityLine = severity
+    ? `<div class="seg-popup-muted seg-popup-event-severity">${escapeHtml(severity)}</div>`
+    : "";
+  const messageBlock = message
+    ? `<div class="seg-popup-event-msg">${escapeHtml(message)}</div>`
+    : `<div class="seg-popup-empty">Ingen beskrivning från Trafikverket.</div>`;
+
+  return `
+    <div class="seg-popup-body">
+      ${headerRoad}
+      ${dateLine}
+      ${severityLine}
+      ${messageBlock}
+      <div class="seg-popup-footer">
+        Klicka på vägsegmentet för aggregerad statistik. Saknas vägen i ÅDT-datasetet visas ingen färgning.
+      </div>
+    </div>
+  `;
 }
