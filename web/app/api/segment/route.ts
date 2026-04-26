@@ -21,7 +21,6 @@ export type SegmentDetail = {
   langd_m: number | null;
   adt_total: number | null;
   matar: number | null;
-  tsk_klass: string | null;
   events_count: number;
   data_window_days: number;
   risk_per_passage_pct: number | null;

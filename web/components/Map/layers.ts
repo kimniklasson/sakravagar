@@ -10,12 +10,6 @@ type AdtSegment = {
   geometry: GeoJSON.LineString;
 };
 
-type TskSegment = {
-  fid: number;
-  klass: string;
-  geometry: GeoJSON.LineString;
-};
-
 type RiskSegment = {
   fid: number;
   adt_total: number;
@@ -29,11 +23,17 @@ export type LayerController = { setVisible: (v: boolean) => void };
 const SOURCE_ID = "events";
 const HEATMAP_LAYER_ID = "events-heatmap";
 const CIRCLE_LAYER_ID = "events-circles";
+const HIT_TARGET_LAYER_ID = "events-hit-target";
+const LIVE_HALO_LAYER_ID = "events-live-halo";
+const LIVE_CORE_LAYER_ID = "events-live-core";
+
+// Pågående = senast sedd inom 90 min (3 polling-cykler à 30 min). Trafikverket
+// droppar olyckor ur feeden när de avslutas, så last_seen slutar uppdateras
+// och vi kan klassa dem som historiska.
+const LIVE_THRESHOLD_MS = 90 * 60 * 1000;
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
-const TSK_SOURCE_ID = "tsk";
-const TSK_LAYER_ID = "tsk-lines";
 const RISK_SOURCE_ID = "risk";
 const RISK_LAYER_ID = "risk-lines";
 
@@ -45,36 +45,43 @@ const NVDB_MIN_ZOOM = 9;
 export async function addEventsLayer(
   map: MapLibreMap,
   opts: { since?: string | null } = {},
-): Promise<void> {
+): Promise<{ liveCount: number }> {
   const url = opts.since ? `/api/events?since=${encodeURIComponent(opts.since)}` : "/api/events";
   const res = await fetch(url);
   if (!res.ok) {
     console.error("failed to fetch events", await res.text());
-    return;
+    return { liveCount: 0 };
   }
   const { points } = (await res.json()) as { points: EventPoint[] };
 
+  const liveCutoff = Date.now() - LIVE_THRESHOLD_MS;
+  let liveCount = 0;
   const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
     type: "FeatureCollection",
-    features: points.map((p) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [p.lng, p.lat] },
-      properties: {
-        id: p.id,
-        icon_id: p.icon_id,
-        road_number: p.road_number,
-        message: p.message,
-        severity: p.severity,
-        first_seen: p.first_seen,
-        last_seen: p.last_seen,
-      },
-    })),
+    features: points.map((p) => {
+      const isLive = Date.parse(p.last_seen) >= liveCutoff;
+      if (isLive) liveCount++;
+      return {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.lng, p.lat] },
+        properties: {
+          id: p.id,
+          icon_id: p.icon_id,
+          road_number: p.road_number,
+          message: p.message,
+          severity: p.severity,
+          first_seen: p.first_seen,
+          last_seen: p.last_seen,
+          is_live: isLive,
+        },
+      };
+    }),
   };
 
   const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
   if (existing) {
     existing.setData(geojson);
-    return;
+    return { liveCount };
   }
 
   map.addSource(SOURCE_ID, { type: "geojson", data: geojson });
@@ -116,12 +123,14 @@ export async function addEventsLayer(
     },
   });
 
-  // Enskilda punkter — tonar in vid hög zoom där heatmapen blir glesare.
+  // Enskilda historiska punkter — tonar in vid hög zoom där heatmapen blir glesare.
+  // Pågående olyckor renderas separat nedan så de inte kommer hit.
   map.addLayer({
     id: CIRCLE_LAYER_ID,
     type: "circle",
     source: SOURCE_ID,
     minzoom: 10,
+    filter: ["!=", ["get", "is_live"], true],
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 14, 7, 18, 12],
       "circle-color": "#c0543a",
@@ -135,9 +144,78 @@ export async function addEventsLayer(
       ],
     },
   });
+
+  // Osynligt hit-target för historiska events — alltid aktivt så att
+  // queryRenderedFeatures hittar dem vid alla zoom-nivåer (även när
+  // CIRCLE_LAYER_ID inte renderas pga minzoom). Lite större radie ger
+  // bättre klick-yta. Heatmappen är inte klickbar (density-rendering),
+  // så utan detta lager går historiska events inte att klicka utzoomat.
+  map.addLayer({
+    id: HIT_TARGET_LAYER_ID,
+    type: "circle",
+    source: SOURCE_ID,
+    filter: ["!=", ["get", "is_live"], true],
+    paint: {
+      "circle-radius": 10,
+      "circle-color": "#000000",
+      "circle-opacity": 0,
+    },
+  });
+
+  // Pågående olyckor: pulserande halo (animeras nedan via rAF) + statisk
+  // kärna ovanpå. Synliga vid alla zoom-nivåer eftersom realtid är poängen.
+  map.addLayer({
+    id: LIVE_HALO_LAYER_ID,
+    type: "circle",
+    source: SOURCE_ID,
+    filter: ["==", ["get", "is_live"], true],
+    paint: {
+      "circle-color": "#d7191c",
+      "circle-radius": 6,
+      "circle-opacity": 0.5,
+      "circle-stroke-width": 0,
+      "circle-pitch-alignment": "map",
+    },
+  });
+
+  map.addLayer({
+    id: LIVE_CORE_LAYER_ID,
+    type: "circle",
+    source: SOURCE_ID,
+    filter: ["==", ["get", "is_live"], true],
+    paint: {
+      "circle-color": "#d7191c",
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 6, 16, 10],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2,
+      "circle-opacity": 1,
+    },
+  });
+
+  startLivePulse(map);
+
+  return { liveCount };
 }
 
-// Delad bbox-driven loader för NVDB-lagren (ADT, TSK).
+// rAF-loop som pulserar halo-lagret. Klassiskt "radar-ping": radien expanderar
+// och opaciteten tonas ut, sen reset. Loopen avbryter sig själv när lagret
+// inte längre finns på kartan (efter map.remove()).
+function startLivePulse(map: MapLibreMap): void {
+  const start = performance.now();
+  const PERIOD_MS = 1500;
+  const tick = () => {
+    if (!map.getLayer(LIVE_HALO_LAYER_ID)) return;
+    const phase = ((performance.now() - start) % PERIOD_MS) / PERIOD_MS;
+    const radius = 6 + phase * 22;
+    const opacity = 0.55 * (1 - phase);
+    map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-radius", radius);
+    map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-opacity", opacity);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// Delad bbox-driven loader för NVDB-lagren (ADT).
 //
 // - Padder bbox 30% i varje riktning så små panoreringar inte refetchar.
 // - Säkerhetsventil mot stora bbox (zoom 7-8 hit p.g.a. resize/hot-reload):
@@ -310,91 +388,6 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// TSK-lager (TrafikSäkerhetsKlass): bbox-driven, samma fetch-mönster som ADT.
-// Färgkategorier från ColorBrewer RdYlGn — grön = säker, röd = farlig.
-// Bredare line-width än ADT så att ADT-färgen syns som stripa ovanpå när
-// båda lagren är synliga samtidigt.
-export function addTskLayer(map: MapLibreMap): LayerController {
-  if (map.getSource(TSK_SOURCE_ID)) {
-    return { setVisible: () => {} };
-  }
-
-  map.addSource(TSK_SOURCE_ID, {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] },
-  });
-
-  const beforeId = map.getLayer(ADT_LAYER_ID)
-    ? ADT_LAYER_ID
-    : map.getLayer(HEATMAP_LAYER_ID)
-      ? HEATMAP_LAYER_ID
-      : undefined;
-  map.addLayer(
-    {
-      id: TSK_LAYER_ID,
-      type: "line",
-      source: TSK_SOURCE_ID,
-      minzoom: NVDB_MIN_ZOOM,
-      paint: {
-        "line-color": [
-          "match", ["get", "klass"],
-          "Mycket god", "#1a9850",
-          "God",        "#a6d96a",
-          "Mindre god", "#fdae61",
-          "Låg",        "#d7191c",
-          "#999999",
-        ],
-        "line-width": [
-          "interpolate", ["linear"], ["zoom"],
-          8, 2.5,
-          12, 5,
-          16, 9,
-        ],
-        "line-opacity": [
-          "interpolate", ["linear"], ["zoom"],
-          NVDB_MIN_ZOOM, 0.35,
-          NVDB_MIN_ZOOM + 1, 0.65,
-        ],
-      },
-    },
-    beforeId,
-  );
-
-  const loader = createBboxLoader(map, {
-    minZoom: NVDB_MIN_ZOOM,
-    fetchBbox: async (padded) => {
-      const res = await fetch(`/api/tsk?bbox=${bboxToParam(padded)}`);
-      if (!res.ok) {
-        console.error("failed to fetch tsk", await res.text());
-        return;
-      }
-      const { segments } = (await res.json()) as { segments: TskSegment[] };
-      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
-        type: "FeatureCollection",
-        features: segments.map((s) => ({
-          type: "Feature",
-          geometry: s.geometry,
-          properties: {
-            fid: s.fid,
-            klass: s.klass,
-          },
-        })),
-      };
-      const src = map.getSource(TSK_SOURCE_ID) as GeoJSONSource | undefined;
-      src?.setData(fc);
-    },
-  });
-
-  return {
-    setVisible: (v) => {
-      if (map.getLayer(TSK_LAYER_ID)) {
-        map.setLayoutProperty(TSK_LAYER_ID, "visibility", v ? "visible" : "none");
-      }
-      loader.setEnabled(v);
-    },
-  };
-}
-
 // Risk-lager: olyckor per miljon fordon per nvdb-segment, från
 // materialiserad vy `risk_per_segment`. RPC:n returnerar bara segment där
 // events_count > 0 — tomma sträckor ritas inte alls.
@@ -415,8 +408,8 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
     data: { type: "FeatureCollection", features: [] },
   });
 
-  // Ovanpå TSK, under ADT — så ADT-färgen syns som tunn stripa när alla
-  // tre är på, och risk-segmenten är synliga som mellanlager.
+  // Under ADT så ADT-färgen syns som tunn stripa ovanpå risk-segmenten
+  // när båda är på.
   const beforeId = map.getLayer(ADT_LAYER_ID)
     ? ADT_LAYER_ID
     : map.getLayer(HEATMAP_LAYER_ID)
@@ -496,7 +489,7 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 
 // Click → popup för segment och events.
 //
-// Prioritetsordning vid klick: events-circles → risk → adt → tsk.
+// Prioritetsordning vid klick: events-circles → risk → adt.
 // Eventcirklarna ligger överst i render-stacken så ett klick rakt på en
 // punkt vinner; klick lite vid sidan om faller igenom till segmentet.
 // Osynliga lager filtreras automatiskt bort eftersom queryRenderedFeatures
@@ -511,8 +504,11 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 // escapeHtml() eftersom de kommer från Trafikverkets API och kan innehålla
 // godtyckliga strängar.
 export function addPopupHandler(map: MapLibreMap): void {
-  const segmentLayerIds = [RISK_LAYER_ID, ADT_LAYER_ID, TSK_LAYER_ID];
-  const eventLayerIds = [CIRCLE_LAYER_ID];
+  const segmentLayerIds = [RISK_LAYER_ID, ADT_LAYER_ID];
+  // Live-core ovanpå historisk circle, halo skippas (dekorativ — klick går
+  // igenom till core eller faller till segment). Hit-target sist: fångar
+  // klick på historiska events vid låg zoom där CIRCLE_LAYER_ID inte renderas.
+  const eventLayerIds = [LIVE_CORE_LAYER_ID, CIRCLE_LAYER_ID, HIT_TARGET_LAYER_ID];
   const allLayerIds = [...eventLayerIds, ...segmentLayerIds];
 
   for (const id of allLayerIds) {
@@ -529,7 +525,7 @@ export function addPopupHandler(map: MapLibreMap): void {
     if (!features.length) return;
 
     // Eventcirkel vinner alltid om en sådan ligger under klick-punkten,
-    // sen segment i prioritetsordning Risk → ADT → TSK.
+    // sen segment i prioritetsordning Risk → ADT.
     const eventFeature = features.find((f) => eventLayerIds.includes(f.layer.id));
     if (eventFeature) {
       openEventPopup(map, e.lngLat, eventFeature.properties);
@@ -652,7 +648,6 @@ function renderSegment(s: SegmentDetail): string {
     ? `${s.adt_total.toLocaleString("sv-SE")} fordon/dygn`
     : "okänd";
   const matarSuffix = s.matar ? ` <span class="seg-popup-muted">(mätår ${escapeHtml(s.matar)})</span>` : "";
-  const tsk = s.tsk_klass ?? "okänd";
   const eventsCount = s.events_count ?? 0;
   const langd = typeof s.langd_m === "number" ? Math.round(s.langd_m) : null;
   const days = typeof s.data_window_days === "number" ? s.data_window_days : 0;
@@ -700,7 +695,6 @@ function renderSegment(s: SegmentDetail): string {
       ${headerRoad}
       <dl class="seg-popup-stats">
         <dt>ÅDT</dt><dd>${escapeHtml(adt)}${matarSuffix}</dd>
-        <dt>Säkerhetsklass</dt><dd>${escapeHtml(tsk)}</dd>
         <dt>Olyckor</dt><dd>${eventsCount}</dd>
         ${riskRow}
         <dt>Datafönster</dt><dd>${escapeHtml(dataWindowText)}</dd>

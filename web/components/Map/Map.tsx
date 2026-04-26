@@ -9,7 +9,6 @@ import {
   addEventsLayer,
   addPopupHandler,
   addRiskLayer,
-  addTskLayer,
   type LayerController,
 } from "./layers";
 
@@ -36,13 +35,14 @@ export default function Map() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLoadedRef = useRef(false);
   const adtCtrl = useRef<LayerController | null>(null);
-  const tskCtrl = useRef<LayerController | null>(null);
   const riskCtrl = useRef<LayerController | null>(null);
-  const [tskVisible, setTskVisible] = useState(true);
   const [riskVisible, setRiskVisible] = useState(true);
   const [adtVisible, setAdtVisible] = useState(true);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("all");
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [liveCount, setLiveCount] = useState(0);
+  const timeWindowRef = useRef<TimeWindow>(timeWindow);
+  useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -58,12 +58,13 @@ export default function Map() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
     map.on("load", () => {
-      // Render-ordning: TSK underst, Risk i mitten, ADT tunnare ovanpå,
+      // Render-ordning: Risk underst, ADT tunnare ovanpå,
       // events-heatmap/circles överst.
-      tskCtrl.current = addTskLayer(map);
       riskCtrl.current = addRiskLayer(map);
       adtCtrl.current = addAdtLayer(map);
-      void addEventsLayer(map, { since: sinceFromWindow(timeWindow) });
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindow) }).then(({ liveCount }) =>
+        setLiveCount(liveCount),
+      );
       addPopupHandler(map);
       mapLoadedRef.current = true;
     });
@@ -77,7 +78,6 @@ export default function Map() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { tskCtrl.current?.setVisible(tskVisible); }, [tskVisible]);
   useEffect(() => { riskCtrl.current?.setVisible(riskVisible); }, [riskVisible]);
   useEffect(() => { adtCtrl.current?.setVisible(adtVisible); }, [adtVisible]);
 
@@ -86,8 +86,24 @@ export default function Map() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
-    void addEventsLayer(map, { since: sinceFromWindow(timeWindow) });
+    void addEventsLayer(map, { since: sinceFromWindow(timeWindow) }).then(({ liveCount }) =>
+      setLiveCount(liveCount),
+    );
   }, [timeWindow]);
+
+  // Auto-refresh av events var 60:e sekund så pågående olyckor uppdateras
+  // utan reload. Använder ref för timeWindow så intervallet alltid läser
+  // senaste valet utan att behöva återskapas vid varje filter-ändring.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const map = mapRef.current;
+      if (!map || !mapLoadedRef.current) return;
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) }).then(
+        ({ liveCount }) => setLiveCount(liveCount),
+      );
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Stäng om-modalen med Escape.
   useEffect(() => {
@@ -103,15 +119,18 @@ export default function Map() {
     <>
       <div ref={containerRef} className={styles.map} />
       <div className={styles.controls}>
+        {liveCount > 0 && (
+          <div
+            className={styles.controlsLivePill}
+            title="Olyckor som syns i Trafikverkets feed just nu (rapporterade senaste 90 min)"
+          >
+            <span className={styles.controlsLiveDot} aria-hidden="true" />
+            <span>
+              {liveCount} pågående {liveCount === 1 ? "olycka" : "olyckor"}
+            </span>
+          </div>
+        )}
         <div className={styles.controlsTitle}>Lager</div>
-        <label className={styles.controlsRow}>
-          <input
-            type="checkbox"
-            checked={tskVisible}
-            onChange={(e) => setTskVisible(e.target.checked)}
-          />
-          <span>Säkerhetsklass (TSK)</span>
-        </label>
         <label className={styles.controlsRow}>
           <input
             type="checkbox"
@@ -151,30 +170,17 @@ export default function Map() {
           Om tjänsten
         </button>
       </div>
-      {(tskVisible || riskVisible || adtVisible) && (
+      {(riskVisible || adtVisible || liveCount > 0) && (
         <div className={styles.legend}>
           <div className={styles.legendTitle}>Förklaring</div>
-          {tskVisible && (
+          {liveCount > 0 && (
             <div className={styles.legendBlock}>
-              <div className={styles.legendSubtitle}>Säkerhetsklass</div>
-              <div className={styles.legendCategorical}>
-                <span className={styles.legendItem}>
-                  <span className={styles.legendSwatch} style={{ background: "#1a9850" }} />
-                  <span>Mycket god</span>
-                </span>
-                <span className={styles.legendItem}>
-                  <span className={styles.legendSwatch} style={{ background: "#a6d96a" }} />
-                  <span>God</span>
-                </span>
-                <span className={styles.legendItem}>
-                  <span className={styles.legendSwatch} style={{ background: "#fdae61" }} />
-                  <span>Mindre god</span>
-                </span>
-                <span className={styles.legendItem}>
-                  <span className={styles.legendSwatch} style={{ background: "#d7191c" }} />
-                  <span>Låg</span>
-                </span>
+              <div className={styles.legendSubtitle}>Pågående olyckor</div>
+              <div className={styles.legendItem}>
+                <span className={styles.legendLiveDot} aria-hidden="true" />
+                <span>Rapporterade just nu</span>
               </div>
+              <div className={styles.legendNote}>Synliga vid alla zoom-nivåer</div>
             </div>
           )}
           {riskVisible && (
@@ -242,10 +248,9 @@ export default function Map() {
             </p>
             <h3 className={styles.aboutSubtitle}>Lager</h3>
             <ul className={styles.aboutList}>
-              <li><strong>Säkerhetsklass (TSK)</strong> — Trafikverkets klassning av vägars säkerhetsstandard (Mycket god → Låg).</li>
-              <li><strong>Trafikflöde (ÅDT)</strong> — årsdygnstrafik per vägsegment, dvs. genomsnittligt antal fordon per dygn.</li>
+              <li><strong>Trafikflöde (ÅDT)</strong> — årsdygnstrafik per vägsegment, dvs. genomsnittligt antal fordon per dygn. Korta segment vid trafikplatser och avfarter saknar ibland mätning från Trafikverket och visas då som ofärgade glapp.</li>
               <li><strong>Risk</strong> — olyckor per miljon fordon. <em>Preliminär</em> — kalibreras när historiken växer.</li>
-              <li><strong>Olyckor</strong> — pågående och nyligen rapporterade olyckor från Trafikverket. Uppdateras var 30:e minut.</li>
+              <li><strong>Olyckor</strong> — pågående och nyligen rapporterade olyckor från Trafikverket. Pågående markeras med pulserande röd punkt och uppdateras var 60:e sekund i kartan.</li>
             </ul>
             <h3 className={styles.aboutSubtitle}>Tips</h3>
             <ul className={styles.aboutList}>
@@ -256,7 +261,7 @@ export default function Map() {
             </ul>
             <h3 className={styles.aboutSubtitle}>Datakällor</h3>
             <p className={styles.aboutMuted}>
-              Trafikverket Open API (olyckor) · NVDB via Lastkajen (ÅDT, TSK).
+              Trafikverket Open API (olyckor) · NVDB via Lastkajen (ÅDT).
               Data är preliminär och bör inte användas som enda underlag för vägval.
             </p>
           </div>
