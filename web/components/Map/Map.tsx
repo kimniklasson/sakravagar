@@ -49,7 +49,7 @@ export default function Map() {
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: "https://tiles.openfreemap.org/styles/positron",
+      style: "/styles/sakravagar_dark.json",
       center: SWEDEN_CENTER,
       zoom: SWEDEN_ZOOM,
       attributionControl: { compact: true },
