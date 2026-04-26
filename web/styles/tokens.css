@@ -10,6 +10,12 @@
   --color-severity-med: #e0a152;
   --color-severity-high: #c0543a;
 
+  /* Brand */
+  --color-beige: #E6E0D4;
+  --color-red: #FF2F00;
+  --color-dark: #333;
+  --color-white: #fff;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -25,6 +31,7 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", sans-serif;
+  --font-univers: "Univers Next Pro", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-size-sm: 13px;
   --font-size-base: 15px;
   --font-size-lg: 18px;

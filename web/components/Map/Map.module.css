@@ -5,283 +5,326 @@
   height: 100%;
 }
 
+.map::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse closest-side at center, rgba(34, 34, 34, 0) 0%, rgba(34, 34, 34, 0) 70%, rgba(34, 34, 34, 0.6) 100%);
+}
+
+/* === Top-left controls stack === */
+
 .controls {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: 40px;
+  left: 40px;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 10px 12px;
-  border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 13px;
-  color: #222;
-  min-width: 180px;
+  gap: 2px;
+  width: 320px;
+  font-family: var(--font-univers);
 }
 
-.controlsTitle {
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #555;
-  margin-bottom: 2px;
+/* === Info-box (beige) === */
+
+.infoBox {
+  background: var(--color-beige);
+  border-radius: 8px;
+  padding: 24px;
+  cursor: pointer;
+  color: var(--color-dark);
 }
 
-.controlsRow {
+.infoBoxOpen {
+  cursor: default;
+}
+
+.infoBoxHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.controlsRow input {
-  cursor: pointer;
+.infoBoxLogo {
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: -0.05em;
+  color: var(--color-red);
 }
 
-.controlsHint {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #777;
-}
-
-.controlsDivider {
-  height: 1px;
-  background: #e5e5e3;
-  margin: 6px -12px 2px;
-}
-
-.controlsSelect {
-  font-family: inherit;
-  font-size: 12px;
-  color: #222;
-  background: #fff;
-  border: 1px solid #d4d4d2;
-  border-radius: 4px;
-  padding: 4px 6px;
-  cursor: pointer;
-}
-
-.controlsSelect:focus {
-  outline: 2px solid #0a7a5f;
-  outline-offset: 1px;
-}
-
-.controlsAboutLink {
-  background: none;
-  border: none;
+.infoBoxIconBtn {
+  background: transparent;
+  border: 0;
   padding: 0;
-  font: inherit;
-  font-size: 12px;
-  color: #0a7a5f;
-  text-decoration: underline;
+  margin: 0;
   cursor: pointer;
-  text-align: left;
+  color: var(--color-dark);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.controlsAboutLink:hover {
-  color: #075c47;
+.infoBoxIntro {
+  margin: 40px 0 0;
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: -0.05em;
+  color: var(--color-dark);
+  font-weight: 400;
 }
 
-.controlsLivePill {
+/* === Expander (delad animation för info-box + live-box body) ===
+   Använder grid-template-rows 0fr→1fr-tricket: barnet animeras från
+   höjd 0 till sin auto-höjd utan att vi behöver veta innehållets storlek.
+   Innerelementet sätter overflow: hidden så barnens marginer inte
+   "sticker ut" under animationen. */
+
+.expander {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.expanderOpen {
+  grid-template-rows: 1fr;
+}
+
+.expanderInner {
+  overflow: hidden;
+  /* min-height: 0 krävs i grid-row-tracks för att 0fr verkligen ska
+     ge höjd 0 i alla browsers — annars beter sig vissa som "auto". */
+  min-height: 0;
+}
+
+.infoBoxBody {
+  margin-top: 24px;
+  font-size: 14px;
+  line-height: 1.20;
+  letter-spacing: -0.03em;
+  color: var(--color-dark);
+}
+
+.infoBoxBody p {
+  margin: 0 0 12px;
+}
+
+.infoBoxBody p:last-child {
+  margin-bottom: 0;
+}
+
+.infoBoxSources {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(51, 51, 51, 0.05);
+  border-radius: 8px;
+  color: rgba(51, 51, 51, 0.6);
+  font-size: 14px;
+  line-height: 1.20;
+  letter-spacing: -0.03em;
+}
+
+.infoBoxSources a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* === Road icon + morph to X === */
+
+.roadIcon {
+  display: block;
+  width: 28px;
+  height: 18px;
+}
+
+.roadIcon path {
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  transform-box: view-box;
+  transform-origin: 14px 9px;
+}
+
+.roadIcon path:nth-child(2) {
+  /* Mittlinjens dash-animation — scrollar mönstret höger→vänster, loopar.
+     5+4 = 9 px periodlängd. */
+  animation: roadDashScroll 1.4s linear infinite;
+}
+
+.roadIconExpanded path:nth-child(1) {
+  transform: translateY(8px) rotate(45deg);
+}
+
+.roadIconExpanded path:nth-child(2) {
+  opacity: 0;
+  animation-play-state: paused;
+}
+
+.roadIconExpanded path:nth-child(3) {
+  transform: translateY(-8px) rotate(-45deg);
+}
+
+@keyframes roadDashScroll {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -9; }
+}
+
+/* === Live (pågående olyckor) box === */
+
+.liveBox {
+  background: var(--color-red);
+  color: var(--color-white);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+}
+
+.liveBoxCalm {
+  background: var(--color-white);
+  color: var(--color-dark);
+}
+
+.liveBoxHeader {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.liveBoxCalm .liveBoxHeader {
+  /* Calm-state: ikon left + label, vänsterjusterat. */
+  justify-content: flex-start;
   gap: 8px;
-  padding: 6px 8px;
-  margin-bottom: 2px;
-  background: #fff5f5;
-  border: 1px solid #fcd5d5;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #8a1a1a;
 }
 
-.controlsLiveDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #d7191c;
-  box-shadow: 0 0 0 0 rgba(215, 25, 28, 0.6);
-  animation: livePulse 1.5s ease-out infinite;
-  flex-shrink: 0;
+.liveBoxLabel {
+  font-size: 10px;
+  line-height: 0.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.legendLiveDot {
+.liveDot {
+  position: relative;
   display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #d7191c;
-  box-shadow: 0 0 0 0 rgba(215, 25, 28, 0.6);
-  animation: livePulse 1.5s ease-out infinite;
+  background: var(--color-white);
   flex-shrink: 0;
+}
+
+.liveDot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--color-white);
+  opacity: 0;
+  animation: livePulse 1.6s ease-in-out infinite;
+  pointer-events: none;
 }
 
 @keyframes livePulse {
-  0%   { box-shadow: 0 0 0 0 rgba(215, 25, 28, 0.6); }
-  70%  { box-shadow: 0 0 0 8px rgba(215, 25, 28, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(215, 25, 28, 0); }
+  0%, 100% { transform: scale(1); opacity: 0; }
+  50%      { transform: scale(2.4); opacity: 0.6; }
 }
 
-.aboutBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-
-.aboutModal {
-  position: relative;
-  background: #fff;
-  color: #1a1a1a;
-  border-radius: 8px;
-  padding: 24px 28px 22px;
-  max-width: 480px;
-  width: 100%;
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
-  font-family: system-ui, -apple-system, sans-serif;
+.liveBoxBody {
+  margin: 16px 0 0;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.20;
+  letter-spacing: -0.03em;
+  /* Ärver färg från .liveBox (vit) eller .liveBoxCalm (mörk). */
 }
 
-.aboutModal p {
-  margin: 0 0 12px;
-}
+/* === Time-window box === */
 
-.aboutTitle {
-  margin: 0 0 12px;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.aboutSubtitle {
-  margin: 16px 0 6px;
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #555;
-}
-
-.aboutList {
-  margin: 0 0 8px;
-  padding-left: 18px;
-}
-
-.aboutList li {
-  margin-bottom: 4px;
-}
-
-.aboutMuted {
-  color: #6b6b6b;
-  font-size: 12px;
-}
-
-.aboutClose {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  background: none;
-  border: none;
-  font-size: 24px;
-  line-height: 1;
-  color: #888;
-  cursor: pointer;
-  padding: 4px 8px;
-}
-
-.aboutClose:hover {
-  color: #222;
-}
-
-.legend {
-  position: absolute;
-  left: 12px;
-  bottom: 28px;
-  z-index: 1;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 10px 12px;
-  border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 12px;
-  color: #222;
-  max-width: 220px;
-}
-
-.legendTitle {
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #555;
-}
-
-.legendBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.legendSubtitle {
-  font-weight: 600;
-  font-size: 12px;
-  color: #333;
-}
-
-.legendCategorical {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3px 8px;
-  font-size: 11px;
-}
-
-.legendItem {
+.timeBox {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  background: rgba(85, 85, 85, 0.3);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: var(--color-white);
 }
 
-.legendSwatch {
-  display: inline-block;
+.timeLabel {
+  font-size: 10px;
+  line-height: 0.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.timeSelectGroup {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.timeSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font-family: var(--font-univers);
+  font-size: 10px;
+  line-height: 0.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-white);
+  cursor: pointer;
+  outline: none;
+  /* Högerställ visat värde. text-align-last är nyckeln för select-element
+     — text-align ensamt ignoreras av en del browsers på <select>. */
+  text-align: right;
+  text-align-last: right;
+}
+
+.timeSelect option {
+  /* Native dropdown overlay — vissa attribut (text-transform, letter-spacing)
+     respekteras inte konsekvent över browsers, men vi sätter dem ändå. */
+  background: var(--color-dark);
+  color: var(--color-white);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  text-align: left;
+}
+
+.dropdownIcon {
+  display: block;
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  color: var(--color-white);
+  pointer-events: none;
+}
+
+.infoIcon {
+  display: block;
+  width: 10px;
+  height: 10px;
+  color: var(--color-dark);
   flex-shrink: 0;
 }
 
-.legendGradient {
-  height: 8px;
-  border-radius: 2px;
-  margin-top: 2px;
-}
-
-.legendGradientLabels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: #555;
-  margin-top: 1px;
-}
-
-.legendNote {
-  font-size: 10px;
-  color: #888;
-  font-style: italic;
-  margin-top: 1px;
+/* Konsistent 1 CSS-pixel stroke oavsett display-storlek på ikonen.
+   Annars renderas info.svg (16x16 viewBox vid 10px) tunnare än 1px. */
+.roadIcon path,
+.infoIcon path,
+.dropdownIcon path {
+  vector-effect: non-scaling-stroke;
 }

@@ -9,7 +9,6 @@ import {
   addEventsLayer,
   addPopupHandler,
   addRiskLayer,
-  type LayerController,
 } from "./layers";
 
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
@@ -34,12 +33,9 @@ export default function Map() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLoadedRef = useRef(false);
-  const adtCtrl = useRef<LayerController | null>(null);
-  const riskCtrl = useRef<LayerController | null>(null);
-  const [riskVisible, setRiskVisible] = useState(true);
-  const [adtVisible, setAdtVisible] = useState(true);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("all");
-  const [aboutOpen, setAboutOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
   useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
@@ -58,10 +54,8 @@ export default function Map() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
     map.on("load", () => {
-      // Render-ordning: Risk underst, ADT tunnare ovanpå,
-      // events-heatmap/circles överst.
-      riskCtrl.current = addRiskLayer(map);
-      adtCtrl.current = addAdtLayer(map);
+      addRiskLayer(map);
+      addAdtLayer(map);
       void addEventsLayer(map, { since: sinceFromWindow(timeWindow) }).then(({ liveCount }) =>
         setLiveCount(liveCount),
       );
@@ -78,11 +72,6 @@ export default function Map() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { riskCtrl.current?.setVisible(riskVisible); }, [riskVisible]);
-  useEffect(() => { adtCtrl.current?.setVisible(adtVisible); }, [adtVisible]);
-
-  // Re-fetcha events när tidsfönstret ändras. Skippa första rendret —
-  // load-handlern ovan kör redan en fetch med initialt fönster.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
@@ -91,9 +80,6 @@ export default function Map() {
     );
   }, [timeWindow]);
 
-  // Auto-refresh av events var 60:e sekund så pågående olyckor uppdateras
-  // utan reload. Använder ref för timeWindow så intervallet alltid läser
-  // senaste valet utan att behöva återskapas vid varje filter-ändring.
   useEffect(() => {
     const id = window.setInterval(() => {
       const map = mapRef.current;
@@ -105,55 +91,170 @@ export default function Map() {
     return () => window.clearInterval(id);
   }, []);
 
-  // Stäng om-modalen med Escape.
-  useEffect(() => {
-    if (!aboutOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAboutOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [aboutOpen]);
-
   return (
     <>
       <div ref={containerRef} className={styles.map} />
       <div className={styles.controls}>
-        {liveCount > 0 && (
-          <div
-            className={styles.controlsLivePill}
-            title="Olyckor som syns i Trafikverkets feed just nu (rapporterade senaste 90 min)"
-          >
-            <span className={styles.controlsLiveDot} aria-hidden="true" />
-            <span>
-              {liveCount} pågående {liveCount === 1 ? "olycka" : "olyckor"}
-            </span>
+        <InfoBox open={infoOpen} onToggle={() => setInfoOpen((v) => !v)} />
+        <LiveBox count={liveCount} open={liveOpen} onToggle={() => setLiveOpen((v) => !v)} />
+        <TimeBox value={timeWindow} onChange={setTimeWindow} />
+      </div>
+    </>
+  );
+}
+
+function InfoBox({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  // Kollapsad: hela boxen är klickbar och öppnar.
+  // Öppen: bara X-ikonen stänger (klick på text/länkar i innehållet ska inte stänga).
+  const handleBoxClick = open ? undefined : onToggle;
+  return (
+    <div
+      className={`${styles.infoBox} ${open ? styles.infoBoxOpen : ""}`}
+      onClick={handleBoxClick}
+      role={open ? "dialog" : "button"}
+      aria-expanded={open}
+    >
+      <div className={styles.infoBoxHeader}>
+        <span className={styles.infoBoxLogo}>Säkravägar.se</span>
+        <button
+          type="button"
+          className={styles.infoBoxIconBtn}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          aria-label={open ? "Stäng" : "Öppna"}
+        >
+          <RoadOrXIcon expanded={open} />
+        </button>
+      </div>
+      <p className={styles.infoBoxIntro}>
+        För dig som känner oro i trafiken och vill planera din resa med mer kontroll, lugn och tillit.
+      </p>
+      <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
+        <div className={styles.expanderInner}>
+          <div className={styles.infoBoxBody}>
+            <p>
+              Olyckor samlas från Trafikverket på en karta över hela Sverige – historiska som värmekarta, pågående som pulserande punkter. Vägarna färgas efter risk, så att de som är värst per resa lyser starkast, inte de mest trafikerade.
+            </p>
+            <p>
+              Klicka på en väg eller olycka för detaljer, och filtrera på tidsfönster. Tanken är inte att förutsäga vad som händer härnäst, utan att synliggöra mönster — så att du kan välja vägen, tiden eller färdsättet som passar dig bäst.
+            </p>
           </div>
+          <div className={styles.infoBoxSources}>
+            Datakällor:{" "}
+            <a href="https://api.trafikinfo.trafikverket.se/" target="_blank" rel="noreferrer">
+              Trafikverket Open API
+            </a>{" "}
+            (olyckor) · NVDB via{" "}
+            <a href="https://lastkajen.trafikverket.se/" target="_blank" rel="noreferrer">
+              Lastkajen
+            </a>{" "}
+            (ÅDT). Data är preliminär och bör inte användas som enda underlag för vägval.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoadOrXIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      className={`${styles.roadIcon} ${expanded ? styles.roadIconExpanded : ""}`}
+      width="28"
+      height="18"
+      viewBox="0 0 28 18"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path d="M0 1H28" stroke="currentColor" strokeWidth="1" />
+      <path d="M0 9H28" stroke="currentColor" strokeWidth="1" strokeDasharray="5 4" />
+      <path d="M0 17H28" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function LiveBox({
+  count,
+  open,
+  onToggle,
+}: {
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const calm = count === 0;
+  return (
+    <div
+      className={`${styles.liveBox} ${calm ? styles.liveBoxCalm : ""}`}
+      onClick={onToggle}
+      role="button"
+      aria-expanded={open}
+    >
+      <div className={styles.liveBoxHeader}>
+        {calm ? (
+          <>
+            <InfoIcon />
+            <span className={styles.liveBoxLabel}>Inga rapporterade olyckor just nu</span>
+          </>
+        ) : (
+          <>
+            <span className={styles.liveBoxLabel}>
+              {count} pågående {count === 1 ? "olycka" : "olyckor"}
+            </span>
+            <span className={styles.liveDot} aria-hidden="true" />
+          </>
         )}
-        <div className={styles.controlsTitle}>Lager</div>
-        <label className={styles.controlsRow}>
-          <input
-            type="checkbox"
-            checked={riskVisible}
-            onChange={(e) => setRiskVisible(e.target.checked)}
-          />
-          <span>Risk (olyckor / M fordon)</span>
-        </label>
-        <label className={styles.controlsRow}>
-          <input
-            type="checkbox"
-            checked={adtVisible}
-            onChange={(e) => setAdtVisible(e.target.checked)}
-          />
-          <span>Trafikflöde (ÅDT)</span>
-        </label>
-        <div className={styles.controlsHint}>Zooma in (≥9) för att se lagren</div>
-        <div className={styles.controlsDivider} />
-        <div className={styles.controlsTitle}>Tidsfönster</div>
+      </div>
+      <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
+        <div className={styles.expanderInner}>
+          <p className={styles.liveBoxBody}>
+            Pågående olyckor är de som rapporterats till Trafikverket de senaste 90 minuterna. De markeras med en röd, pulserande punkt på kartan och uppdateras automatiskt.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoIcon() {
+  return (
+    <svg
+      className={styles.infoIcon}
+      width="10"
+      height="10"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M8 0.5C12.1421 0.5 15.5 3.85786 15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5ZM7.5 12H8.5V10.4004H7.5V12ZM7.5 8.7998H8.5V4H7.5V8.7998Z"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function TimeBox({
+  value,
+  onChange,
+}: {
+  value: TimeWindow;
+  onChange: (v: TimeWindow) => void;
+}) {
+  return (
+    <div className={styles.timeBox}>
+      <span className={styles.timeLabel}>Tidsfönster</span>
+      <div className={styles.timeSelectGroup}>
         <select
-          className={styles.controlsSelect}
-          value={timeWindow}
-          onChange={(e) => setTimeWindow(e.target.value as TimeWindow)}
+          className={styles.timeSelect}
+          value={value}
+          onChange={(e) => onChange(e.target.value as TimeWindow)}
+          aria-label="Tidsfönster"
         >
           <option value="all">Alla olyckor</option>
           <option value="7d">Senaste 7 dagarna</option>
@@ -161,112 +262,28 @@ export default function Map() {
           <option value="6m">Senaste 6 månaderna</option>
           <option value="1y">Senaste året</option>
         </select>
-        <div className={styles.controlsDivider} />
-        <button
-          type="button"
-          className={styles.controlsAboutLink}
-          onClick={() => setAboutOpen(true)}
-        >
-          Om tjänsten
-        </button>
+        <DropdownIcon />
       </div>
-      {(riskVisible || adtVisible || liveCount > 0) && (
-        <div className={styles.legend}>
-          <div className={styles.legendTitle}>Förklaring</div>
-          {liveCount > 0 && (
-            <div className={styles.legendBlock}>
-              <div className={styles.legendSubtitle}>Pågående olyckor</div>
-              <div className={styles.legendItem}>
-                <span className={styles.legendLiveDot} aria-hidden="true" />
-                <span>Rapporterade just nu</span>
-              </div>
-              <div className={styles.legendNote}>Synliga vid alla zoom-nivåer</div>
-            </div>
-          )}
-          {riskVisible && (
-            <div className={styles.legendBlock}>
-              <div className={styles.legendSubtitle}>Olyckor / M fordon</div>
-              <div
-                className={styles.legendGradient}
-                style={{
-                  background:
-                    "linear-gradient(to right, #1a9850 0%, #a6d96a 40%, #fdae61 60%, #f46d43 80%, #d7191c 100%)",
-                }}
-              />
-              <div className={styles.legendGradientLabels}>
-                <span>låg</span>
-                <span>hög</span>
-              </div>
-              <div className={styles.legendNote}>Preliminär — kalibreras när data mognat</div>
-            </div>
-          )}
-          {adtVisible && (
-            <div className={styles.legendBlock}>
-              <div className={styles.legendSubtitle}>Trafikflöde (ÅDT)</div>
-              <div
-                className={styles.legendGradient}
-                style={{
-                  background:
-                    "linear-gradient(to right, #2c7bb6 0%, #abd9e9 7.69%, #ffffbf 23.08%, #fdae61 48.72%, #d7191c 100%)",
-                }}
-              />
-              <div className={styles.legendGradientLabels}>
-                <span>500</span>
-                <span>20 000+</span>
-              </div>
-              <div className={styles.legendNote}>fordon/dygn</div>
-            </div>
-          )}
-        </div>
-      )}
-      {aboutOpen && (
-        <div
-          className={styles.aboutBackdrop}
-          onClick={() => setAboutOpen(false)}
-          role="presentation"
-        >
-          <div
-            className={styles.aboutModal}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="about-title"
-          >
-            <button
-              type="button"
-              className={styles.aboutClose}
-              onClick={() => setAboutOpen(false)}
-              aria-label="Stäng"
-            >
-              ×
-            </button>
-            <h2 id="about-title" className={styles.aboutTitle}>Om Säkravägar.se</h2>
-            <p>
-              Karta över trafiksäkerhet i Sverige. Kombinerar Trafikverkets aktuella olyckor
-              med vägdata från NVDB för att visa vilka sträckor som är säkrast respektive
-              farligast att köra på.
-            </p>
-            <h3 className={styles.aboutSubtitle}>Lager</h3>
-            <ul className={styles.aboutList}>
-              <li><strong>Trafikflöde (ÅDT)</strong> — årsdygnstrafik per vägsegment, dvs. genomsnittligt antal fordon per dygn. Korta segment vid trafikplatser och avfarter saknar ibland mätning från Trafikverket och visas då som ofärgade glapp.</li>
-              <li><strong>Risk</strong> — olyckor per miljon fordon. <em>Preliminär</em> — kalibreras när historiken växer.</li>
-              <li><strong>Olyckor</strong> — pågående och nyligen rapporterade olyckor från Trafikverket. Pågående markeras med pulserande röd punkt och uppdateras var 60:e sekund i kartan.</li>
-            </ul>
-            <h3 className={styles.aboutSubtitle}>Tips</h3>
-            <ul className={styles.aboutList}>
-              <li>Klicka på en väg eller olyckspunkt för detaljer.</li>
-              <li>Toggla av/på lager för att jämföra dem.</li>
-              <li>Tidsfilter under lager-toggles begränsar vilka olyckor som visas.</li>
-              <li>Zooma in till nivå 9 eller mer för att se vägfärgning.</li>
-            </ul>
-            <h3 className={styles.aboutSubtitle}>Datakällor</h3>
-            <p className={styles.aboutMuted}>
-              Trafikverket Open API (olyckor) · NVDB via Lastkajen (ÅDT).
-              Data är preliminär och bör inte användas som enda underlag för vägval.
-            </p>
-          </div>
-        </div>
-      )}
-    </>
+    </div>
+  );
+}
+
+function DropdownIcon() {
+  return (
+    <svg
+      className={styles.dropdownIcon}
+      width="11"
+      height="10"
+      viewBox="0 0 11 10"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M0.353516 2L5.35352 7L10.3535 2"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+    </svg>
   );
 }
