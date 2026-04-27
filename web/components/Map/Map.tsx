@@ -9,6 +9,7 @@ import {
   addEventsLayer,
   addPopupHandler,
   addRiskLayer,
+  type LayerController,
 } from "./layers";
 
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
@@ -37,6 +38,12 @@ export default function Map() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
+  const [riskOn, setRiskOn] = useState(true);
+  const [adtOn, setAdtOn] = useState(true);
+  const [riskOpen, setRiskOpen] = useState(false);
+  const [adtOpen, setAdtOpen] = useState(false);
+  const [atUserLocation, setAtUserLocation] = useState(false);
+  const layerCtrlRef = useRef<{ risk?: LayerController; adt?: LayerController }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
   useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
 
@@ -51,11 +58,13 @@ export default function Map() {
       attributionControl: { compact: true },
     });
 
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    // dragend räcker som "användar-pan"-signal — zoom (knappar/scroll/pinch)
+    // ändrar inte centrum så locate-state ska inte växla av av zoom.
+    map.on("dragend", () => setAtUserLocation(false));
 
     map.on("load", () => {
-      addRiskLayer(map);
-      addAdtLayer(map);
+      layerCtrlRef.current.risk = addRiskLayer(map);
+      layerCtrlRef.current.adt = addAdtLayer(map);
       void addEventsLayer(map, { since: sinceFromWindow(timeWindow) }).then(({ liveCount }) =>
         setLiveCount(liveCount),
       );
@@ -81,6 +90,14 @@ export default function Map() {
   }, [timeWindow]);
 
   useEffect(() => {
+    layerCtrlRef.current.risk?.setVisible(riskOn);
+  }, [riskOn]);
+
+  useEffect(() => {
+    layerCtrlRef.current.adt?.setVisible(adtOn);
+  }, [adtOn]);
+
+  useEffect(() => {
     const id = window.setInterval(() => {
       const map = mapRef.current;
       if (!map || !mapLoadedRef.current) return;
@@ -91,6 +108,25 @@ export default function Map() {
     return () => window.clearInterval(id);
   }, []);
 
+  const handleZoomIn = () => mapRef.current?.zoomIn();
+  const handleZoomOut = () => mapRef.current?.zoomOut();
+  const handleLocate = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 14 });
+        setAtUserLocation(true);
+      },
+      (err) => {
+        // Geolocation kräver explicit tillåtelse från användaren — om hen
+        // nekar eller browsern saknar permission API får vi ingen fix.
+        console.warn("geolocation failed", err);
+      },
+    );
+  };
+
   return (
     <>
       <div ref={containerRef} className={styles.map} />
@@ -99,7 +135,116 @@ export default function Map() {
         <LiveBox count={liveCount} open={liveOpen} onToggle={() => setLiveOpen((v) => !v)} />
         <TimeBox value={timeWindow} onChange={setTimeWindow} />
       </div>
+      <div className={styles.rightControls}>
+        <div className={styles.zoomGroup}>
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${styles.zoomPlus}`}
+            onClick={handleZoomIn}
+            aria-label="Zooma in"
+          >
+            <PlusIcon />
+          </button>
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${styles.zoomMinus}`}
+            onClick={handleZoomOut}
+            aria-label="Zooma ut"
+          >
+            <MinusIcon />
+          </button>
+        </div>
+        <button
+          type="button"
+          className={`${styles.iconBtn} ${atUserLocation ? styles.iconBtnActive : ""}`}
+          onClick={handleLocate}
+          aria-label="Visa min position"
+          aria-pressed={atUserLocation}
+        >
+          <LocationIcon />
+        </button>
+      </div>
+      <div className={styles.layerControls}>
+        <LayerBox
+          label="Risk"
+          colors={RISK_SCALE}
+          on={riskOn}
+          open={riskOpen}
+          onToggleLayer={() => setRiskOn((v) => !v)}
+          onToggleOpen={() => setRiskOpen((v) => !v)}
+          body="Risk-lagret färgar vägsegment efter olyckor per miljon fordon — så att de farligaste vägarna per resa lyser starkast, inte de mest trafikerade. Synligt vid inzoomning från stadsnivå och uppåt."
+        />
+        <LayerBox
+          label="Flöde"
+          colors={FLOW_SCALE}
+          on={adtOn}
+          open={adtOpen}
+          onToggleLayer={() => setAdtOn((v) => !v)}
+          onToggleOpen={() => setAdtOpen((v) => !v)}
+          body="Flödes-lagret färgar vägsegment efter ÅDT (årsdygnstrafik) enligt NVDB — antalet fordon per dygn. Mörkare = mer trafik. Synligt vid inzoomning från stadsnivå och uppåt."
+        />
+      </div>
     </>
+  );
+}
+
+const RISK_SCALE = ["#1a9850", "#66bd63", "#a6d96a", "#fdae61", "#f46d43", "#d7191c"];
+const FLOW_SCALE = ["#2c7bb6", "#74add1", "#abd9e9", "#fee090", "#fdae61", "#d7191c"];
+
+function LayerBox({
+  label,
+  colors,
+  on,
+  open,
+  onToggleLayer,
+  onToggleOpen,
+  body,
+}: {
+  label: string;
+  colors: string[];
+  on: boolean;
+  open: boolean;
+  onToggleLayer: () => void;
+  onToggleOpen: () => void;
+  body: string;
+}) {
+  return (
+    <div
+      className={`${styles.layerBox} ${!on ? styles.layerBoxOff : ""}`}
+      onClick={onToggleOpen}
+      role="button"
+      aria-expanded={open}
+    >
+      <div className={styles.layerBoxHeader}>
+        <InfoIcon className={styles.layerBoxInfoIcon} />
+        <span className={styles.layerBoxLabel}>{label}</span>
+        <div className={styles.layerBoxFiller} />
+        <div className={styles.layerScale} aria-hidden="true">
+          {colors.map((c) => (
+            <span key={c} style={{ background: c }} />
+          ))}
+        </div>
+        <button
+          type="button"
+          className={styles.layerToggleHit}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleLayer();
+          }}
+          aria-label={`Slå ${on ? "av" : "på"} ${label.toLowerCase()}-lagret`}
+          aria-pressed={on}
+        >
+          <span className={styles.layerToggle}>
+            <span className={styles.layerToggleKnob} />
+          </span>
+        </button>
+      </div>
+      <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
+        <div className={styles.expanderInner}>
+          <p className={styles.layerBoxBody}>{body}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -194,19 +339,13 @@ function LiveBox({
       aria-expanded={open}
     >
       <div className={styles.liveBoxHeader}>
-        {calm ? (
-          <>
-            <InfoIcon />
-            <span className={styles.liveBoxLabel}>Inga rapporterade olyckor just nu</span>
-          </>
-        ) : (
-          <>
-            <span className={styles.liveBoxLabel}>
-              {count} pågående {count === 1 ? "olycka" : "olyckor"}
-            </span>
-            <span className={styles.liveDot} aria-hidden="true" />
-          </>
-        )}
+        <InfoIcon />
+        <span className={styles.liveBoxLabel}>
+          {calm
+            ? "Inga rapporterade olyckor just nu"
+            : `${count} pågående ${count === 1 ? "olycka" : "olyckor"}`}
+        </span>
+        {!calm && <span className={styles.liveDot} aria-hidden="true" />}
       </div>
       <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
         <div className={styles.expanderInner}>
@@ -219,25 +358,34 @@ function LiveBox({
   );
 }
 
-function InfoIcon() {
+function InfoIcon({ className }: { className?: string } = {}) {
   return (
     <svg
-      className={styles.infoIcon}
+      className={`${styles.infoIcon} ${className ?? ""}`}
       width="10"
       height="10"
-      viewBox="0 0 16 16"
+      viewBox="0 0 17 17"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
       <path
-        d="M8 0.5C12.1421 0.5 15.5 3.85786 15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5ZM7.5 12H8.5V10.4004H7.5V12ZM7.5 8.7998H8.5V4H7.5V8.7998Z"
+        d="M8.5 4.5V9.3M8.5 10.9V12.5M16.5 8.5C16.5 12.9183 12.9183 16.5 8.5 16.5C4.08172 16.5 0.5 12.9183 0.5 8.5C0.5 4.08172 4.08172 0.5 8.5 0.5C12.9183 0.5 16.5 4.08172 16.5 8.5Z"
         stroke="currentColor"
         strokeWidth="1"
+        fill="none"
       />
     </svg>
   );
 }
+
+const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
+  all: "Alla olyckor",
+  "7d": "Senaste 7 dagarna",
+  "30d": "Senaste 30 dagarna",
+  "6m": "Senaste 6 månaderna",
+  "1y": "Senaste året",
+};
 
 function TimeBox({
   value,
@@ -246,24 +394,29 @@ function TimeBox({
   value: TimeWindow;
   onChange: (v: TimeWindow) => void;
 }) {
+  // Native <select> placerad absolut över hela boxen med opacity 0 — så att
+  // klick var som helst i boxen öppnar dropdown (en native select kan inte
+  // öppnas programatiskt på ett pålitligt sätt). Synlig text + ikon ritas
+  // separat under.
   return (
     <div className={styles.timeBox}>
       <span className={styles.timeLabel}>Tidsfönster</span>
       <div className={styles.timeSelectGroup}>
-        <select
-          className={styles.timeSelect}
-          value={value}
-          onChange={(e) => onChange(e.target.value as TimeWindow)}
-          aria-label="Tidsfönster"
-        >
-          <option value="all">Alla olyckor</option>
-          <option value="7d">Senaste 7 dagarna</option>
-          <option value="30d">Senaste 30 dagarna</option>
-          <option value="6m">Senaste 6 månaderna</option>
-          <option value="1y">Senaste året</option>
-        </select>
+        <span className={styles.timeSelectValue}>{TIME_WINDOW_LABELS[value]}</span>
         <DropdownIcon />
       </div>
+      <select
+        className={styles.timeSelect}
+        value={value}
+        onChange={(e) => onChange(e.target.value as TimeWindow)}
+        aria-label="Tidsfönster"
+      >
+        {(Object.entries(TIME_WINDOW_LABELS) as [TimeWindow, string][]).map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -283,6 +436,59 @@ function DropdownIcon() {
         d="M0.353516 2L5.35352 7L10.3535 2"
         stroke="currentColor"
         strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      className={styles.btnIcon}
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path d="M1 8H15M8 15L8 1" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function MinusIcon() {
+  return (
+    <svg
+      className={styles.btnIcon}
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path d="M1 8H15" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function LocationIcon() {
+  return (
+    <svg
+      className={styles.btnIcon}
+      width="16"
+      height="16"
+      viewBox="0 0 17 17"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M9.08308 7.75042L10.3979 15L15.8335 1L1.8335 6.43559L9.08308 7.75042Z"
+        stroke="currentColor"
+        strokeWidth="1"
+        fill="none"
       />
     </svg>
   );

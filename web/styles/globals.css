@@ -194,3 +194,100 @@ a:hover {
   line-height: 1.4;
   margin-bottom: 4px;
 }
+
+/* === Maplibre attribution override (bottom-right info-button) ===
+   Maplibre 4 renderar compact attribution som <details><summary>…</summary>
+   <div class="…-inner">…</div></details>. Vi piggyback:ar på det — hörn-
+   attribuering är ett licenskrav från OFM/OMT/OSM, och maplibre samlar in
+   attribution-strängar från sources åt oss.
+
+   !important används frikostigt: maplibre-gl.css importeras inifrån
+   Map.tsx och bundlas EFTER globals.css i Next.js, så maplibres egna
+   selektorer (samma specificitet, senare i kaskaden) vinner annars. */
+
+.maplibregl-ctrl-bottom-right {
+  bottom: 40px !important;
+  right: 40px !important;
+  margin: 0 !important;
+  font-family: var(--font-univers);
+}
+
+.maplibregl-ctrl-bottom-right > .maplibregl-ctrl {
+  margin: 0 !important;
+  float: none !important;
+}
+
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background: rgba(85, 85, 85, 0.3) !important;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-radius: 8px !important;
+  padding: 0 !important;
+  min-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  /* row (default): summary först → vänster, inner sen → höger. Container
+     är right-anchored, så när inner blir synlig växer baren vänsterut och
+     X-knappen "hoppar" från hörnet till vänster om texten. */
+}
+
+/* Knappen (summary). Maplibres default har width 24px, border-radius 12px
+   och en data-URL bg-image — vi nollställer allt och använder mask för
+   info/close-ikonen istället. */
+.maplibregl-ctrl-attrib-button {
+  position: static !important;
+  width: 40px !important;
+  height: 40px !important;
+  background-image: none !important;
+  background-color: rgba(255, 255, 255, 0.6) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  cursor: pointer;
+  list-style: none;
+  outline: none;
+  flex-shrink: 0;
+  /* mask-image: vi färgar pixlarna via background-color. SVG:erna har
+     fill="none" stroke="black" — mask läser alpha från renderad svg, så
+     bara strokens pixlar blir synliga. */
+  -webkit-mask: url(/icons/info.svg) center / 16px 16px no-repeat !important;
+  mask: url(/icons/info.svg) center / 16px 16px no-repeat !important;
+  transition: background-color 200ms ease;
+}
+
+.maplibregl-ctrl-attrib-button::-webkit-details-marker {
+  display: none;
+}
+
+.maplibregl-ctrl-attrib-button::marker {
+  display: none;
+}
+
+.maplibregl-ctrl-attrib-button:hover {
+  background-color: var(--color-white) !important;
+}
+
+details[open].maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  -webkit-mask-image: url(/icons/close.svg) !important;
+  mask-image: url(/icons/close.svg) !important;
+}
+
+.maplibregl-ctrl-attrib-inner {
+  font-size: 13px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.6) !important;
+  padding: 0 16px !important;
+  white-space: nowrap;
+  background: transparent !important;
+}
+
+.maplibregl-ctrl-attrib-inner a {
+  color: inherit !important;
+  text-decoration: underline !important;
+  transition: color 150ms ease;
+}
+
+.maplibregl-ctrl-attrib-inner a:hover {
+  color: var(--color-white) !important;
+}

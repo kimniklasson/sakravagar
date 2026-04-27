@@ -170,9 +170,9 @@ export async function addEventsLayer(
     source: SOURCE_ID,
     filter: ["==", ["get", "is_live"], true],
     paint: {
-      "circle-color": "#d7191c",
+      "circle-color": "#ffffff",
       "circle-radius": 6,
-      "circle-opacity": 0.5,
+      "circle-opacity": 0.3,
       "circle-stroke-width": 0,
       "circle-pitch-alignment": "map",
     },
@@ -207,7 +207,7 @@ function startLivePulse(map: MapLibreMap): void {
     if (!map.getLayer(LIVE_HALO_LAYER_ID)) return;
     const phase = ((performance.now() - start) % PERIOD_MS) / PERIOD_MS;
     const radius = 6 + phase * 22;
-    const opacity = 0.55 * (1 - phase);
+    const opacity = 0.3 * (1 - phase);
     map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-radius", radius);
     map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-opacity", opacity);
     requestAnimationFrame(tick);

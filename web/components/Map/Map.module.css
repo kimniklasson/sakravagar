@@ -187,13 +187,6 @@
 .liveBoxHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.liveBoxCalm .liveBoxHeader {
-  /* Calm-state: ikon left + label, vänsterjusterat. */
-  justify-content: flex-start;
   gap: 8px;
 }
 
@@ -209,6 +202,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
+  margin-left: auto;
   border-radius: 50%;
   background: var(--color-white);
   flex-shrink: 0;
@@ -231,7 +225,7 @@
 
 @keyframes livePulse {
   0%, 100% { transform: scale(1); opacity: 0; }
-  50%      { transform: scale(2.4); opacity: 0.6; }
+  50%      { transform: scale(2.4); opacity: 0.3; }
 }
 
 .liveBoxBody {
@@ -242,9 +236,132 @@
   /* Ärver färg från .liveBox (vit) eller .liveBoxCalm (mörk). */
 }
 
+/* === Layer-toggle controls (bottom-left) === */
+
+.layerControls {
+  position: absolute;
+  bottom: 40px;
+  left: 40px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 320px;
+  font-family: var(--font-univers);
+}
+
+.layerBox {
+  position: relative;
+  background: rgba(85, 85, 85, 0.3);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  color: var(--color-white);
+}
+
+.layerBoxHeader {
+  display: flex;
+  align-items: center;
+}
+
+.layerBoxInfoIcon {
+  margin-right: 8px;
+  transition: opacity 200ms ease;
+}
+
+.layerBoxOff .layerBoxInfoIcon {
+  opacity: 0.6;
+}
+
+.layerBoxLabel {
+  flex: 1;
+  font-size: 10px;
+  line-height: 0.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: opacity 200ms ease;
+}
+
+.layerBoxOff .layerBoxLabel {
+  opacity: 0.6;
+}
+
+.layerScale {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  transition: opacity 200ms ease;
+}
+
+.layerScale span {
+  display: block;
+  width: 16px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.layerBoxOff .layerScale {
+  opacity: 0.3;
+}
+
+/* Hit-zon: 24px padding-left + 24px toggle = 48px klickbar yta från höger.
+   stopPropagation på onClick i React förhindrar att box-clicket också triggar
+   expand. */
+.layerToggleHit {
+  background: transparent;
+  border: 0;
+  padding: 0 0 0 24px;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+}
+
+.layerToggle {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 10px;
+  border-radius: 16px;
+  background: #555555;
+  transition: background 200ms ease;
+}
+
+.layerToggleKnob {
+  position: absolute;
+  top: 1px;
+  left: 15px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-white);
+  transition: left 200ms cubic-bezier(0.4, 0, 0.2, 1), background 200ms ease;
+}
+
+.layerBoxOff .layerToggle {
+  background: var(--color-white);
+}
+
+.layerBoxOff .layerToggleKnob {
+  left: 1px;
+  background: #555555;
+}
+
+.layerBoxBody {
+  margin: 16px 0 0;
+  font-size: 14px;
+  line-height: 1.20;
+  letter-spacing: -0.03em;
+  color: var(--color-white);
+}
+
 /* === Time-window box === */
 
 .timeBox {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -255,6 +372,7 @@
   -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   color: var(--color-white);
+  cursor: pointer;
 }
 
 .timeLabel {
@@ -266,32 +384,38 @@
 }
 
 .timeSelectGroup {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+  pointer-events: none;
 }
 
+.timeSelectValue {
+  font-size: 10px;
+  line-height: 0.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-white);
+}
+
+/* Native select är osynlig och täcker hela boxen — så att klick var som
+   helst öppnar dropdown. Native select kan inte öppnas programatiskt
+   pålitligt över browsers, så vi låter den ta klicken direkt. */
 .timeSelect {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   appearance: none;
   -webkit-appearance: none;
   background: transparent;
   border: 0;
   padding: 0;
   margin: 0;
-  font-family: var(--font-univers);
-  font-size: 10px;
-  line-height: 0.9;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-white);
+  opacity: 0;
   cursor: pointer;
   outline: none;
-  /* Högerställ visat värde. text-align-last är nyckeln för select-element
-     — text-align ensamt ignoreras av en del browsers på <select>. */
-  text-align: right;
-  text-align-last: right;
+  font-family: var(--font-univers);
 }
 
 .timeSelect option {
@@ -317,14 +441,99 @@
   display: block;
   width: 10px;
   height: 10px;
-  color: var(--color-dark);
   flex-shrink: 0;
+  /* Ärver currentColor från närmaste textfärg — vit i .liveBox/.layerBox,
+     mörk i .liveBoxCalm. */
 }
 
 /* Konsistent 1 CSS-pixel stroke oavsett display-storlek på ikonen.
    Annars renderas info.svg (16x16 viewBox vid 10px) tunnare än 1px. */
 .roadIcon path,
 .infoIcon path,
-.dropdownIcon path {
+.dropdownIcon path,
+.btnIcon path {
   vector-effect: non-scaling-stroke;
 }
+
+/* === Right-side controls (top): zoom + locate === */
+
+.rightControls {
+  position: absolute;
+  top: 40px;
+  right: 40px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-univers);
+}
+
+.zoomGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.iconBtn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(85, 85, 85, 0.3);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Snabb återgång efter press: bg+color tonar tillbaka till default på
+     ~250ms när :active släpps eller .iconBtnActive tas bort. */
+  transition: background-color 250ms ease, color 250ms ease;
+}
+
+.iconBtn:hover {
+  color: var(--color-white);
+}
+
+/* :active = mousedown→mouseup. transition: none gör att invertering snäpper
+   in direkt; när knapp släpps kickar default-transition tillbaka till glas. */
+.iconBtn:active {
+  background-color: var(--color-white);
+  color: var(--color-dark);
+  transition: none;
+}
+
+/* Persistent inverterat läge — locate-knappen när vi är centrerade på
+   användarens position. Animeras tillbaka när klassen tas bort (pan→ut). */
+.iconBtnActive {
+  background-color: var(--color-white);
+  color: var(--color-dark);
+}
+
+/* När locate är aktiv (vit bg + #333 ikon) får hover INTE göra ikonen vit —
+   då blir den osynlig på vit bg. Behåller mörk färg. */
+.iconBtnActive:hover {
+  color: var(--color-dark);
+}
+
+/* Plus + minus visuellt sammansatta: rundade ytterkanter, raka inre. */
+.zoomPlus {
+  border-radius: 8px 8px 0 0;
+}
+
+.zoomMinus {
+  border-radius: 0 0 8px 8px;
+}
+
+.btnIcon {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+/* Maplibre-attribution-override flyttad till globals.css — Next.js CSS
+   Modules kräver att varje selector innehåller minst en lokal class/id,
+   och våra `:global(.maplibregl-…)`-overrides är "pure global". */
