@@ -1,4 +1,8 @@
-import maplibregl, { type Map as MapLibreMap, type GeoJSONSource } from "maplibre-gl";
+import maplibregl, {
+  type ExpressionSpecification,
+  type GeoJSONSource,
+  type Map as MapLibreMap,
+} from "maplibre-gl";
 import type { SegmentDetail } from "@/app/api/segment/route";
 import type { EventPoint } from "@/app/api/events/route";
 
@@ -19,6 +23,13 @@ type RiskSegment = {
 };
 
 export type LayerController = { setVisible: (v: boolean) => void };
+type HeatmapStop = { density: number; color: string; alpha: number };
+
+const DEFAULT_HEATMAP_STOPS: HeatmapStop[] = [
+  { density: 0, color: "#000000", alpha: 0 },
+  { density: 0.4, color: "#666666", alpha: 0.25 },
+  { density: 0.51, color: "#666666", alpha: 1 },
+];
 
 const SOURCE_ID = "events";
 const HEATMAP_LAYER_ID = "events-heatmap";
@@ -41,6 +52,28 @@ const RISK_LAYER_ID = "risk-lines";
 // sån query timeoutar mot Supabase (för många segment). Zoom 9 är ~2°
 // vilket fungerar bra för båda lager.
 const NVDB_MIN_ZOOM = 9;
+
+function heatmapColorExpression(stops: HeatmapStop[]): ExpressionSpecification {
+  const sorted = [...stops].sort((a, b) => a.density - b.density);
+  return [
+    "interpolate",
+    ["linear"],
+    ["heatmap-density"],
+    ...sorted.flatMap((s) => [
+      Math.max(0, Math.min(1, s.density)),
+      hexToRgba(s.color, s.alpha),
+    ]),
+  ] as ExpressionSpecification;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace("#", "");
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  const a = Math.max(0, Math.min(1, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
 
 export async function addEventsLayer(
   map: MapLibreMap,
@@ -105,15 +138,7 @@ export async function addEventsLayer(
         8, 20,
         11, 30,
       ],
-      "heatmap-color": [
-        "interpolate", ["linear"], ["heatmap-density"],
-        0, "rgba(0, 0, 0, 0)",
-        0.2, "rgba(255, 223, 163, 0.5)",
-        0.4, "rgba(247, 168, 85, 0.7)",
-        0.6, "rgba(232, 104, 58, 0.85)",
-        0.8, "rgba(192, 54, 40, 0.9)",
-        1, "rgba(128, 20, 20, 0.95)",
-      ],
+      "heatmap-color": heatmapColorExpression(DEFAULT_HEATMAP_STOPS),
       "heatmap-opacity": [
         "interpolate", ["linear"], ["zoom"],
         4, 0.9,
@@ -133,7 +158,7 @@ export async function addEventsLayer(
     filter: ["!=", ["get", "is_live"], true],
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 14, 7, 18, 12],
-      "circle-color": "#c0543a",
+      "circle-color": "#ffffff",
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 1,
       "circle-opacity": [
@@ -171,7 +196,7 @@ export async function addEventsLayer(
     filter: ["==", ["get", "is_live"], true],
     paint: {
       "circle-color": "#ffffff",
-      "circle-radius": 6,
+      "circle-radius": 5,
       "circle-opacity": 0.3,
       "circle-stroke-width": 0,
       "circle-pitch-alignment": "map",
@@ -184,10 +209,9 @@ export async function addEventsLayer(
     source: SOURCE_ID,
     filter: ["==", ["get", "is_live"], true],
     paint: {
-      "circle-color": "#d7191c",
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 6, 16, 10],
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 2,
+      "circle-color": "#ffffff",
+      "circle-radius": 5,
+      "circle-stroke-width": 0,
       "circle-opacity": 1,
     },
   });
@@ -202,12 +226,17 @@ export async function addEventsLayer(
 // inte längre finns på kartan (efter map.remove()).
 function startLivePulse(map: MapLibreMap): void {
   const start = performance.now();
-  const PERIOD_MS = 1500;
+  const PERIOD_MS = 1600;
+  const easeInOut = (t: number) => 0.5 - Math.cos(Math.PI * t) / 2;
   const tick = () => {
     if (!map.getLayer(LIVE_HALO_LAYER_ID)) return;
     const phase = ((performance.now() - start) % PERIOD_MS) / PERIOD_MS;
-    const radius = 6 + phase * 22;
-    const opacity = 0.3 * (1 - phase);
+    const rising = phase <= 0.5;
+    const halfProgress = rising ? phase / 0.5 : (phase - 0.5) / 0.5;
+    const eased = easeInOut(halfProgress);
+    const pulse = rising ? eased : 1 - eased;
+    const radius = 5 + pulse * 7;
+    const opacity = 0.3 * pulse;
     map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-radius", radius);
     map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-opacity", opacity);
     requestAnimationFrame(tick);
@@ -304,8 +333,8 @@ function bboxToParam(b: Bbox): string {
 }
 
 // ÅDT-lager: bbox-driven, fyller på via /api/adt vid moveend när zoom ≥ 9.
-// Färgar linjer efter trafikflöde (lågt blått → högt rött). Läggs in före
-// events-lagret så att olyckspunkter renderas ovanpå vägfärgningen.
+// Färgar linjer efter trafikflöde (ljusblåvitt → blått). Läggs under risk
+// och events så att det läses som underlagsdata, inte slutsatsen.
 export function addAdtLayer(map: MapLibreMap): LayerController {
   if (map.getSource(ADT_SOURCE_ID)) {
     return { setVisible: () => {} };
@@ -316,7 +345,11 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     data: { type: "FeatureCollection", features: [] },
   });
 
-  const beforeId = map.getLayer(HEATMAP_LAYER_ID) ? HEATMAP_LAYER_ID : undefined;
+  const beforeId = map.getLayer(RISK_LAYER_ID)
+    ? RISK_LAYER_ID
+    : map.getLayer(HEATMAP_LAYER_ID)
+      ? HEATMAP_LAYER_ID
+      : undefined;
   map.addLayer(
     {
       id: ADT_LAYER_ID,
@@ -324,16 +357,16 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
       source: ADT_SOURCE_ID,
       minzoom: NVDB_MIN_ZOOM,
       paint: {
-        // Trafikflöde: ColorBrewer RdYlBu inverterad. Skala vald så att
-        // typiska riksvägar (5–15k) hamnar i gult/orange och E-vägar
-        // (>20k) blir röda.
+        // Trafikflöde: bas #F2F8FF med #0077FF som overlay i 20%-steg.
+        // Skalan hålls blå så den inte läses som samma "fara"-språk som risk.
         "line-color": [
           "interpolate", ["linear"], ["get", "adt_total"],
-          500, "#2c7bb6",
-          2000, "#abd9e9",
-          5000, "#ffffbf",
-          10000, "#fdae61",
-          20000, "#d7191c",
+          0, "#F2F8FF",
+          500, "#C2DEFF",
+          2000, "#91C4FF",
+          5000, "#61ABFF",
+          10000, "#3091FF",
+          20000, "#0077FF",
         ],
         "line-width": [
           "interpolate", ["linear"], ["zoom"],
@@ -408,13 +441,8 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
     data: { type: "FeatureCollection", features: [] },
   });
 
-  // Under ADT så ADT-färgen syns som tunn stripa ovanpå risk-segmenten
-  // när båda är på.
-  const beforeId = map.getLayer(ADT_LAYER_ID)
-    ? ADT_LAYER_ID
-    : map.getLayer(HEATMAP_LAYER_ID)
-      ? HEATMAP_LAYER_ID
-      : undefined;
+  // Risk är slutsatsen, så den läggs ovanpå flöde men under events.
+  const beforeId = map.getLayer(HEATMAP_LAYER_ID) ? HEATMAP_LAYER_ID : undefined;
 
   map.addLayer(
     {
@@ -428,11 +456,12 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
         "line-color": [
           "interpolate", ["linear"],
           ["log10", ["max", 1, ["get", "risk_per_milj_fordon"]]],
-          0, "#1a9850",
-          2, "#a6d96a",
-          3, "#fdae61",
-          4, "#f46d43",
-          5, "#d7191c",
+          0, "#FFF382",
+          1, "#FFCC68",
+          2, "#FFA54E",
+          3, "#FF7D34",
+          4, "#FF561A",
+          5, "#FF2F00",
         ],
         "line-width": [
           "interpolate", ["linear"], ["zoom"],

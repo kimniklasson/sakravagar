@@ -197,21 +197,21 @@ export default function Map() {
 type ScaleStop = { color: string; label: string };
 
 const RISK_SCALE: ScaleStop[] = [
-  { color: "#1a9850", label: "Mycket låg" },
-  { color: "#66bd63", label: "Låg" },
-  { color: "#a6d96a", label: "Måttlig" },
-  { color: "#fdae61", label: "Förhöjd" },
-  { color: "#f46d43", label: "Hög" },
-  { color: "#d7191c", label: "Mycket hög" },
+  { color: "#FFF382", label: "Mycket låg" },
+  { color: "#FFCC68", label: "Låg" },
+  { color: "#FFA54E", label: "Måttlig" },
+  { color: "#FF7D34", label: "Förhöjd" },
+  { color: "#FF561A", label: "Hög" },
+  { color: "#FF2F00", label: "Mycket hög" },
 ];
 
 const FLOW_SCALE: ScaleStop[] = [
-  { color: "#2c7bb6", label: "Mycket lågt" },
-  { color: "#74add1", label: "Lågt" },
-  { color: "#abd9e9", label: "Måttligt" },
-  { color: "#fee090", label: "Förhöjt" },
-  { color: "#fdae61", label: "Högt" },
-  { color: "#d7191c", label: "Mycket högt" },
+  { color: "#F2F8FF", label: "Mycket lågt" },
+  { color: "#C2DEFF", label: "Lågt" },
+  { color: "#91C4FF", label: "Måttligt" },
+  { color: "#61ABFF", label: "Förhöjt" },
+  { color: "#3091FF", label: "Högt" },
+  { color: "#0077FF", label: "Mycket högt" },
 ];
 
 function LayerBox({

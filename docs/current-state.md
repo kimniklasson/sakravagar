@@ -1,4 +1,4 @@
-# Current state — 2026-04-27 (redesign top-left: Univers + brand-färger + InfoBox/LiveBox/TimeBox)
+# Current state — 2026-04-27 (overlays komplett: top-left + bottom-left + right-side, 3-tier typografi)
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
 
@@ -147,6 +147,50 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
 
 - ✅ **Radial vignette över kartan (2026-04-27)** — `.map::after` med `radial-gradient(ellipse closest-side at center, rgba(34,34,34,0) 0% 70%, rgba(34,34,34,0.6) 100%)`. Inre 70% av ellipsens radie är klar karta, gradient i yttre 30%. `pointer-events: none` så klick går igenom till kartan. `closest-side` gör att 60%-stoppet träffar precis på kanternas mitt — på desktop blir topp/botten 60% opaque och hörnen mörkare; på mobil blir sidor 60% och topp/botten mörkare. Kalibrerad genom iterativ tweaking (50% → 70% radie, 80% → 60% maxopacity).
 
+- ✅ **Bottom-left lager-toggles live (2026-04-27)** — Risk + Flöde som glas-boxar (`rgba(85,85,85,0.3)` + 16px backdrop-blur, samma som TimeBox), 320px breda, 2px gap. Stack:as via `.layerControls` (`bottom: 40px; left: 40px`).
+  - **Anatomi per box:** info-i (10x10) + label "RISK"/"FLÖDE" + 6-stops färgskala (16x10 swatches, 2px radius, 2px gap mellan) + toggle (24x10 pill, 8x8 knob med 1px-marginaler).
+  - **Toggle-interaktion:** ON = vit pill + #555 knob (höger), OFF = #555 pill + vit knob (vänster). 200ms ease-transition på både färg och position. Knob slidar via `left: 1px ↔ left: 15px`.
+  - **Klick-zoner:** klick var som helst i boxen togglar expanderad förklaring (samma `.expander`-mekanik som InfoBox/LiveBox). Klick i höger 48px-strip (24px padding-left på `<button>` + 24px synlig pill = 48px hit-zon) togglar lagret on/off via `e.stopPropagation()` + `LayerController.setVisible`. Box-clicket kommer aldrig fram till boxens onClick när man klickar på toggle.
+  - **OFF-state styling:** ikon+text 60% opacity, swatcher 30% opacity, toggle inverterad — alla animerade via `transition: opacity 200ms ease`.
+  - **Tooltips på swatches:** custom CSS via `::after { content: attr(title) }`, opacity 0→1 på `:hover`, 150ms transition, z-index 10. Native `title` har 1-2s delay vilket inte var användbart. Etiketter: Risk = "Mycket låg / Låg / Måttlig / Förhöjd / Hög / Mycket hög"; Flöde = samma men med "lågt"/"högt"-form. Positionerad ovanför swatch med 8px gap så Flöde-tooltips kan flyta upp över Risk-boxen.
+  - **Wirat upp** till `addRiskLayer` / `addAdtLayer` controllers via `setVisible`. Båda PÅ vid sidladdning. `useEffect` på `riskOn`/`adtOn` synkar mot map-lagren.
+  - Färgskalorna kalibrerades senare 2026-04-27, se "Färg- och heatmap-kalibrering" nedan. `RISK_SCALE`/`FLOW_SCALE`-konstanter ligger fortsatt i `Map.tsx` och matchar MapLibre-linjernas färgskala.
+
+- ✅ **Right-side map-kontroller (2026-04-27)** — ersatt MapLibres default `NavigationControl` med custom-knappar + omstylad attribution.
+  - **Top-right stack** (`bottom-right` mirror, `top: 40px; right: 40px`, `gap: 2px`):
+    - **Zoom-grupp** (plus + minus, 1px gap mellan så de visuellt sitter ihop). Plus = `border-radius: 8px 8px 0 0`, minus = `0 0 8px 8px`. Klickar `map.zoomIn() / zoomOut()`.
+    - **Locate-knapp** (separat under, 2px gap). Klickar `navigator.geolocation.getCurrentPosition` → `map.flyTo({ center, zoom: 14 })` → `setAtUserLocation(true)`. Persistent inverterad medan användaren är centrerad på sin position; återgår till default vid första `dragend` (manuell pan).
+  - **Knapp-styling:** 40x40, 16x16 inline-SVG centrerad via flex (12px implicit padding). Glas-bg `rgba(85,85,85,0.3)` + 16px blur. Default `color: rgba(255,255,255,0.6)`. Hover → `var(--color-white)` med 250ms ease. `:active` → vit bg + #333 ikon med `transition: none` (snäpper inverterad), släpp animerar tillbaka via base-transition. `.iconBtnActive`-class (locate vid centrering) ger persistent inverterad — `.iconBtnActive:hover { color: #333 }` overridar hover så ikonen syns på vit bg.
+  - **Inline SVG** för plus/minus/location med `currentColor` + `vector-effect: non-scaling-stroke` (samma mönster som info/road).
+  - **Locate-state-tracking:** `map.on("dragend", ...)` är enda signalen som växlar `atUserLocation` till false. Zoom (knappar/scroll/pinch) ändrar inte centrum så locate-state ska inte påverkas.
+  - **Attribution rebuilt** istället för ersatt — licenskrav från OFM/OMT/OSM gör att vi behåller MapLibres `AttributionControl` med `compact: true` och styler om den hela. Realiserat i `globals.css` med `!important` eftersom maplibre-gl.css importeras från `Map.tsx` och bundlas EFTER globals.css i Next.js, så samma-specificitet-selektorer från maplibre vinner annars.
+    - **Layout:** Glas-pill (samma bg som zoom-knapparna) i bottom-right (`bottom: 40px; right: 40px`). Kollapsat = bara info-knappen 40x40. Expanderat = X-knapp till vänster + attribution-text till höger. Container är right-anchored, så när text blir synlig växer baren leftward och X-knappen "hoppar" från hörnet till vänster om texten — matchar Kims mockup.
+    - **Ikoner via `mask-image`:** info.svg / close.svg sätts som `mask` på knappen (`<summary>`), `background-color` ger ikonens färg. Default 60% vit, hover 100%. Mask-tekniken används eftersom maplibre genererar knappens DOM och vi inte kan ge den inline-SVG.
+    - **Animation:** överstyrt maplibres `display: none/block`-toggle med `display: block !important` plus `max-width: 0 → 600px` och `padding: 0 → 16px` med samma 320ms `cubic-bezier(0.4, 0, 0.2, 1)` som `.expander` till vänster. `overflow: hidden` på pill-wrappern klipper texten under animationen.
+    - **State-detection-bug fixad:** maplibre 4 har INVERTERAD logik kring `<details open>` i compact-läge. `_toggleAttribution` i maplibres källkod sätter faktiskt `[open]`-attributet när panelen STÄNGS och tar bort det när den ÖPPNAS. Klassen `.maplibregl-compact-show` är vad som faktiskt styr inner-synligheten. Vi byter till close.svg på `.maplibregl-compact-show .maplibregl-ctrl-attrib-button` (NOT `details[open]`).
+    - **Text-styling:** medium-tier från tokens (14px / 1.20 / -0.03em), 60% vit, vita länkar på `:hover`.
+
+- ✅ **TimeBox interaction-refactor (2026-04-27)** — gick från "hela boxen öppnar dropdown" till "hela boxen togglar expand, höger-zonen öppnar dropdown".
+  - Boxen själv har `onClick={onToggleOpen}` + `cursor: pointer`. Höger-zonen `.timeSelectGroup` har `onClick={(e) => e.stopPropagation()}` så att klick där inte också triggar expand. Native `<select>` ligger absolut placerad bara över höger-zonen (inte hela boxen som tidigare) med `opacity: 0` och tar klicken — `.timeSelectValue` och `.dropdownIcon` har `pointer-events: none` så klick faller igenom till select.
+  - **Info-i tillagd** vänster om "Tidsfönster"-texten (8px gap, samma som övriga boxar). Header-layout: `display: flex; gap: 8px;` med `margin-left: auto` på höger-zonen för att skjuta den till höger oavsett label-bredd. Senare finputs 2026-04-27: "Tidsfönster"-labeln är 100% vit, dropdown-zonen har egen vit 10%-platta (`rgba(255,255,255,0.1)`), 8px padding och 4px radius. Hela `.timeBox` har nu padding `8px 8px 8px 16px`.
+  - **Expander-content:** "Tidsfönstret styr vilka olyckor som visas på kartan — både i värmekartan och som enskilda punkter när du zoomar in. Risk-färgningen baseras alltid på all data oavsett val här." Reuses `.expander` / `.expanderOpen` / `.expanderInner` så animationen är konsistent med InfoBox/LiveBox/LayerBox.
+
+- ✅ **Typografi 3-tier-system (2026-04-27)** — DRY:at ut alla `font-size`/`line-height`/`letter-spacing`-värden i overlay-CSS:en.
+  - **Tokens i `tokens.css`:** sex variabler — `--type-{large,medium,small}-{size,line,tracking}`:
+    - Large (header-text): 20px / 1.15 / -0.05em
+    - Medium (brödtext): 14px / 1.20 / -0.03em
+    - Small (labels): 10px / 0.9 / 0.08em
+  - **Utility-classes i `globals.css`:** `.type-large`, `.type-medium`, `.type-small`. Endast size + line-height + letter-spacing — INTE color/uppercase/etc (det sätts per komponent).
+  - **Refaktorering via `composes from global`:** alla 11 textklasser i `Map.module.css` gör nu `composes: type-X from global;` plus det som faktiskt skiljer (color, padding, margin, text-transform). Visuellt identiskt — samma värden, men nu omöjligt att smyga in en 11px eller 13px text utan att frångå systemet.
+  - **Klass-fördelning:**
+    - large: `infoBoxLogo`, `infoBoxIntro`
+    - medium: `infoBoxBody`, `infoBoxSources`, `liveBoxBody`, `layerBoxBody`, `timeBoxBody`
+    - small: `liveBoxLabel`, `layerBoxLabel`, `timeLabel`, `timeSelectValue`
+  - **Maplibre-attribution drar samma medium-tier** men via direkta `var(--type-medium-*)`-referenser eftersom globals.css inte är CSS-modul (composes funkar inte där).
+  - **Inte rört (medvetna undantag):** `.timeSelect option` (13px — native dropdown-overlay där browsers ignorerar de flesta stilar), alla `.seg-popup-*`-klasser (segment-popup, separat designyta som inte passar in i 3-tier just nu).
+
+- ✅ **Live-halo förfining (2026-04-27)** — `events-live-halo` på kartan är nu vit och matchar live-pricken i röda boxen: kärna 10px diameter, halo 10→24px diameter, 1.6s `ease-in-out`, opacity 0→0.3→0. Live-core är också helt vit utan stroke. Poängen är att pågående olyckor syns tydligt men inte introducerar ännu en riskfärg på kartan.
+
 - ✅ **Top-left redesign live (2026-04-27)** — komplett ombyggnad av kontrollerna i övre vänstra hörnet enligt Kims Figma-spec.
   - **Tillgångar:** `web/public/font/UniversNextProRegular.ttf` (Univers Next Pro Regular, enda fontvarianten — opacity används för kontrast istället för weight). Ikoner i `web/public/icons/`: `road.svg`, `info.svg`, `location.svg`, `minus.svg`, `plus.svg`, `dropdown.svg`. Alla ikoner uppdaterade till `stroke="currentColor"` + `stroke-width="1"` + `vector-effect: non-scaling-stroke` (CSS) så strokebredden alltid är 1 CSS-pixel oavsett displaystorlek (kritiskt för `info.svg` som är 16x16 viewBox renderad vid 10x10).
   - **Brand-färger** tillagda i `tokens.css`: `--color-beige #E6E0D4`, `--color-red #FF2F00`, `--color-dark #333`, `--color-white #fff`. Plus `--font-univers` token. Befintliga `--color-*`-tokens (popup-styling) lämnades oförändrade så event/segment-popup-rendering inte påverkas.
@@ -163,6 +207,29 @@ Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.m
   - **Borttaget i redesignen:** `.controls`-panelen (gammal whitebox med checkbox-toggles + select), `.legend` (bottom-left RISK/ÅDT-förklaringar), `.aboutBackdrop`/`.aboutModal` ("Om tjänsten"-modalen — innehållet bor nu i InfoBox expanded). State `riskVisible`/`adtVisible` + `aboutOpen`/`legendBlock`-grenar är borta. Lager-toggles + legend återimplementeras imorgon ihop med bottom-left-skissen.
 
 Alla MVP-element finns nu på plats; nästa naturliga steg är **bottom-left förklaring/legend + lager-toggles** (Kims design-skiss) eller fortsatt UI-polering.
+
+**Status 2026-04-27 sen kväll:** Bottom-left lager-toggles + right-side controls + attribution-redesign + 3-tier typografi-system klart. Hela overlayskelettet matchar nu Kims Figma-spec på top-left, bottom-left, top-right och bottom-right.
+
+**Status 2026-04-27 färg- och heatmap-kalibrering:** Kartans färgspråk renodlades så att *risk* är enda varma varningsskalan, *flöde* är blått underlagsdata, och olyckor/heatmap är neutrala händelsemarkörer.
+
+- **Risk-skalan** är gul→röd, baserat på bottenfärg `#FFF382` + `#FF2F00` overlay i 0/20/40/60/80/100%-steg:
+  - `#FFF382`, `#FFCC68`, `#FFA54E`, `#FF7D34`, `#FF561A`, `#FF2F00`
+  - Används både i `RISK_SCALE` i `Map.tsx` och `risk-lines` i `layers.ts`.
+- **Flöde-skalan** är ljusblåvit→blå, baserat på bottenfärg `#F2F8FF` + `#0077FF` overlay i 0/20/40/60/80/100%-steg:
+  - `#F2F8FF`, `#C2DEFF`, `#91C4FF`, `#61ABFF`, `#3091FF`, `#0077FF`
+  - Används både i `FLOW_SCALE` i `Map.tsx` och `adt-lines` i `layers.ts`.
+- **Renderordning** ändrad: Flöde/ÅDT ligger underst, Risk ovanpå Flöde, och events/heatmap/punkter ovanpå båda. Produktlogik: Flöde är underlag, Risk är slutsats.
+- **Heatmap** är neutral grå, inte röd/orange. Slutlig `heatmap-color`-spec:
+  - density `0.00`: `#000000` alpha 0%
+  - density `0.40`: `#666666` alpha 25%
+  - density `0.51`: `#666666` alpha 100%
+  - Teknisk implementation: `DEFAULT_HEATMAP_STOPS` + `heatmapColorExpression()` i `layers.ts`, så alpha kan uttryckas utan ad hoc rgba-strängar.
+- **Historiska eventpunkter** (`events-circles`) är nu helvita: fill `#ffffff`, stroke `#ffffff`.
+- **Pågående eventpunkter** är också helvita och pulserar enligt live-boxens visuella språk (se Live-halo ovan).
+- **Temporärt Heatmap Lab byggdes och togs bort** samma session. Det användes bara för att labba density/color/alpha-stops live i previewn. Inget lab-UI finns kvar i koden.
+- **Designprincip beslutad:** Olyckspunkter och heatmap ska inte indikera risk med färg. De visar *att händelser finns*. Riskfärg bor på risksträckorna; flöde bor i blå skala.
+
+**Nästa fokus:** mobilläget. Overlayskelettet funkar på desktop, men nästa session bör kontrollera mobilbredd: top-left stacken, bottom-left lagerboxar, right controls, attribution, popup-positionering och text som kan klämmas i `TimeBox`/`LayerBox`.
 
 **Kims plan för UI/UX:** Så fort alla element/information finns på plats kommer Kim göra en samlad redesign och leverera screenshots + interaktionsspecifikation. Vi bygger alltså vidare med funktion först, designnit sen — inte värt att polera enskilda komponenter just nu eftersom de kommer ritas om ändå.
 
@@ -217,9 +284,12 @@ Alla MVP-element finns nu på plats; nästa naturliga steg är **bottom-left fö
 | `scraper/src/env.ts` | Env-schema: `SUPABASE_SERVICE_KEY` (ej `_ROLE_KEY`). |
 | `.github/workflows/cron.yml` | GitHub Actions cron. Schema `17,47 * * * *`. Ingen `version:` på `pnpm/action-setup`. |
 | `web/components/Map/MapLoader.tsx` | Client wrapper runt dynamisk MapLibre-import. |
-| `web/components/Map/Map.tsx` | MapLibre-karta. Anropar `addRiskLayer` + `addAdtLayer` + `addEventsLayer` + `addPopupHandler` på `load`. Top-left-redesign med tre sub-komponenter: `InfoBox` (beige med road→X-morph), `LiveBox` (calm/active states + pulse-halo), `TimeBox` (blur-bg + native select). Inline-SVG för `RoadOrXIcon`/`InfoIcon`/`DropdownIcon` så CSS kan animera paths. |
-| `web/components/Map/Map.module.css` | Brand-redesign: `.controls` är top-left-stack (40px från kant, 320px, 2px gap). Tre box-stilar (`.infoBox`/`.liveBox`/`.timeBox`) + ikon-styling (`.roadIcon`/`.infoIcon`/`.dropdownIcon`) + delad `.expander`/`.expanderOpen`/`.expanderInner` med grid-template-rows-trick för smooth collapse/expand. Också `.map::after` radial vignette. |
-| `web/components/Map/layers.ts` | Lager-definitioner. `addEventsLayer` (heatmap+circles, properties: id/icon_id/road_number/message/severity/first_seen/last_seen), `addAdtLayer` + `addRiskLayer` (line, bbox-driven via delad `createBboxLoader`). `addPopupHandler` (event-popup + segment-popup, prioritet events→Risk→ADT). Returnerar `LayerController { setVisible }`. |
+| `web/components/Map/Map.tsx` | MapLibre-karta. Anropar `addRiskLayer` + `addAdtLayer` + `addEventsLayer` + `addPopupHandler` på `load`, lagrar controllers i `layerCtrlRef` för later setVisible. Sub-komponenter: `InfoBox` (beige med road→X-morph), `LiveBox` (calm/active states + pulse-halo), `TimeBox` (whole-box-expand + dropdown-zone), `LayerBox` (Risk/Flöde med toggle-zone + tooltips), zoom/locate-knappar inline. Inline-SVG för `RoadOrXIcon`/`InfoIcon`/`DropdownIcon`/`PlusIcon`/`MinusIcon`/`LocationIcon` så CSS kan animera paths. State: `infoOpen`/`liveOpen`/`riskOpen`/`adtOpen`/`timeOpen` (boxar), `riskOn`/`adtOn` (lager), `atUserLocation` (locate). `map.on("dragend", ...)` växlar atUserLocation→false. `RISK_SCALE`/`FLOW_SCALE`-konstanter med `{color, label}` per stop — dessa ska matcha linjefärgerna i `layers.ts`. |
+| `web/components/Map/Map.module.css` | Brand-styling. `.controls` (top-left), `.layerControls` (bottom-left), `.rightControls` (top-right). Box-stilar: `.infoBox`/`.liveBox`/`.timeBox`/`.layerBox` + ikon-styling (`.roadIcon`/`.infoIcon`/`.dropdownIcon`/`.btnIcon`) + delad `.expander`/`.expanderOpen`/`.expanderInner` med grid-template-rows-trick för smooth collapse/expand. `.iconBtn` (40x40 glas) + `.iconBtnActive` (persistent inverterad) för zoom/locate. Toggle-styling (`.layerToggle`/`.layerToggleKnob`/`.layerToggleHit`) med ON/OFF-färgväxling och knob-position-animation. `.layerScale span::after` är custom CSS-tooltip via `attr(title)`. Alla textregler komponerar `type-X from global`. Också `.map::after` radial vignette. |
+| `web/components/Map/layers.ts` | Lager-definitioner. `addEventsLayer` (neutral grå heatmap + vita historical circles + vita live-punkter; properties: id/icon_id/road_number/message/severity/first_seen/last_seen). `DEFAULT_HEATMAP_STOPS` = 0.00 transparent, 0.40 `#666` 25%, 0.51 `#666` 100%. Live-halo matchar live-boxen: vit, 10→24px diameter, 1.6s ease-in-out, peak-opacity 0.3. `addAdtLayer` + `addRiskLayer` (line, bbox-driven via delad `createBboxLoader`). Renderordning: ADT/Flöde underst, Risk ovanpå, events överst. `addPopupHandler` (event-popup + segment-popup, prioritet events→Risk→ADT). Returnerar `LayerController { setVisible }`. |
+| `web/styles/tokens.css` | Brand-färger + Univers-font-token + `--type-{large,medium,small}-{size,line,tracking}`-tokens (3-tier typografi). |
+| `web/styles/globals.css` | Globala stilar inkl. `.type-large`/`.type-medium`/`.type-small` utility-classes (för `composes from global` i CSS Modules). `.seg-popup-*`-popup-styling. Maplibre attribution-overrides (info/close.svg via mask-image, glas-pill, max-width-animation, `.maplibregl-compact-show`-baserad open-state). |
+| `web/public/icons/close.svg` | X-ikon (16x16, stroke). Används av maplibre attribution-pill när expanderad (via mask-image). |
 | `web/public/font/UniversNextProRegular.ttf` | Univers Next Pro Regular — den enda fontvarianten i appen. Loaded via `@font-face` i `globals.css`. |
 | `web/public/icons/*.svg` | Brand-ikoner med `stroke="currentColor"` + `stroke-width="1"` + `vector-effect: non-scaling-stroke` (CSS). `road.svg` (28x18) har dashed mittlinje för animation; `info.svg` (16x16, renderas vid 10px); `dropdown.svg` (11x10); `location.svg`/`minus.svg`/`plus.svg` (oanvända just nu, kommer in i nästa iteration med bottom-left). |
 | `web/public/styles/sakravagar_dark.json` | MapLibre style.json — fork av OpenFreeMap Dark, brand-customized i Maputnik. Tile/sprite/glyph-sources pekar på `tiles.openfreemap.org` så vi behåller gratis-no-key-setupen. |

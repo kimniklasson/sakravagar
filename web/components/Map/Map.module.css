@@ -378,6 +378,7 @@
   background: rgba(85, 85, 85, 0.3);
   -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
+  padding: 8px 8px 8px 16px;
   color: var(--color-white);
   cursor: pointer;
 }
@@ -386,13 +387,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px;
 }
 
 .timeLabel {
   composes: type-small from global;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-white);
 }
 
 /* Högerzonen — visat värde + pil. Native <select> ligger absolut över bara
@@ -403,6 +403,9 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
   /* Skjuts åt höger oavsett bredd på label/info-i — paddar inte gap så
      mycket som behövs annars. */
   margin-left: auto;
@@ -438,7 +441,7 @@
 
 .timeBoxBody {
   composes: type-medium from global;
-  margin: 0 16px 16px;
+  margin: 16px 0 0;
   color: var(--color-white);
 }
 
