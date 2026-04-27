@@ -229,7 +229,22 @@ Alla MVP-element finns nu på plats; nästa naturliga steg är **bottom-left fö
 - **Temporärt Heatmap Lab byggdes och togs bort** samma session. Det användes bara för att labba density/color/alpha-stops live i previewn. Inget lab-UI finns kvar i koden.
 - **Designprincip beslutad:** Olyckspunkter och heatmap ska inte indikera risk med färg. De visar *att händelser finns*. Riskfärg bor på risksträckorna; flöde bor i blå skala.
 
-**Nästa fokus:** mobilläget. Overlayskelettet funkar på desktop, men nästa session bör kontrollera mobilbredd: top-left stacken, bottom-left lagerboxar, right controls, attribution, popup-positionering och text som kan klämmas i `TimeBox`/`LayerBox`.
+**Status 2026-04-27 mobilpass:** Första responsiva mobil-/tablet-varianten är byggd och real-device-testad i Safari + Chrome via lokal nätverks-IP.
+
+- **Responsivt overlay-system:** desktop är fortsatt baseline. Tablet/mobil styrs via CSS-variabler i `Map.module.css`: `--overlay-inset`, `--overlay-width`, `--icon-btn-size`, `--mobile-bottom-clearance`. Tablet använder 24px inset. Mobil (`max-width: 767px`) använder 24px inset, fullbredd top-stack, Risk/Flöde nere vänster och location/attribution nere höger.
+- **Mobiltypografi:** i `globals.css` override:as tokens på mobil till Large 18px och Medium 13px. Small är fortsatt 10px. Samma line-height/tracking som desktop.
+- **InfoBox på mobil:** kollapsad visar bara `Säkravägar.se` + road-ikon (introtext göms). Öppen blir fullscreen-ish modal ovanpå kartan med 24px inset, scrollbart innehåll och road→X-morph som stängknapp. Escape stänger också. När modalen är öppen döljs övriga mobiloverlays så de inte ligger kvar under/på botten.
+- **Mobile attribution:** desktop-MapLibre attribution döljs på mobil. Egen mobil-knapp ligger under location-knappen; klick öppnar bottom sheet (`rgba(85,85,85,0.3)` + 16px blur, 24px padding) med OSM/OpenMapTiles/OpenFreeMap-länkar. Backdrop + Escape stänger.
+- **Viewport/browser chrome:** lagt till `viewportFit: "cover"` i `layout.tsx`. `page.module.css` gör appytan fixed (`position: fixed; inset: 0`) och använder `height: var(--app-visual-height, 100dvh)`. `Map.tsx` lyssnar på `window.visualViewport` och sätter `--app-visual-height`, `--app-visual-top`, `--app-visual-bottom`; kör också `map.resize()` när viewporten ändras. Målet är att undvika body-scroll och låta Safari/Chrome-positioner anpassas efter faktisk synlig viewport.
+- **Scroll-lås:** `html/body/main` har `overflow: hidden`; `body` har `overscroll-behavior: none` och `touch-action: none`. Om kartpan/zoom känns påverkad imorgon, flytta `touch-action: none` från body till overlay/backdrop-ytor.
+- **Bottenposition:** klart mycket bättre än startläget, men inte färdigpolerat. Kvar: finjustera Risk/Flöde + location/attribution mot Safari vs Chrome. Chrome klippte botten före `visualViewport`-fixen; Safari låg ibland för högt. Nästa session bör börja här.
+- **Kartklick på mobil:** Risk/Flöde-linjerna har fått osynliga bredare hit-lager (`risk-lines-hit`, `adt-lines-hit`) som följer visibility-state och ligger i popup-prioriteten före de synliga linjerna. Detta gör segment lättare att träffa med finger utan att göra linjerna visuellt tjockare.
+- **Popups på mobil:** MapLibre segment/event-popup stylas som fixed bottom sheet i `globals.css` med `left/right: 24px`, scrollbart innehåll och dold popup-tip.
+- **Location lokalt:** geolocation kräver secure context. Lokal `http://192.168...` visar alert: "Platsfunktionen kräver HTTPS..." Live-sajten på HTTPS bör kunna använda geolocation normalt.
+- **Lokal mobiltest:** Macens IP var `192.168.1.42`. Kör devserver med `./node_modules/.bin/next dev --hostname 0.0.0.0 --port 3000`, öppna `http://192.168.1.42:3000` på telefonen. `next.config.ts` har `allowedDevOrigins: ["192.168.1.42"]` och `devIndicators: false` för att slippa dev-N-bollen nere vänster.
+- **Viktig dev-not:** kör inte `next build` medan `next dev` är igång. Det korruptade devserverns `.next`-runtime/chunk-referenser och gav `Cannot find module './579.js'`. Fix: stoppa dev-servern, `rm -rf web/.next`, starta dev igen.
+
+**Nästa fokus:** småjustera mobilens bottensektion (Risk/Flöde + location/attribution) i Safari och Chrome. Utgå från nuvarande `visualViewport`-lösning men kalibrera `--mobile-bottom-gap`/clearance eller browser-specifika fall om det behövs.
 
 **Kims plan för UI/UX:** Så fort alla element/information finns på plats kommer Kim göra en samlad redesign och leverera screenshots + interaktionsspecifikation. Vi bygger alltså vidare med funktion först, designnit sen — inte värt att polera enskilda komponenter just nu eftersom de kommer ritas om ändå.
 

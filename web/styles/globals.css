@@ -21,16 +21,21 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
   font-size: var(--font-size-base);
   -webkit-font-smoothing: antialiased;
+  touch-action: none;
 }
 
 #__next,
 main {
   height: 100%;
+  overflow: hidden;
 }
 
 a {
@@ -334,4 +339,41 @@ a:hover {
 
 .maplibregl-ctrl-attrib-inner a:hover {
   color: var(--color-white) !important;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --type-large-size: 18px;
+    --type-medium-size: 13px;
+  }
+
+  .maplibregl-ctrl-bottom-right {
+    display: none !important;
+  }
+
+  .maplibregl-popup.seg-popup {
+    position: fixed !important;
+    top: auto !important;
+    right: 24px !important;
+    bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+    left: 24px !important;
+    z-index: 20;
+    max-width: none !important;
+    transform: none !important;
+  }
+
+  .maplibregl-popup.seg-popup .maplibregl-popup-tip {
+    display: none;
+  }
+
+  .seg-popup .maplibregl-popup-content {
+    max-height: min(360px, calc(100vh - 96px));
+    overflow-y: auto;
+    border-radius: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .seg-popup-body {
+    padding: 16px;
+  }
 }

@@ -45,8 +45,10 @@ const LIVE_THRESHOLD_MS = 90 * 60 * 1000;
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
+const ADT_HIT_LAYER_ID = "adt-lines-hit";
 const RISK_SOURCE_ID = "risk";
 const RISK_LAYER_ID = "risk-lines";
+const RISK_HIT_LAYER_ID = "risk-lines-hit";
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase (för många segment). Zoom 9 är ~2°
@@ -383,6 +385,25 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     },
     beforeId,
   );
+  map.addLayer(
+    {
+      id: ADT_HIT_LAYER_ID,
+      type: "line",
+      source: ADT_SOURCE_ID,
+      minzoom: NVDB_MIN_ZOOM,
+      paint: {
+        "line-color": "#ffffff",
+        "line-opacity": 0,
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          9, 18,
+          12, 24,
+          16, 32,
+        ],
+      },
+    },
+    beforeId,
+  );
 
   const loader = createBboxLoader(map, {
     minZoom: NVDB_MIN_ZOOM,
@@ -415,6 +436,9 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     setVisible: (v) => {
       if (map.getLayer(ADT_LAYER_ID)) {
         map.setLayoutProperty(ADT_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      if (map.getLayer(ADT_HIT_LAYER_ID)) {
+        map.setLayoutProperty(ADT_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
       }
       loader.setEnabled(v);
     },
@@ -478,6 +502,25 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
     },
     beforeId,
   );
+  map.addLayer(
+    {
+      id: RISK_HIT_LAYER_ID,
+      type: "line",
+      source: RISK_SOURCE_ID,
+      minzoom: NVDB_MIN_ZOOM,
+      paint: {
+        "line-color": "#ffffff",
+        "line-opacity": 0,
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          9, 20,
+          12, 28,
+          16, 36,
+        ],
+      },
+    },
+    beforeId,
+  );
 
   const loader = createBboxLoader(map, {
     minZoom: NVDB_MIN_ZOOM,
@@ -511,6 +554,9 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
       if (map.getLayer(RISK_LAYER_ID)) {
         map.setLayoutProperty(RISK_LAYER_ID, "visibility", v ? "visible" : "none");
       }
+      if (map.getLayer(RISK_HIT_LAYER_ID)) {
+        map.setLayoutProperty(RISK_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
       loader.setEnabled(v);
     },
   };
@@ -533,7 +579,7 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 // escapeHtml() eftersom de kommer från Trafikverkets API och kan innehålla
 // godtyckliga strängar.
 export function addPopupHandler(map: MapLibreMap): void {
-  const segmentLayerIds = [RISK_LAYER_ID, ADT_LAYER_ID];
+  const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID, ADT_HIT_LAYER_ID, ADT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ — klick går
   // igenom till core eller faller till segment). Hit-target sist: fångar
   // klick på historiska events vid låg zoom där CIRCLE_LAYER_ID inte renderas.

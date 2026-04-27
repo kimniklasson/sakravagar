@@ -13,18 +13,30 @@
   background: radial-gradient(ellipse closest-side at center, rgba(34, 34, 34, 0) 0%, rgba(34, 34, 34, 0) 70%, rgba(34, 34, 34, 0.6) 100%);
 }
 
+.controls,
+.layerControls,
+.rightControls {
+  --overlay-inset: 40px;
+  --overlay-width: 320px;
+  --icon-btn-size: 40px;
+}
+
 /* === Top-left controls stack === */
 
 .controls {
   position: absolute;
-  top: 40px;
-  left: 40px;
+  top: var(--overlay-inset);
+  left: var(--overlay-inset);
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 320px;
+  width: var(--overlay-width);
   font-family: var(--font-univers);
+}
+
+.infoModalBackdrop {
+  display: none;
 }
 
 /* === Info-box (beige) === */
@@ -228,13 +240,13 @@
 
 .layerControls {
   position: absolute;
-  bottom: 40px;
-  left: 40px;
+  bottom: var(--overlay-inset);
+  left: var(--overlay-inset);
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 320px;
+  width: var(--overlay-width);
   font-family: var(--font-univers);
 }
 
@@ -486,8 +498,8 @@
 
 .rightControls {
   position: absolute;
-  top: 40px;
-  right: 40px;
+  top: var(--overlay-inset);
+  right: var(--overlay-inset);
   z-index: 1;
   display: flex;
   flex-direction: column;
@@ -502,8 +514,8 @@
 }
 
 .iconBtn {
-  width: 40px;
-  height: 40px;
+  width: var(--icon-btn-size);
+  height: var(--icon-btn-size);
   padding: 0;
   margin: 0;
   border: 0;
@@ -561,6 +573,233 @@
   height: 16px;
 }
 
+/* === Mobile-only attribution sheet === */
+
+.mobileAttributionBtn,
+.mobileAttributionBackdrop,
+.mobileAttributionSheet {
+  display: none;
+}
+
+.mobileAttributionIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.mobileAttributionClose {
+  display: none;
+}
+
 /* Maplibre-attribution-override flyttad till globals.css — Next.js CSS
    Modules kräver att varje selector innehåller minst en lokal class/id,
    och våra `:global(.maplibregl-…)`-overrides är "pure global". */
+
+@media (max-width: 1023px) {
+  .controls,
+  .layerControls,
+  .rightControls {
+    --overlay-inset: 24px;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .zoomGroup {
+    display: none;
+  }
+
+  .layerScale span::after {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .controls,
+  .layerControls,
+  .rightControls {
+    --overlay-inset: 24px;
+    --mobile-bottom-gap: 16px;
+    --mobile-bottom-clearance: max(var(--mobile-bottom-gap), calc(var(--app-visual-bottom, 0px) + var(--mobile-bottom-gap)));
+    --icon-btn-size: 40px;
+  }
+
+  .controls {
+    top: calc(var(--overlay-inset) + env(safe-area-inset-top));
+    left: var(--overlay-inset);
+    right: auto;
+    width: calc(100vw - (var(--overlay-inset) * 2));
+    z-index: 3;
+  }
+
+  .controlsInfoOpen {
+    z-index: 40;
+  }
+
+  .infoModalBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: default;
+  }
+
+  .infoBox {
+    width: 100%;
+    padding: 24px;
+  }
+
+  .infoBoxIntro {
+    display: none;
+  }
+
+  .infoBoxOpen {
+    position: fixed;
+    top: calc(24px + env(safe-area-inset-top));
+    right: 24px;
+    bottom: calc(24px + env(safe-area-inset-bottom));
+    left: 24px;
+    width: auto;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    animation: infoMobileModalIn 320ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .infoBoxOpen .infoBoxIntro {
+    display: block;
+  }
+
+  .liveBox,
+  .layerBox {
+    padding: 16px;
+  }
+
+  .timeBox {
+    padding: 8px 8px 8px 16px;
+  }
+
+  .timeSelectValue {
+    max-width: 112px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rightControls {
+    top: auto;
+    right: var(--overlay-inset);
+    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
+    z-index: 4;
+    gap: 4px;
+  }
+
+  .mobileAttributionBtn {
+    display: flex;
+  }
+
+  .mobileAttributionBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: default;
+  }
+
+  .mobileAttributionSheet {
+    position: fixed;
+    right: 24px;
+    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
+    left: 24px;
+    z-index: 2;
+    display: block;
+    max-height: min(320px, calc(var(--app-visual-height, 100dvh) - 96px));
+    overflow-y: auto;
+    padding: 24px;
+    border-radius: 8px;
+    background: rgba(85, 85, 85, 0.3);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    color: var(--color-white);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(100% + 48px));
+    transition: opacity 260ms ease, transform 320ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .mobileAttributionSheetOpen {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .mobileAttributionClose {
+    display: inline-flex;
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-white);
+    cursor: pointer;
+  }
+
+  .mobileAttributionBody {
+    composes: type-medium from global;
+    padding-right: 40px;
+    color: var(--color-white);
+  }
+
+  .mobileAttributionBody p {
+    margin: 0;
+  }
+
+  .mobileAttributionBody a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  .layerControls {
+    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
+    left: var(--overlay-inset);
+    width: calc(100vw - (var(--overlay-inset) * 2) - var(--icon-btn-size) - 16px);
+    z-index: 3;
+  }
+
+  .controlsInfoOpen ~ .rightControls,
+  .controlsInfoOpen ~ .layerControls {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .layerBoxHeader {
+    gap: 0;
+  }
+
+  .layerScale span {
+    width: 16px;
+  }
+}
+
+@keyframes infoMobileModalIn {
+  from {
+    opacity: 0.85;
+    transform: translateY(-8px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

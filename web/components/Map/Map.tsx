@@ -44,9 +44,45 @@ export default function Map() {
   const [adtOpen, setAdtOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
+  const [mobileAttributionOpen, setMobileAttributionOpen] = useState(false);
   const layerCtrlRef = useRef<{ risk?: LayerController; adt?: LayerController }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
   useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    let frame = 0;
+
+    const updateViewportVars = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const vv = window.visualViewport;
+        const height = vv?.height ?? window.innerHeight;
+        const offsetTop = vv?.offsetTop ?? 0;
+        const bottomInset = Math.max(0, window.innerHeight - height - offsetTop);
+
+        root.style.setProperty("--app-visual-height", `${height}px`);
+        root.style.setProperty("--app-visual-top", `${offsetTop}px`);
+        root.style.setProperty("--app-visual-bottom", `${bottomInset}px`);
+        mapRef.current?.resize();
+      });
+    };
+
+    updateViewportVars();
+    window.addEventListener("resize", updateViewportVars);
+    window.visualViewport?.addEventListener("resize", updateViewportVars);
+    window.visualViewport?.addEventListener("scroll", updateViewportVars);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateViewportVars);
+      window.visualViewport?.removeEventListener("resize", updateViewportVars);
+      window.visualViewport?.removeEventListener("scroll", updateViewportVars);
+      root.style.removeProperty("--app-visual-height");
+      root.style.removeProperty("--app-visual-top");
+      root.style.removeProperty("--app-visual-bottom");
+    };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -109,10 +145,24 @@ export default function Map() {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setInfoOpen(false);
+      setMobileAttributionOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleZoomIn = () => mapRef.current?.zoomIn();
   const handleZoomOut = () => mapRef.current?.zoomOut();
   const handleLocate = () => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      window.alert("Platsfunktionen kräver HTTPS. Den fungerar på live-sajten, men inte via lokal http-IP.");
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const map = mapRef.current;
@@ -131,7 +181,15 @@ export default function Map() {
   return (
     <>
       <div ref={containerRef} className={styles.map} />
-      <div className={styles.controls}>
+      {infoOpen && (
+        <button
+          type="button"
+          className={styles.infoModalBackdrop}
+          onClick={() => setInfoOpen(false)}
+          aria-label="Stäng information"
+        />
+      )}
+      <div className={`${styles.controls} ${infoOpen ? styles.controlsInfoOpen : ""}`}>
         <InfoBox open={infoOpen} onToggle={() => setInfoOpen((v) => !v)} />
         <LiveBox count={liveCount} open={liveOpen} onToggle={() => setLiveOpen((v) => !v)} />
         <TimeBox
@@ -169,6 +227,11 @@ export default function Map() {
         >
           <LocationIcon />
         </button>
+        <MobileAttribution
+          open={mobileAttributionOpen}
+          onToggle={() => setMobileAttributionOpen((v) => !v)}
+          onClose={() => setMobileAttributionOpen(false)}
+        />
       </div>
       <div className={styles.layerControls}>
         <LayerBox
@@ -189,6 +252,75 @@ export default function Map() {
           onToggleOpen={() => setAdtOpen((v) => !v)}
           body="Flödes-lagret färgar vägsegment efter ÅDT (årsdygnstrafik) enligt NVDB — antalet fordon per dygn. Mörkare = mer trafik. Synligt vid inzoomning från stadsnivå och uppåt."
         />
+      </div>
+    </>
+  );
+}
+
+function MobileAttribution({
+  open,
+  onToggle,
+  onClose,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      {open && (
+        <button
+          type="button"
+          className={styles.mobileAttributionBackdrop}
+          onClick={onClose}
+          aria-label="Stäng kartinformation"
+        />
+      )}
+      <button
+        type="button"
+        className={`${styles.iconBtn} ${styles.mobileAttributionBtn} ${
+          open ? styles.iconBtnActive : ""
+        }`}
+        onClick={onToggle}
+        aria-label="Visa kartinformation"
+        aria-expanded={open}
+      >
+        <InfoIcon className={styles.mobileAttributionIcon} />
+      </button>
+      <div
+        className={`${styles.mobileAttributionSheet} ${
+          open ? styles.mobileAttributionSheetOpen : ""
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={!open}
+        aria-label="Kartinformation"
+      >
+        <button
+          type="button"
+          className={styles.mobileAttributionClose}
+          onClick={onClose}
+          aria-label="Stäng kartinformation"
+        >
+          <RoadOrXIcon expanded />
+        </button>
+        <div className={styles.mobileAttributionBody}>
+          <p>
+            Kartdata från{" "}
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+              OpenStreetMap
+            </a>
+            ,{" "}
+            <a href="https://openmaptiles.org/" target="_blank" rel="noreferrer">
+              OpenMapTiles
+            </a>{" "}
+            och{" "}
+            <a href="https://openfreemap.org/" target="_blank" rel="noreferrer">
+              OpenFreeMap
+            </a>
+            .
+          </p>
+        </div>
       </div>
     </>
   );
