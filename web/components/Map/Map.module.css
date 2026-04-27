@@ -49,9 +49,7 @@
 }
 
 .infoBoxLogo {
-  font-size: 20px;
-  line-height: 1.15;
-  letter-spacing: -0.05em;
+  composes: type-large from global;
   color: var(--color-red);
 }
 
@@ -68,10 +66,8 @@
 }
 
 .infoBoxIntro {
+  composes: type-large from global;
   margin: 40px 0 0;
-  font-size: 20px;
-  line-height: 1.15;
-  letter-spacing: -0.05em;
   color: var(--color-dark);
   font-weight: 400;
 }
@@ -100,10 +96,8 @@
 }
 
 .infoBoxBody {
+  composes: type-medium from global;
   margin-top: 24px;
-  font-size: 14px;
-  line-height: 1.20;
-  letter-spacing: -0.03em;
   color: var(--color-dark);
 }
 
@@ -116,14 +110,12 @@
 }
 
 .infoBoxSources {
+  composes: type-medium from global;
   margin-top: 16px;
   padding: 16px;
   background: rgba(51, 51, 51, 0.05);
   border-radius: 8px;
   color: rgba(51, 51, 51, 0.6);
-  font-size: 14px;
-  line-height: 1.20;
-  letter-spacing: -0.03em;
 }
 
 .infoBoxSources a {
@@ -191,9 +183,7 @@
 }
 
 .liveBoxLabel {
-  font-size: 10px;
-  line-height: 0.9;
-  letter-spacing: 0.08em;
+  composes: type-small from global;
   text-transform: uppercase;
 }
 
@@ -229,10 +219,8 @@
 }
 
 .liveBoxBody {
+  composes: type-medium from global;
   margin: 16px 0 0;
-  font-size: 14px;
-  line-height: 1.20;
-  letter-spacing: -0.03em;
   /* Ärver färg från .liveBox (vit) eller .liveBoxCalm (mörk). */
 }
 
@@ -276,10 +264,8 @@
 }
 
 .layerBoxLabel {
+  composes: type-small from global;
   flex: 1;
-  font-size: 10px;
-  line-height: 0.9;
-  letter-spacing: 0.08em;
   text-transform: uppercase;
   transition: opacity 200ms ease;
 }
@@ -296,10 +282,39 @@
 }
 
 .layerScale span {
+  position: relative;
   display: block;
   width: 16px;
   height: 10px;
   border-radius: 2px;
+}
+
+/* Custom CSS-tooltip via attr(title) — native title har 1-2s delay innan
+   den visas, vi vill ha omedelbar feedback. Positionerad ovanför swatchen
+   med 8px gap. z-index hög så att tooltip från Flöde-boxens swatches kan
+   gå upp över Risk-boxen ovanför utan att klippas. */
+.layerScale span::after {
+  content: attr(title);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 6px;
+  background: rgba(51, 51, 51, 0.9);
+  color: var(--color-white);
+  border-radius: 4px;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  letter-spacing: var(--type-small-tracking);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 10;
+  transition: opacity 150ms ease;
+}
+
+.layerScale span:hover::after {
+  opacity: 1;
 }
 
 .layerBoxOff .layerScale {
@@ -326,7 +341,7 @@
   width: 24px;
   height: 10px;
   border-radius: 16px;
-  background: #555555;
+  background: var(--color-white);
   transition: background 200ms ease;
 }
 
@@ -337,36 +352,28 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--color-white);
+  background: #555555;
   transition: left 200ms cubic-bezier(0.4, 0, 0.2, 1), background 200ms ease;
 }
 
 .layerBoxOff .layerToggle {
-  background: var(--color-white);
+  background: #555555;
 }
 
 .layerBoxOff .layerToggleKnob {
   left: 1px;
-  background: #555555;
+  background: var(--color-white);
 }
 
 .layerBoxBody {
+  composes: type-medium from global;
   margin: 16px 0 0;
-  font-size: 14px;
-  line-height: 1.20;
-  letter-spacing: -0.03em;
   color: var(--color-white);
 }
 
 /* === Time-window box === */
 
 .timeBox {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
   border-radius: 8px;
   background: rgba(85, 85, 85, 0.3);
   -webkit-backdrop-filter: blur(16px);
@@ -375,32 +382,43 @@
   cursor: pointer;
 }
 
+.timeBoxHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+}
+
 .timeLabel {
-  font-size: 10px;
-  line-height: 0.9;
-  letter-spacing: 0.08em;
+  composes: type-small from global;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.6);
 }
 
+/* Högerzonen — visat värde + pil. Native <select> ligger absolut över bara
+   denna zon (inte hela boxen som tidigare), så klick i vänstra delen
+   expanderar förklaringen istället för att öppna dropdown. */
 .timeSelectGroup {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  pointer-events: none;
+  /* Skjuts åt höger oavsett bredd på label/info-i — paddar inte gap så
+     mycket som behövs annars. */
+  margin-left: auto;
 }
 
 .timeSelectValue {
-  font-size: 10px;
-  line-height: 0.9;
-  letter-spacing: 0.08em;
+  composes: type-small from global;
   text-transform: uppercase;
   color: var(--color-white);
+  pointer-events: none;
 }
 
-/* Native select är osynlig och täcker hela boxen — så att klick var som
-   helst öppnar dropdown. Native select kan inte öppnas programatiskt
-   pålitligt över browsers, så vi låter den ta klicken direkt. */
+.timeSelectGroup .dropdownIcon {
+  pointer-events: none;
+}
+
 .timeSelect {
   position: absolute;
   inset: 0;
@@ -416,6 +434,12 @@
   cursor: pointer;
   outline: none;
   font-family: var(--font-univers);
+}
+
+.timeBoxBody {
+  composes: type-medium from global;
+  margin: 0 16px 16px;
+  color: var(--color-white);
 }
 
 .timeSelect option {

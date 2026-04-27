@@ -42,6 +42,26 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Typografi — endast tre tier används i UI-overlayerna (large/medium/small).
+   Komposita ovanpå via CSS Modules `composes: type-X from global;`. */
+.type-large {
+  font-size: var(--type-large-size);
+  line-height: var(--type-large-line);
+  letter-spacing: var(--type-large-tracking);
+}
+
+.type-medium {
+  font-size: var(--type-medium-size);
+  line-height: var(--type-medium-line);
+  letter-spacing: var(--type-medium-tracking);
+}
+
+.type-small {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  letter-spacing: var(--type-small-tracking);
+}
+
 /* Segment-popup (MapLibre Popup, klickad på NVDB-lager).
    MapLibre renderar popup-DOM utanför Reacts träd så vi kan inte
    använda CSS Modules — klasserna sätts i layers.ts:s renderSegment(). */
@@ -226,6 +246,7 @@ a:hover {
   min-height: 40px !important;
   display: flex !important;
   align-items: center !important;
+  overflow: hidden;
   /* row (default): summary först → vänster, inner sen → höger. Container
      är right-anchored, så när inner blir synlig växer baren vänsterut och
      X-knappen "hoppar" från hörnet till vänster om texten. */
@@ -268,18 +289,41 @@ a:hover {
   background-color: var(--color-white) !important;
 }
 
-details[open].maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+/* OBS: maplibre använder klassen .maplibregl-compact-show som "visually open"
+   — INTE [open]-attributet. (Maplibres _toggleAttribution sätter faktiskt
+   [open] när panelen STÄNGS i compact-läge, omvänd logik.) Klassen är vad
+   som styr inner display:block, så det är den vi ska följa. */
+.maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button {
   -webkit-mask-image: url(/icons/close.svg) !important;
   mask-image: url(/icons/close.svg) !important;
 }
 
-.maplibregl-ctrl-attrib-inner {
-  font-size: 13px;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.6) !important;
-  padding: 0 16px !important;
+/* Animationen: horisontell variant av samma 320ms cubic-bezier som
+   .expander till vänster. Vi tvingar inner till display:block alltid
+   och animerar max-width + padding mellan kollapsat och expanderat
+   istället för att låta maplibre toggla display:none. */
+.maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-inner {
+  display: block !important;
+  max-width: 0;
+  padding: 0;
+  overflow: hidden;
   white-space: nowrap;
   background: transparent !important;
+  /* Medium-tier från tokens.css. Kan inte composa här (globals.css är inte
+     CSS-modul) så vi refererar variablerna direkt. */
+  font-size: var(--type-medium-size);
+  line-height: var(--type-medium-line);
+  letter-spacing: var(--type-medium-tracking);
+  color: rgba(255, 255, 255, 0.6) !important;
+  transition: max-width 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-inner {
+  /* 600px är ett generöst tak för OFM/OMT/OSM-attributionen — kortare text
+     stoppar vid sin natural width, längre text klipps (osannolikt). */
+  max-width: 600px;
+  padding: 0 16px !important;
 }
 
 .maplibregl-ctrl-attrib-inner a {

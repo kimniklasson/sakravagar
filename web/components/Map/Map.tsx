@@ -42,6 +42,7 @@ export default function Map() {
   const [adtOn, setAdtOn] = useState(true);
   const [riskOpen, setRiskOpen] = useState(false);
   const [adtOpen, setAdtOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
   const layerCtrlRef = useRef<{ risk?: LayerController; adt?: LayerController }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
@@ -133,7 +134,12 @@ export default function Map() {
       <div className={styles.controls}>
         <InfoBox open={infoOpen} onToggle={() => setInfoOpen((v) => !v)} />
         <LiveBox count={liveCount} open={liveOpen} onToggle={() => setLiveOpen((v) => !v)} />
-        <TimeBox value={timeWindow} onChange={setTimeWindow} />
+        <TimeBox
+          value={timeWindow}
+          onChange={setTimeWindow}
+          open={timeOpen}
+          onToggleOpen={() => setTimeOpen((v) => !v)}
+        />
       </div>
       <div className={styles.rightControls}>
         <div className={styles.zoomGroup}>
@@ -188,8 +194,25 @@ export default function Map() {
   );
 }
 
-const RISK_SCALE = ["#1a9850", "#66bd63", "#a6d96a", "#fdae61", "#f46d43", "#d7191c"];
-const FLOW_SCALE = ["#2c7bb6", "#74add1", "#abd9e9", "#fee090", "#fdae61", "#d7191c"];
+type ScaleStop = { color: string; label: string };
+
+const RISK_SCALE: ScaleStop[] = [
+  { color: "#1a9850", label: "Mycket låg" },
+  { color: "#66bd63", label: "Låg" },
+  { color: "#a6d96a", label: "Måttlig" },
+  { color: "#fdae61", label: "Förhöjd" },
+  { color: "#f46d43", label: "Hög" },
+  { color: "#d7191c", label: "Mycket hög" },
+];
+
+const FLOW_SCALE: ScaleStop[] = [
+  { color: "#2c7bb6", label: "Mycket lågt" },
+  { color: "#74add1", label: "Lågt" },
+  { color: "#abd9e9", label: "Måttligt" },
+  { color: "#fee090", label: "Förhöjt" },
+  { color: "#fdae61", label: "Högt" },
+  { color: "#d7191c", label: "Mycket högt" },
+];
 
 function LayerBox({
   label,
@@ -201,7 +224,7 @@ function LayerBox({
   body,
 }: {
   label: string;
-  colors: string[];
+  colors: ScaleStop[];
   on: boolean;
   open: boolean;
   onToggleLayer: () => void;
@@ -220,8 +243,8 @@ function LayerBox({
         <span className={styles.layerBoxLabel}>{label}</span>
         <div className={styles.layerBoxFiller} />
         <div className={styles.layerScale} aria-hidden="true">
-          {colors.map((c) => (
-            <span key={c} style={{ background: c }} />
+          {colors.map((s) => (
+            <span key={s.color} title={s.label} style={{ background: s.color }} />
           ))}
         </div>
         <button
@@ -390,33 +413,54 @@ const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
 function TimeBox({
   value,
   onChange,
+  open,
+  onToggleOpen,
 }: {
   value: TimeWindow;
   onChange: (v: TimeWindow) => void;
+  open: boolean;
+  onToggleOpen: () => void;
 }) {
-  // Native <select> placerad absolut över hela boxen med opacity 0 — så att
-  // klick var som helst i boxen öppnar dropdown (en native select kan inte
-  // öppnas programatiskt på ett pålitligt sätt). Synlig text + ikon ritas
-  // separat under.
+  // Hela boxen togglar expand vid klick. Höger-zonen (värde + pil) har
+  // stopPropagation så att klick där öppnar native dropdown utan att också
+  // expandera/kollapsa boxen — samma mönster som risk/flöde-toggleknappen.
   return (
-    <div className={styles.timeBox}>
-      <span className={styles.timeLabel}>Tidsfönster</span>
-      <div className={styles.timeSelectGroup}>
-        <span className={styles.timeSelectValue}>{TIME_WINDOW_LABELS[value]}</span>
-        <DropdownIcon />
+    <div
+      className={styles.timeBox}
+      onClick={onToggleOpen}
+      role="button"
+      aria-expanded={open}
+    >
+      <div className={styles.timeBoxHeader}>
+        <InfoIcon />
+        <span className={styles.timeLabel}>Tidsfönster</span>
+        <div
+          className={styles.timeSelectGroup}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className={styles.timeSelectValue}>{TIME_WINDOW_LABELS[value]}</span>
+          <DropdownIcon />
+          <select
+            className={styles.timeSelect}
+            value={value}
+            onChange={(e) => onChange(e.target.value as TimeWindow)}
+            aria-label="Tidsfönster"
+          >
+            {(Object.entries(TIME_WINDOW_LABELS) as [TimeWindow, string][]).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
-      <select
-        className={styles.timeSelect}
-        value={value}
-        onChange={(e) => onChange(e.target.value as TimeWindow)}
-        aria-label="Tidsfönster"
-      >
-        {(Object.entries(TIME_WINDOW_LABELS) as [TimeWindow, string][]).map(([v, l]) => (
-          <option key={v} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
+      <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
+        <div className={styles.expanderInner}>
+          <p className={styles.timeBoxBody}>
+            Tidsfönstret styr vilka olyckor som visas på kartan — både i värmekartan och som enskilda punkter när du zoomar in. Risk-färgningen baseras alltid på all data oavsett val här.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

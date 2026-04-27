@@ -35,4 +35,19 @@
   --font-size-sm: 13px;
   --font-size-base: 15px;
   --font-size-lg: 18px;
+
+  /* Typografi-skala — endast tre nivåer används i UI-overlayerna.
+     Allt övrigt (färg/padding/margin/uppercase/etc) sätts per komponent
+     ovanpå dessa via .type-* utility-klasser i globals.css. */
+  --type-large-size: 20px;
+  --type-large-line: 1.15;
+  --type-large-tracking: -0.05em;
+
+  --type-medium-size: 14px;
+  --type-medium-line: 1.20;
+  --type-medium-tracking: -0.03em;
+
+  --type-small-size: 10px;
+  --type-small-line: 0.9;
+  --type-small-tracking: 0.08em;
 }
