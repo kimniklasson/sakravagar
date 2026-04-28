@@ -365,11 +365,13 @@ function createBboxLoader(
   opts: {
     minZoom: number;
     initialEnabled?: boolean;
+    bboxPadding?: number;
+    maxBboxAreaDeg2?: number;
     fetchBbox: (b: Bbox) => Promise<void>;
   },
 ): BboxLoader {
-  const BBOX_PADDING = 0.3;
-  const MAX_BBOX_AREA_DEG2 = 8;
+  const BBOX_PADDING = opts.bboxPadding ?? 0.3;
+  const MAX_BBOX_AREA_DEG2 = opts.maxBboxAreaDeg2 ?? 8;
 
   let cachedBbox: Bbox | null = null;
   let inFlight = false;
@@ -602,15 +604,18 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
           NVDB_MIN_ZOOM, 0.35,
           NVDB_MIN_ZOOM + 1, 0.75,
         ],
-        "line-dasharray": [1.6, 1.1],
       },
     },
     beforeId,
   );
 
+  const featureCache = new Map<string, GeoJSON.Feature<GeoJSON.LineString | GeoJSON.MultiLineString>>();
+
   const loader = createBboxLoader(map, {
     minZoom: NVDB_MIN_ZOOM,
     initialEnabled: false,
+    bboxPadding: 0.8,
+    maxBboxAreaDeg2: 24,
     fetchBbox: async (padded) => {
       const res = await fetch(`/api/large-roads?bbox=${bboxToParam(padded)}`);
       if (!res.ok) {
@@ -618,9 +623,8 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
         return;
       }
       const { segments } = (await res.json()) as { segments: LargeRoadSegment[] };
-      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString> = {
-        type: "FeatureCollection",
-        features: segments.map((s) => ({
+      for (const s of segments) {
+        featureCache.set(`${s.class}:${s.fid}`, {
           type: "Feature",
           geometry: s.geometry,
           properties: {
@@ -632,7 +636,12 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
             road_type: s.road_type,
             length_m: s.length_m,
           },
-        })),
+        });
+      }
+
+      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString> = {
+        type: "FeatureCollection",
+        features: Array.from(featureCache.values()),
       };
       const src = map.getSource(LARGE_ROADS_SOURCE_ID) as GeoJSONSource | undefined;
       src?.setData(fc);
