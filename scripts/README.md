@@ -48,3 +48,30 @@ Lager som kommer in blir typiskt:
 ### Varför en engångs-import och inte polling?
 
 ÅDT uppdateras årligen. Vägnätet ändras sällan. Ingen poäng att polla — vi kör `import-nvdb.sh` en gång per år när nya mätdata släppts.
+
+## `import-large-roads.sh` — importera trygghetsfiltret "Stora vägar"
+
+Importerar bara de rader som behövs från Lastkajen-paketet `sakravagar_filter_*.gpkg`:
+
+- `Hastighetsgräns` där hastighet är 90 km/h eller högre
+- `Vägtyp` där typen är `Motorväg`, `Motortrafikled`, `Motortrafikled mötesfri`, `4-fältsväg` eller `Vanlig väg mötesfri`
+
+Detta undviker att hela hastighetslagret på ~2,2 miljoner rader hamnar i Supabase.
+
+```sh
+set -a && . .env && set +a
+./scripts/import-large-roads.sh /Users/kimniklasson/Documents/sakravagar_filter_Geopackage_253085/sakravagar_filter_253085.gpkg
+```
+
+Efter import:
+
+```sh
+/opt/homebrew/opt/libpq/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/0019_large_roads_filter.sql
+```
+
+Skapar:
+
+- `nvdb_large_roads_speed`
+- `nvdb_large_roads_type`
+- `large_roads_public`
+- RPC `large_roads_in_bbox(...)`

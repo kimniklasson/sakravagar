@@ -2,6 +2,18 @@
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
 
+## Senaste ändring — Lastkajen-filter importerat för "Stora vägar" (2026-04-28)
+
+- ✅ **GeoPackage mottaget:** `/Users/kimniklasson/Documents/sakravagar_filter_Geopackage_253085/sakravagar_filter_253085.gpkg`, 1,6 GB, EPSG:3006. Innehåller exakt fyra lager: `Hastighetsgräns`, `Motortrafikled`, `Motorväg`, `Vägtyp`.
+- ✅ **Filstorleken hanterad med smal import:** hela hastighetslagret har 2 209 950 rader, men bara 27 881 har `Hogsta_tillatna_hastighet >= 90`. Vägtyp-filtret ger 15 967 rader (`Motorväg`, `Motortrafikled`, `Motortrafikled mötesfri`, `4-fältsväg`, `Vanlig väg mötesfri`). Vi importerar alltså cirka 44k features, inte miljontals.
+- ✅ **GDAL installerat lokalt:** `brew install gdal` kördes eftersom `ogr2ogr` saknades.
+- ✅ **Importscript tillagt:** `scripts/import-large-roads.sh` importerar bara `nvdb_large_roads_speed` och `nvdb_large_roads_type` via `ogr2ogr` + `DATABASE_URL`.
+- ✅ **Prod-DB importerad:** `nvdb_large_roads_speed` = 27 881 rader, `nvdb_large_roads_type` = 15 967 rader, `large_roads_public` = 43 848 rader.
+- ✅ **Migration 0019 applicerad i Supabase:** `db/migrations/0019_large_roads_filter.sql` skapar index, `large_roads_public` och RPC:n `large_roads_in_bbox(min_lng,min_lat,max_lng,max_lat)`. Sanitycheck mot Sverige-bbox gav: `high_speed` 27 881, `major_road` 6 335, `motor_traffic_road` 1 160, `motorway` 8 472.
+- ✅ **Frontend kopplad till NVDB-data:** ny `/api/large-roads` route och `addLargeRoadsLayer` är nu bbox-driven mot RPC:n. Lagret är fortsatt default av, men när användaren slår på **Stora vägar** hämtas Sverige-begränsad NVDB-data i stället för OpenMapTiles-approxen.
+- ✅ **Verifiering:** `tsc --noEmit -p web/tsconfig.json`, `tsc --noEmit -p scraper/tsconfig.json`, och `next build` passerar. HTTP-test via lokal `curl` gick inte i Codex-sandboxen trots att devserver startade, men DB-RPC och build är verifierade.
+- ⏭️ **Nästa steg:** commit + push frontend/API/migration/importscript. Ingen ny Edge Function-deploy behövs för detta steg.
+
 ## Senaste ändring — aktuella störningar som separat live-overlay (2026-04-28)
 
 - ✅ **Separat dataspår:** ny migration `db/migrations/0018_live_disturbances.sql` skapar `disturbances` + `disturbances_public`. Detta hålls avsiktligt skilt från `events`, så vägarbeten/köer/hinder inte påverkar olyckshistorik, snapping eller riskberäkning.

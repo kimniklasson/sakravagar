@@ -306,7 +306,7 @@ export default function Map() {
           open={largeRoadsOpen}
           onToggleLayer={() => setLargeRoadsOn((v) => !v)}
           onToggleOpen={() => setLargeRoadsOpen((v) => !v)}
-          body="Trygghetsfilter för dig som vill undvika motorvägar, motortrafikleder och större huvudvägar. Första versionen använder kartans vägklass; exakt hastighetsgräns kan kopplas på när NVDB Hastighetsgräns importeras."
+          body="Trygghetsfilter för dig som vill undvika motorvägar, motortrafikleder, mötesfria större vägar och vägar med hastighetsgräns 90 km/h eller högre. Bygger på NVDB-data från Lastkajen."
         />
       </div>
     </>
@@ -403,7 +403,8 @@ const FLOW_SCALE: ScaleStop[] = [
 ];
 
 const LARGE_ROADS_SCALE: ScaleStop[] = [
-  { color: "#A9A59D", label: "Större huvudväg" },
+  { color: "#8F8B84", label: "90+ väg" },
+  { color: "#A9A59D", label: "Större/mötesfri väg" },
   { color: "#C8C3B9", label: "Motortrafikled" },
   { color: "#E6E0D4", label: "Motorväg" },
 ];

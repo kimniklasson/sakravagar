@@ -6,6 +6,7 @@ import maplibregl, {
 import type { SegmentDetail } from "@/app/api/segment/route";
 import type { EventPoint } from "@/app/api/events/route";
 import type { DisturbancePoint } from "@/app/api/disturbances/route";
+import type { LargeRoadSegment } from "@/app/api/large-roads/route";
 
 type AdtSegment = {
   fid: number;
@@ -50,6 +51,7 @@ const ADT_HIT_LAYER_ID = "adt-lines-hit";
 const RISK_SOURCE_ID = "risk";
 const RISK_LAYER_ID = "risk-lines";
 const RISK_HIT_LAYER_ID = "risk-lines-hit";
+const LARGE_ROADS_SOURCE_ID = "large-roads";
 const LARGE_ROADS_LAYER_ID = "large-roads-lines";
 const DISTURBANCE_SOURCE_ID = "disturbances";
 const DISTURBANCE_LAYER_ID = "disturbances-points";
@@ -362,6 +364,7 @@ function createBboxLoader(
   map: MapLibreMap,
   opts: {
     minZoom: number;
+    initialEnabled?: boolean;
     fetchBbox: (b: Bbox) => Promise<void>;
   },
 ): BboxLoader {
@@ -371,7 +374,7 @@ function createBboxLoader(
   let cachedBbox: Bbox | null = null;
   let inFlight = false;
   let needsRefresh = false;
-  let enabled = true;
+  let enabled = opts.initialEnabled ?? true;
 
   const contains = (outer: Bbox, inner: Bbox) =>
     outer.west <= inner.west &&
@@ -548,16 +551,18 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// Första versionen av trygghetsfiltret "stora/snabba vägar".
-//
-// Vi har ännu ingen importerad NVDB-tabell för exakt Hastighetsgräns, så
-// lagret använder baskartans OpenMapTiles-vägklass som approximation:
-// motorway/trunk/primary. När NVDB Hastighetsgräns importeras kan samma UI
-// och controller byta datakälla till ett bbox-drivet lager med speed_limit.
+// Trygghetsfiltret "stora/snabba vägar".
+// Bbox-drivet NVDB-lager från Lastkajen: hastighetsgräns 90+ och utvalda
+// Vägtyp-klasser. Lagret är default av i UI:t, så loadern startar pausad.
 export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
-  if (map.getLayer(LARGE_ROADS_LAYER_ID)) {
+  if (map.getSource(LARGE_ROADS_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
+
+  map.addSource(LARGE_ROADS_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
 
   const beforeId = map.getLayer(RISK_LAYER_ID)
     ? RISK_LAYER_ID
@@ -569,39 +574,33 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
     {
       id: LARGE_ROADS_LAYER_ID,
       type: "line",
-      source: "openmaptiles",
-      "source-layer": "transportation",
-      minzoom: 5,
-      filter: [
-        "all",
-        ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
-        ["match", ["get", "class"], ["motorway", "trunk", "primary"], true, false],
-      ],
+      source: LARGE_ROADS_SOURCE_ID,
+      minzoom: NVDB_MIN_ZOOM,
       layout: {
         "line-cap": "round",
         "line-join": "round",
         visibility: "visible",
+        "line-sort-key": ["get", "rank"],
       },
       paint: {
         "line-color": [
           "match", ["get", "class"],
           "motorway", "#E6E0D4",
-          "trunk", "#C8C3B9",
-          "primary", "#A9A59D",
-          "#E6E0D4",
+          "motor_traffic_road", "#C8C3B9",
+          "major_road", "#A9A59D",
+          "high_speed", "#8F8B84",
+          "#A9A59D",
         ],
         "line-width": [
           "interpolate", ["linear"], ["zoom"],
-          5, 1.5,
-          9, 3,
-          13, 6,
-          16, 10,
+          8, 1.5,
+          12, 4,
+          16, 8,
         ],
         "line-opacity": [
           "interpolate", ["linear"], ["zoom"],
-          5, 0.25,
-          8, 0.55,
-          12, 0.75,
+          NVDB_MIN_ZOOM, 0.35,
+          NVDB_MIN_ZOOM + 1, 0.75,
         ],
         "line-dasharray": [1.6, 1.1],
       },
@@ -609,11 +608,43 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
     beforeId,
   );
 
+  const loader = createBboxLoader(map, {
+    minZoom: NVDB_MIN_ZOOM,
+    initialEnabled: false,
+    fetchBbox: async (padded) => {
+      const res = await fetch(`/api/large-roads?bbox=${bboxToParam(padded)}`);
+      if (!res.ok) {
+        console.error("failed to fetch large roads", await res.text());
+        return;
+      }
+      const { segments } = (await res.json()) as { segments: LargeRoadSegment[] };
+      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString> = {
+        type: "FeatureCollection",
+        features: segments.map((s) => ({
+          type: "Feature",
+          geometry: s.geometry,
+          properties: {
+            fid: s.fid,
+            element_id: s.element_id,
+            class: s.class,
+            rank: s.rank,
+            speed_limit: s.speed_limit,
+            road_type: s.road_type,
+            length_m: s.length_m,
+          },
+        })),
+      };
+      const src = map.getSource(LARGE_ROADS_SOURCE_ID) as GeoJSONSource | undefined;
+      src?.setData(fc);
+    },
+  });
+
   return {
     setVisible: (v) => {
       if (map.getLayer(LARGE_ROADS_LAYER_ID)) {
         map.setLayoutProperty(LARGE_ROADS_LAYER_ID, "visibility", v ? "visible" : "none");
       }
+      loader.setEnabled(v);
     },
   };
 }
