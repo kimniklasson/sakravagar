@@ -11,6 +11,7 @@ const DeviationSchema = z
     IconId: z.string().optional(),
     Message: z.string().optional(),
     MessageType: z.string().optional(),
+    SeverityText: z.string().optional(),
     RoadNumber: z.string().optional(),
     CountyNo: z.array(z.number()).optional(),
     ModifiedTime: z.string().optional(),
@@ -41,24 +42,27 @@ const ResponseSchema = z.object({
 
 export type Deviation = z.infer<typeof DeviationSchema>;
 
-function buildQuery(apiKey: string): string {
-  // MessageType "Olycka" filtrerar ner till olyckshändelser.
-  // Verifiera i praktiken att fältvärdet är stavat så — annars justera.
+function buildQuery(apiKey: string, messageType?: string): string {
+  const filter = messageType
+    ? `
+    <FILTER>
+      <EQ name="Deviation.MessageType" value="${messageType}" />
+    </FILTER>`
+    : "";
+
   return `<REQUEST>
   <LOGIN authenticationkey="${apiKey}" />
   <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="1000">
-    <FILTER>
-      <EQ name="Deviation.MessageType" value="Olycka" />
-    </FILTER>
+    ${filter}
   </QUERY>
 </REQUEST>`;
 }
 
-export async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
+async function fetchSituationDeviations(apiKey: string, messageType?: string): Promise<Deviation[]> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "text/xml" },
-    body: buildQuery(apiKey),
+    body: buildQuery(apiKey, messageType),
   });
 
   if (!res.ok) {
@@ -70,11 +74,21 @@ export async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
   const parsed = ResponseSchema.parse(json);
 
   const situations = parsed.RESPONSE.RESULT.flatMap((r) => r.Situation ?? []);
+  return situations.flatMap((s) => s.Deviation);
+}
+
+export async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
+  const deviations = await fetchSituationDeviations(apiKey, "Olycka");
   // API:ets filter matchar hela Situationer — andra Deviations i samma Situation
   // (t.ex. Trafikmeddelande) följer med. Filtrera ner till rena olyckor här.
-  return situations
-    .flatMap((s) => s.Deviation)
-    .filter((d) => d.MessageType === "Olycka");
+  return deviations.filter((d) => d.MessageType === "Olycka");
+}
+
+export async function fetchDisturbances(apiKey: string): Promise<Deviation[]> {
+  const deviations = await fetchSituationDeviations(apiKey);
+  // Störningar är driftinfo, inte historisk olycksdata. Vi sparar allt med
+  // koordinat som inte är MessageType=Olycka i separat tabell.
+  return deviations.filter((d) => d.MessageType !== "Olycka");
 }
 
 // WGS84 i Trafikverkets svar är en WKT-sträng: "POINT (15.123 58.456)".

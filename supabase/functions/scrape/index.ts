@@ -18,6 +18,7 @@ type Deviation = {
   IconId?: string;
   Message?: string;
   MessageType?: string;
+  SeverityText?: string;
   RoadNumber?: string;
   CountyNo?: number[];
   ModifiedTime?: string;
@@ -36,22 +37,37 @@ type UpsertRow = {
   raw: unknown;
 };
 
-function buildQuery(apiKey: string): string {
+type DisturbanceUpsertRow = UpsertRow & {
+  message_type: string | null;
+  severity: string | null;
+};
+
+function normalizeSecret(value: string | null): string {
+  const trimmed = (value ?? "").trim();
+  return trimmed.startsWith("Bearer ") ? trimmed.slice("Bearer ".length).trim() : trimmed;
+}
+
+function buildQuery(apiKey: string, messageType?: string): string {
+  const filter = messageType
+    ? `
+    <FILTER>
+      <EQ name="Deviation.MessageType" value="${messageType}" />
+    </FILTER>`
+    : "";
+
   return `<REQUEST>
   <LOGIN authenticationkey="${apiKey}" />
   <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="1000">
-    <FILTER>
-      <EQ name="Deviation.MessageType" value="Olycka" />
-    </FILTER>
+    ${filter}
   </QUERY>
 </REQUEST>`;
 }
 
-async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
+async function fetchSituationDeviations(apiKey: string, messageType?: string): Promise<Deviation[]> {
   const res = await fetch(TRAFIKVERKET_URL, {
     method: "POST",
     headers: { "Content-Type": "text/xml" },
-    body: buildQuery(apiKey),
+    body: buildQuery(apiKey, messageType),
   });
   if (!res.ok) {
     throw new Error(`Trafikverket API ${res.status}: ${await res.text()}`);
@@ -60,9 +76,17 @@ async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
   const results: Array<{ Situation?: Array<{ Deviation?: Deviation[] }> }> =
     json?.RESPONSE?.RESULT ?? [];
   const situations = results.flatMap((r) => r.Situation ?? []);
-  return situations
-    .flatMap((s) => s.Deviation ?? [])
-    .filter((d) => d.MessageType === "Olycka");
+  return situations.flatMap((s) => s.Deviation ?? []);
+}
+
+async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
+  const deviations = await fetchSituationDeviations(apiKey, "Olycka");
+  return deviations.filter((d) => d.MessageType === "Olycka");
+}
+
+async function fetchDisturbances(apiKey: string): Promise<Deviation[]> {
+  const deviations = await fetchSituationDeviations(apiKey);
+  return deviations.filter((d) => d.MessageType !== "Olycka");
 }
 
 function parseWgs84(wkt: string | undefined): { lng: number; lat: number } | null {
@@ -73,6 +97,16 @@ function parseWgs84(wkt: string | undefined): { lng: number; lat: number } | nul
   const lat = Number(m[2]);
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
   return { lng, lat };
+}
+
+function disturbanceToRow(d: Deviation, now: string): DisturbanceUpsertRow | null {
+  const base = deviationToRow(d, now);
+  if (!base) return null;
+  return {
+    ...base,
+    message_type: d.MessageType ?? null,
+    severity: d.SeverityText ?? null,
+  };
 }
 
 function deviationToRow(d: Deviation, now: string): UpsertRow | null {
@@ -93,13 +127,15 @@ function deviationToRow(d: Deviation, now: string): UpsertRow | null {
 }
 
 Deno.serve(async (req: Request) => {
-  const sharedSecret = Deno.env.get("SCRAPE_SHARED_SECRET");
+  const sharedSecret = normalizeSecret(Deno.env.get("SCRAPE_SHARED_SECRET"));
   if (!sharedSecret) {
     console.error("[scrape] SCRAPE_SHARED_SECRET not configured");
     return new Response("server misconfigured", { status: 500 });
   }
   const auth = req.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${sharedSecret}`) {
+  const bearerSecret = normalizeSecret(auth);
+  const headerSecret = normalizeSecret(req.headers.get("x-scrape-secret"));
+  if (bearerSecret !== sharedSecret && headerSecret !== sharedSecret) {
     return new Response("unauthorized", { status: 401 });
   }
 
@@ -114,10 +150,16 @@ Deno.serve(async (req: Request) => {
   const now = new Date().toISOString();
 
   try {
-    const deviations = await fetchDeviations(apiKey);
+    const [deviations, disturbances] = await Promise.all([
+      fetchDeviations(apiKey),
+      fetchDisturbances(apiKey),
+    ]);
     const rows = deviations
       .map((d) => deviationToRow(d, now))
       .filter((r): r is UpsertRow => r !== null);
+    const disturbanceRows = disturbances
+      .map((d) => disturbanceToRow(d, now))
+      .filter((r): r is DisturbanceUpsertRow => r !== null);
 
     const client = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
@@ -132,11 +174,23 @@ Deno.serve(async (req: Request) => {
       upserted = rows.length;
     }
 
+    let disturbancesUpserted = 0;
+    if (disturbanceRows.length > 0) {
+      const { error } = await client
+        .from("disturbances")
+        .upsert(disturbanceRows, { onConflict: "id", ignoreDuplicates: false });
+      if (error) throw new Error(`disturbance upsert: ${error.message}`);
+      disturbancesUpserted = disturbanceRows.length;
+    }
+
     const summary = {
       ok: true,
       fetched: deviations.length,
       upserted,
       skipped_no_coord: deviations.length - rows.length,
+      disturbances_fetched: disturbances.length,
+      disturbances_upserted: disturbancesUpserted,
+      disturbances_skipped_no_coord: disturbances.length - disturbanceRows.length,
       elapsed_ms: Date.now() - start,
     };
     console.log("[scrape]", summary);

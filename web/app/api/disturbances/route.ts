@@ -1,0 +1,89 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const ACTIVE_WINDOW_MS = 90 * 60 * 1000;
+
+export type DisturbanceCategory = "roadwork" | "traffic" | "obstacle" | "other";
+
+export type DisturbancePoint = {
+  id: string;
+  lng: number;
+  lat: number;
+  icon_id: string | null;
+  message_type: string | null;
+  category: DisturbanceCategory;
+  road_number: string | null;
+  message: string | null;
+  severity: string | null;
+  first_seen: string;
+  last_seen: string;
+};
+
+function categoryFromMessageType(messageType: string | null): DisturbanceCategory {
+  const t = (messageType ?? "").toLowerCase();
+  if (t.includes("vägarbete") || t.includes("roadwork")) return "roadwork";
+  if (t.includes("kö") || t.includes("trafik") || t.includes("queue")) return "traffic";
+  if (t.includes("hinder") || t.includes("stopp") || t.includes("obstacle")) return "obstacle";
+  return "other";
+}
+
+export async function GET(req: Request) {
+  if (!url || !anon) {
+    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const bbox = searchParams.get("bbox"); // "minLng,minLat,maxLng,maxLat"
+  const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
+
+  const client = createClient(url, anon, { auth: { persistSession: false } });
+
+  let query = client
+    .from("disturbances_public")
+    .select("id, lng, lat, icon_id, message_type, road_number, message, severity, first_seen, last_seen")
+    .gte("last_seen", activeSince)
+    .order("last_seen", { ascending: false })
+    .limit(2000);
+
+  if (bbox) {
+    const nums = bbox.split(",").map(Number);
+    if (nums.length === 4 && nums.every(Number.isFinite)) {
+      const [minLng, minLat, maxLng, maxLat] = nums as [number, number, number, number];
+      query = query
+        .gte("lng", minLng)
+        .lte("lng", maxLng)
+        .gte("lat", minLat)
+        .lte("lat", maxLat);
+    }
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const points: DisturbancePoint[] = (data ?? []).map((row) => {
+    const messageType = (row.message_type ?? null) as string | null;
+    return {
+      id: row.id as string,
+      lng: row.lng as number,
+      lat: row.lat as number,
+      icon_id: (row.icon_id ?? null) as string | null,
+      message_type: messageType,
+      category: categoryFromMessageType(messageType),
+      road_number: (row.road_number ?? null) as string | null,
+      message: (row.message ?? null) as string | null,
+      severity: (row.severity ?? null) as string | null,
+      first_seen: row.first_seen as string,
+      last_seen: row.last_seen as string,
+    };
+  });
+
+  return NextResponse.json({ points });
+}

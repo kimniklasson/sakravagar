@@ -197,6 +197,8 @@
 .liveBoxLabel {
   composes: type-small from global;
   text-transform: uppercase;
+  flex: 1;
+  min-width: 0;
 }
 
 .liveDot {

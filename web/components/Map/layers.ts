@@ -5,6 +5,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import type { SegmentDetail } from "@/app/api/segment/route";
 import type { EventPoint } from "@/app/api/events/route";
+import type { DisturbancePoint } from "@/app/api/disturbances/route";
 
 type AdtSegment = {
   fid: number;
@@ -49,6 +50,10 @@ const ADT_HIT_LAYER_ID = "adt-lines-hit";
 const RISK_SOURCE_ID = "risk";
 const RISK_LAYER_ID = "risk-lines";
 const RISK_HIT_LAYER_ID = "risk-lines-hit";
+const LARGE_ROADS_LAYER_ID = "large-roads-lines";
+const DISTURBANCE_SOURCE_ID = "disturbances";
+const DISTURBANCE_LAYER_ID = "disturbances-points";
+const DISTURBANCE_HIT_LAYER_ID = "disturbances-hit-target";
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase (för många segment). Zoom 9 är ~2°
@@ -223,6 +228,102 @@ export async function addEventsLayer(
   return { liveCount };
 }
 
+export function addDisturbancesLayer(map: MapLibreMap): LayerController {
+  if (map.getSource(DISTURBANCE_SOURCE_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  map.addSource(DISTURBANCE_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(LIVE_HALO_LAYER_ID)
+    ? LIVE_HALO_LAYER_ID
+    : map.getLayer(LIVE_CORE_LAYER_ID)
+      ? LIVE_CORE_LAYER_ID
+      : undefined;
+
+  map.addLayer(
+    {
+      id: DISTURBANCE_LAYER_ID,
+      type: "circle",
+      source: DISTURBANCE_SOURCE_ID,
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 6, 14, 9],
+        "circle-color": [
+          "match", ["get", "category"],
+          "roadwork", "#FFD36E",
+          "traffic", "#FF8A4A",
+          "obstacle", "#E6E0D4",
+          "#9AD7FF",
+        ],
+        "circle-stroke-color": "#222222",
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 12, 1.5],
+        "circle-opacity": 0.9,
+      },
+    },
+    beforeId,
+  );
+
+  map.addLayer(
+    {
+      id: DISTURBANCE_HIT_LAYER_ID,
+      type: "circle",
+      source: DISTURBANCE_SOURCE_ID,
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 12, 12, 18, 16, 24],
+        "circle-color": "#000000",
+        "circle-opacity": 0,
+      },
+    },
+    beforeId,
+  );
+
+  return {
+    setVisible: (v) => {
+      if (map.getLayer(DISTURBANCE_LAYER_ID)) {
+        map.setLayoutProperty(DISTURBANCE_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      if (map.getLayer(DISTURBANCE_HIT_LAYER_ID)) {
+        map.setLayoutProperty(DISTURBANCE_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+    },
+  };
+}
+
+export async function refreshDisturbancesLayer(map: MapLibreMap): Promise<{ disturbanceCount: number }> {
+  const res = await fetch("/api/disturbances");
+  if (!res.ok) {
+    console.error("failed to fetch disturbances", await res.text());
+    return { disturbanceCount: 0 };
+  }
+
+  const { points } = (await res.json()) as { points: DisturbancePoint[] };
+  const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+    type: "FeatureCollection",
+    features: points.map((p) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [p.lng, p.lat] },
+      properties: {
+        id: p.id,
+        icon_id: p.icon_id,
+        message_type: p.message_type,
+        category: p.category,
+        road_number: p.road_number,
+        message: p.message,
+        severity: p.severity,
+        first_seen: p.first_seen,
+        last_seen: p.last_seen,
+      },
+    })),
+  };
+
+  const src = map.getSource(DISTURBANCE_SOURCE_ID) as GeoJSONSource | undefined;
+  src?.setData(geojson);
+  return { disturbanceCount: points.length };
+}
+
 // rAF-loop som pulserar halo-lagret. Klassiskt "radar-ping": radien expanderar
 // och opaciteten tonas ut, sen reset. Loopen avbryter sig själv när lagret
 // inte längre finns på kartan (efter map.remove()).
@@ -347,7 +448,9 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     data: { type: "FeatureCollection", features: [] },
   });
 
-  const beforeId = map.getLayer(RISK_LAYER_ID)
+  const beforeId = map.getLayer(ADT_LAYER_ID)
+    ? ADT_LAYER_ID
+    : map.getLayer(RISK_LAYER_ID)
     ? RISK_LAYER_ID
     : map.getLayer(HEATMAP_LAYER_ID)
       ? HEATMAP_LAYER_ID
@@ -441,6 +544,76 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
         map.setLayoutProperty(ADT_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
       }
       loader.setEnabled(v);
+    },
+  };
+}
+
+// Första versionen av trygghetsfiltret "stora/snabba vägar".
+//
+// Vi har ännu ingen importerad NVDB-tabell för exakt Hastighetsgräns, så
+// lagret använder baskartans OpenMapTiles-vägklass som approximation:
+// motorway/trunk/primary. När NVDB Hastighetsgräns importeras kan samma UI
+// och controller byta datakälla till ett bbox-drivet lager med speed_limit.
+export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
+  if (map.getLayer(LARGE_ROADS_LAYER_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  const beforeId = map.getLayer(RISK_LAYER_ID)
+    ? RISK_LAYER_ID
+    : map.getLayer(HEATMAP_LAYER_ID)
+      ? HEATMAP_LAYER_ID
+      : undefined;
+
+  map.addLayer(
+    {
+      id: LARGE_ROADS_LAYER_ID,
+      type: "line",
+      source: "openmaptiles",
+      "source-layer": "transportation",
+      minzoom: 5,
+      filter: [
+        "all",
+        ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+        ["match", ["get", "class"], ["motorway", "trunk", "primary"], true, false],
+      ],
+      layout: {
+        "line-cap": "round",
+        "line-join": "round",
+        visibility: "visible",
+      },
+      paint: {
+        "line-color": [
+          "match", ["get", "class"],
+          "motorway", "#E6E0D4",
+          "trunk", "#C8C3B9",
+          "primary", "#A9A59D",
+          "#E6E0D4",
+        ],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          5, 1.5,
+          9, 3,
+          13, 6,
+          16, 10,
+        ],
+        "line-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          5, 0.25,
+          8, 0.55,
+          12, 0.75,
+        ],
+        "line-dasharray": [1.6, 1.1],
+      },
+    },
+    beforeId,
+  );
+
+  return {
+    setVisible: (v) => {
+      if (map.getLayer(LARGE_ROADS_LAYER_ID)) {
+        map.setLayoutProperty(LARGE_ROADS_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
     },
   };
 }
@@ -562,9 +735,9 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// Click → popup för segment och events.
+// Click → popup för segment, olyckor och aktuella störningar.
 //
-// Prioritetsordning vid klick: events-circles → risk → adt.
+// Prioritetsordning vid klick: olyckor → störningar → risk → adt.
 // Eventcirklarna ligger överst i render-stacken så ett klick rakt på en
 // punkt vinner; klick lite vid sidan om faller igenom till segmentet.
 // Osynliga lager filtreras automatiskt bort eftersom queryRenderedFeatures
@@ -580,11 +753,12 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 // godtyckliga strängar.
 export function addPopupHandler(map: MapLibreMap): void {
   const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID, ADT_HIT_LAYER_ID, ADT_LAYER_ID];
+  const disturbanceLayerIds = [DISTURBANCE_LAYER_ID, DISTURBANCE_HIT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ — klick går
   // igenom till core eller faller till segment). Hit-target sist: fångar
   // klick på historiska events vid låg zoom där CIRCLE_LAYER_ID inte renderas.
   const eventLayerIds = [LIVE_CORE_LAYER_ID, CIRCLE_LAYER_ID, HIT_TARGET_LAYER_ID];
-  const allLayerIds = [...eventLayerIds, ...segmentLayerIds];
+  const allLayerIds = [...eventLayerIds, ...disturbanceLayerIds, ...segmentLayerIds];
 
   for (const id of allLayerIds) {
     map.on("mouseenter", id, () => {
@@ -599,11 +773,17 @@ export function addPopupHandler(map: MapLibreMap): void {
     const features = map.queryRenderedFeatures(e.point, { layers: allLayerIds });
     if (!features.length) return;
 
-    // Eventcirkel vinner alltid om en sådan ligger under klick-punkten,
-    // sen segment i prioritetsordning Risk → ADT.
+    // Olyckor vinner alltid, därefter färska störningar, sedan segment i
+    // prioritetsordning Risk → ADT.
     const eventFeature = features.find((f) => eventLayerIds.includes(f.layer.id));
     if (eventFeature) {
       openEventPopup(map, e.lngLat, eventFeature.properties);
+      return;
+    }
+
+    const disturbanceFeature = features.find((f) => disturbanceLayerIds.includes(f.layer.id));
+    if (disturbanceFeature) {
+      openDisturbancePopup(map, e.lngLat, disturbanceFeature.properties);
       return;
     }
 
@@ -621,6 +801,23 @@ export function addPopupHandler(map: MapLibreMap): void {
     if (!Number.isFinite(fid)) return;
     openSegmentPopup(map, e.lngLat, fid);
   });
+}
+
+function openDisturbancePopup(
+  map: MapLibreMap,
+  lngLat: maplibregl.LngLat,
+  props: Record<string, unknown> | null,
+): void {
+  const popup = new maplibregl.Popup({
+    closeButton: true,
+    closeOnClick: true,
+    maxWidth: "320px",
+    className: "seg-popup",
+  })
+    .setLngLat(lngLat)
+    .setHTML(renderDisturbance(props ?? {}))
+    .addTo(map);
+  void popup;
 }
 
 function openEventPopup(
@@ -816,6 +1013,46 @@ function renderEvent(props: Record<string, unknown>): string {
       ${messageBlock}
       <div class="seg-popup-footer">
         Klicka på vägsegmentet för aggregerad statistik. Saknas vägen i ÅDT-datasetet visas ingen färgning.
+      </div>
+    </div>
+  `;
+}
+
+function renderDisturbance(props: Record<string, unknown>): string {
+  const message = typeof props.message === "string" ? props.message : "";
+  const messageType = typeof props.message_type === "string" ? props.message_type : "";
+  const roadNumber = typeof props.road_number === "string" ? props.road_number : "";
+  const severity = typeof props.severity === "string" ? props.severity : "";
+  const lastSeenRaw = typeof props.last_seen === "string" ? props.last_seen : "";
+  const dateText = lastSeenRaw
+    ? new Date(lastSeenRaw).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+    : "";
+
+  const headerRoad = roadNumber
+    ? `<div class="seg-popup-road">${escapeHtml(roadNumber)}</div>`
+    : "";
+  const typeLine = messageType
+    ? `<div class="seg-popup-muted seg-popup-event-severity">${escapeHtml(messageType)}</div>`
+    : "";
+  const dateLine = dateText
+    ? `<div class="seg-popup-date seg-popup-event-date">Uppdaterad ${escapeHtml(dateText)}</div>`
+    : "";
+  const severityLine = severity
+    ? `<div class="seg-popup-muted seg-popup-event-severity">${escapeHtml(severity)}</div>`
+    : "";
+  const messageBlock = message
+    ? `<div class="seg-popup-event-msg">${escapeHtml(message)}</div>`
+    : `<div class="seg-popup-empty">Ingen beskrivning från Trafikverket.</div>`;
+
+  return `
+    <div class="seg-popup-body">
+      ${headerRoad}
+      ${typeLine}
+      ${dateLine}
+      ${severityLine}
+      ${messageBlock}
+      <div class="seg-popup-footer">
+        Aktuell trafikstörning från Trafikverket. Den ingår inte i riskhistoriken.
       </div>
     </div>
   `;

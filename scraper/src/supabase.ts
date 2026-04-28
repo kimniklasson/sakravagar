@@ -19,6 +19,11 @@ export type UpsertRow = {
   raw: unknown;
 };
 
+export type DisturbanceUpsertRow = UpsertRow & {
+  message_type: string | null;
+  severity: string | null;
+};
+
 export type UpsertResult = {
   attempted: number;
   error: Error | null;
@@ -33,6 +38,20 @@ export async function upsertEvents(
   if (rows.length === 0) return { attempted: 0, error: null };
 
   const { error } = await client.from("events").upsert(rows, {
+    onConflict: "id",
+    ignoreDuplicates: false,
+  });
+
+  return { attempted: rows.length, error: error ? new Error(error.message) : null };
+}
+
+export async function upsertDisturbances(
+  client: SupabaseClient,
+  rows: DisturbanceUpsertRow[]
+): Promise<UpsertResult> {
+  if (rows.length === 0) return { attempted: 0, error: null };
+
+  const { error } = await client.from("disturbances").upsert(rows, {
     onConflict: "id",
     ignoreDuplicates: false,
   });

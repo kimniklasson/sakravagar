@@ -1,5 +1,5 @@
 import { parseWgs84, type Deviation } from "./trafikverket.js";
-import type { UpsertRow } from "./supabase.js";
+import type { DisturbanceUpsertRow, UpsertRow } from "./supabase.js";
 
 export function deviationToRow(d: Deviation, now: string): UpsertRow | null {
   const coord = parseWgs84(d.Geometry?.WGS84);
@@ -17,5 +17,16 @@ export function deviationToRow(d: Deviation, now: string): UpsertRow | null {
     last_seen: now,
     modified_time: d.ModifiedTime ?? null,
     raw: d,
+  };
+}
+
+export function disturbanceToRow(d: Deviation, now: string): DisturbanceUpsertRow | null {
+  const base = deviationToRow(d, now);
+  if (!base) return null;
+
+  return {
+    ...base,
+    message_type: d.MessageType ?? null,
+    severity: d.SeverityText ?? null,
   };
 }

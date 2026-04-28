@@ -2,6 +2,28 @@
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
 
+## Senaste ändring — aktuella störningar som separat live-overlay (2026-04-28)
+
+- ✅ **Separat dataspår:** ny migration `db/migrations/0018_live_disturbances.sql` skapar `disturbances` + `disturbances_public`. Detta hålls avsiktligt skilt från `events`, så vägarbeten/köer/hinder inte påverkar olyckshistorik, snapping eller riskberäkning.
+- ✅ **Scrape uppdaterad:** både Node-scrapern och Supabase Edge Function hämtar nu två flöden: `MessageType=Olycka` till `events`, samt övriga `Situation/Deviation`-rader till `disturbances`. `first_seen` bevaras via insert-default; `last_seen` uppdateras vid varje scrape, samma live-semantik som olyckor.
+- ✅ **Edge Function-auth justerad för enklare test:** `scrape` accepterar fortsatt cronens `Authorization: Bearer <SCRAPE_SHARED_SECRET>`, men också `x-scrape-secret: <SCRAPE_SHARED_SECRET>` eftersom Supabase webb-Invoke kan vara knepig med `Authorization`-headern. Båda jämförs mot samma env secret.
+- ✅ **API:** ny `/api/disturbances` läser `disturbances_public`, visar bara rader med `last_seen` inom 90 minuter, och klassar `message_type` till `roadwork` / `traffic` / `obstacle` / `other` för kartfärg.
+- ✅ **Frontend:** nytt lager **"Störningar"** i bottom-left `LayerBox`, default på. Kartan ritar aktuella störningar som färgade punkter (vägarbete gul, kö/trafik orange, hinder beige, övrigt ljusblå). Klick-popup visar typ, uppdateringstid, meddelande och noterar att störningen inte ingår i riskhistoriken. Top-left livebox visar nu både pågående olyckor och störningar.
+- ✅ **Verifiering:** `./node_modules/.bin/tsc --noEmit -p web/tsconfig.json`, `scraper/tsconfig.json`, `shared/tsconfig.json` passerar. `./node_modules/.bin/next build` passerar och listar nya `/api/disturbances`-routen.
+- ⚠️ **Att göra före prod:** kör migration 0018 i Supabase och deploya Edge Function `scrape`, annars returnerar `/api/disturbances` fel eftersom tabellen/vyn saknas i prod. `pnpm` ligger inte på PATH i Codex-terminalen här, så verifiering gjordes via lokala binärer.
+- ⚠️ **Lastkajen-filter väntar fortsatt:** `.gpkg` kunde inte hittas/läsas från projektmappen; macOS nekade åtkomst till Downloads även med eskalering. Lägg `sakravagar_filter*.gpkg` i `/Users/kimniklasson/Documents/Trafik/` eller annan åtkomlig sökväg för nästa NVDB-importsteg.
+
+## Senaste ändring — trygghetsfilter "Stora vägar" (2026-04-28)
+
+- ✅ **Första trygghetsfiltret tillagt på desktop:** nytt bottom-left lager **"Stora vägar"** i samma `LayerBox`-UI som Risk/Flöde. Default **av** så det inte tar över befintlig kartbild.
+- ✅ **Kartlager:** `addLargeRoadsLayer` i `web/components/Map/layers.ts` använder just nu befintlig OpenMapTiles-source (`openmaptiles` / `transportation`) och filtrerar `class in ("motorway", "trunk", "primary")`. Detta är en snabb UX-version medan vi väntar på nytt Lastkajen-paket.
+- ✅ **Visuell ordning:** render-stack är nu **Stora vägar → Flöde/ÅDT → Risk → olyckor/heatmap/live**. Kim bad specifikt att Flöde/ÅDT ska ligga ovanpå Stora vägar. `addLargeRoadsLayer` försöker lägga sig före `ADT_LAYER_ID` om den finns, annars före Risk/heatmap.
+- ✅ **Legend/tooltip:** `Stora vägar` har nu tre kategorier i stigande "stor/snabb"-ordning: **Större huvudväg → Motortrafikled → Motorväg**. De tidigare sex grå/beige swatches ("svag/tydlig/mycket tydlig") var missvisande och är borttagna.
+- ⚠️ **Datakälla är en approximation:** eftersom OpenMapTiles är globalt lyser även stora vägar i andra länder upp just nu. Detta är väntat och temporärt. När vi byter till NVDB/Lastkajen-data blir lagret Sverige-begränsat och mer korrekt.
+- ⏳ **Lastkajen-paket på gång:** Kim har beställt/är på väg att ladda ner `sakravagar_filter` som GeoPackage, EPSG:3006 SWEREF-99-TM, yta Sverige, referensnät Nej. Valda dataprodukter: **Hastighetsgräns**, **Vägtyp**, **Motorväg**, **Motortrafikled**. Nästa session bör börja med att inspektera `.gpkg` med `ogrinfo`, importera valda lager till Supabase/PostGIS och ersätta OpenMapTiles-approxen bakom samma UI.
+- ✅ **Verifiering hittills:** `tsc --noEmit -p web/tsconfig.json`, `tsc --noEmit -p shared/tsconfig.json`, `tsc --noEmit -p scraper/tsconfig.json` passerar. `next build` passerade lokalt efter första implementationen. Efter småjusteringarna av ordning/legend passerade web-typecheck igen.
+- 🧭 **Nästa produktsteg efter NVDB-filtret:** användaren föreslog "aktuella störningar" medan paketet byggs. Rekommenderad riktning: utöka Trafikverket `Situation`-scrapen med separata aktuella störningstyper (t.ex. vägarbeten/kö/hinder) som **live/overlay**, inte som historisk riskdata, och håll dem isär från `events`-tabellens olyckshistorik.
+
 ## Vad som är klart
 
 - ✅ Monorepo scaffoldat (`scraper/`, `web/`, `shared/`, `db/`, `scripts/`)

@@ -6,9 +6,12 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
 import {
   addAdtLayer,
+  addDisturbancesLayer,
   addEventsLayer,
+  addLargeRoadsLayer,
   addPopupHandler,
   addRiskLayer,
+  refreshDisturbancesLayer,
   type LayerController,
 } from "./layers";
 
@@ -38,14 +41,24 @@ export default function Map() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
+  const [disturbanceCount, setDisturbanceCount] = useState(0);
   const [riskOn, setRiskOn] = useState(true);
   const [adtOn, setAdtOn] = useState(true);
+  const [disturbancesOn, setDisturbancesOn] = useState(true);
+  const [largeRoadsOn, setLargeRoadsOn] = useState(false);
   const [riskOpen, setRiskOpen] = useState(false);
   const [adtOpen, setAdtOpen] = useState(false);
+  const [disturbancesOpen, setDisturbancesOpen] = useState(false);
+  const [largeRoadsOpen, setLargeRoadsOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
   const [mobileAttributionOpen, setMobileAttributionOpen] = useState(false);
-  const layerCtrlRef = useRef<{ risk?: LayerController; adt?: LayerController }>({});
+  const layerCtrlRef = useRef<{
+    risk?: LayerController;
+    adt?: LayerController;
+    disturbances?: LayerController;
+    largeRoads?: LayerController;
+  }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
   useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
 
@@ -100,13 +113,22 @@ export default function Map() {
     map.on("dragend", () => setAtUserLocation(false));
 
     map.on("load", () => {
-      layerCtrlRef.current.risk = addRiskLayer(map);
+      layerCtrlRef.current.largeRoads = addLargeRoadsLayer(map);
       layerCtrlRef.current.adt = addAdtLayer(map);
-      void addEventsLayer(map, { since: sinceFromWindow(timeWindow) }).then(({ liveCount }) =>
-        setLiveCount(liveCount),
-      );
-      addPopupHandler(map);
-      mapLoadedRef.current = true;
+      layerCtrlRef.current.risk = addRiskLayer(map);
+      layerCtrlRef.current.largeRoads.setVisible(largeRoadsOn);
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindow) })
+        .then(({ liveCount }) => {
+          setLiveCount(liveCount);
+          layerCtrlRef.current.disturbances = addDisturbancesLayer(map);
+          layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
+          return refreshDisturbancesLayer(map);
+        })
+        .then(({ disturbanceCount }) => setDisturbanceCount(disturbanceCount))
+        .finally(() => {
+          addPopupHandler(map);
+          mapLoadedRef.current = true;
+        });
     });
 
     mapRef.current = map;
@@ -135,11 +157,22 @@ export default function Map() {
   }, [adtOn]);
 
   useEffect(() => {
+    layerCtrlRef.current.disturbances?.setVisible(disturbancesOn);
+  }, [disturbancesOn]);
+
+  useEffect(() => {
+    layerCtrlRef.current.largeRoads?.setVisible(largeRoadsOn);
+  }, [largeRoadsOn]);
+
+  useEffect(() => {
     const id = window.setInterval(() => {
       const map = mapRef.current;
       if (!map || !mapLoadedRef.current) return;
       void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) }).then(
         ({ liveCount }) => setLiveCount(liveCount),
+      );
+      void refreshDisturbancesLayer(map).then(({ disturbanceCount }) =>
+        setDisturbanceCount(disturbanceCount),
       );
     }, 60_000);
     return () => window.clearInterval(id);
@@ -191,7 +224,12 @@ export default function Map() {
       )}
       <div className={`${styles.controls} ${infoOpen ? styles.controlsInfoOpen : ""}`}>
         <InfoBox open={infoOpen} onToggle={() => setInfoOpen((v) => !v)} />
-        <LiveBox count={liveCount} open={liveOpen} onToggle={() => setLiveOpen((v) => !v)} />
+        <LiveBox
+          accidentCount={liveCount}
+          disturbanceCount={disturbanceCount}
+          open={liveOpen}
+          onToggle={() => setLiveOpen((v) => !v)}
+        />
         <TimeBox
           value={timeWindow}
           onChange={setTimeWindow}
@@ -251,6 +289,24 @@ export default function Map() {
           onToggleLayer={() => setAdtOn((v) => !v)}
           onToggleOpen={() => setAdtOpen((v) => !v)}
           body="Flödes-lagret färgar vägsegment efter ÅDT (årsdygnstrafik) enligt NVDB — antalet fordon per dygn. Mörkare = mer trafik. Synligt vid inzoomning från stadsnivå och uppåt."
+        />
+        <LayerBox
+          label="Störningar"
+          colors={DISTURBANCE_SCALE}
+          on={disturbancesOn}
+          open={disturbancesOpen}
+          onToggleLayer={() => setDisturbancesOn((v) => !v)}
+          onToggleOpen={() => setDisturbancesOpen((v) => !v)}
+          body="Aktuella trafikstörningar från Trafikverket, till exempel vägarbeten, köer och hinder. Lagret är färsk driftinformation och ingår inte i riskhistoriken."
+        />
+        <LayerBox
+          label="Stora vägar"
+          colors={LARGE_ROADS_SCALE}
+          on={largeRoadsOn}
+          open={largeRoadsOpen}
+          onToggleLayer={() => setLargeRoadsOn((v) => !v)}
+          onToggleOpen={() => setLargeRoadsOpen((v) => !v)}
+          body="Trygghetsfilter för dig som vill undvika motorvägar, motortrafikleder och större huvudvägar. Första versionen använder kartans vägklass; exakt hastighetsgräns kan kopplas på när NVDB Hastighetsgräns importeras."
         />
       </div>
     </>
@@ -344,6 +400,19 @@ const FLOW_SCALE: ScaleStop[] = [
   { color: "#61ABFF", label: "Förhöjt" },
   { color: "#3091FF", label: "Högt" },
   { color: "#0077FF", label: "Mycket högt" },
+];
+
+const LARGE_ROADS_SCALE: ScaleStop[] = [
+  { color: "#A9A59D", label: "Större huvudväg" },
+  { color: "#C8C3B9", label: "Motortrafikled" },
+  { color: "#E6E0D4", label: "Motorväg" },
+];
+
+const DISTURBANCE_SCALE: ScaleStop[] = [
+  { color: "#FFD36E", label: "Vägarbete" },
+  { color: "#FF8A4A", label: "Kö/trafik" },
+  { color: "#E6E0D4", label: "Hinder" },
+  { color: "#9AD7FF", label: "Övrigt" },
 ];
 
 function LayerBox({
@@ -477,15 +546,20 @@ function RoadOrXIcon({ expanded }: { expanded: boolean }) {
 }
 
 function LiveBox({
-  count,
+  accidentCount,
+  disturbanceCount,
   open,
   onToggle,
 }: {
-  count: number;
+  accidentCount: number;
+  disturbanceCount: number;
   open: boolean;
   onToggle: () => void;
 }) {
-  const calm = count === 0;
+  const calm = accidentCount === 0 && disturbanceCount === 0;
+  const label = calm
+    ? "Inga rapporterade händelser just nu"
+    : `${accidentCount} ${accidentCount === 1 ? "olycka" : "olyckor"} · ${disturbanceCount} ${disturbanceCount === 1 ? "störning" : "störningar"}`;
   return (
     <div
       className={`${styles.liveBox} ${calm ? styles.liveBoxCalm : ""}`}
@@ -495,17 +569,13 @@ function LiveBox({
     >
       <div className={styles.liveBoxHeader}>
         <InfoIcon />
-        <span className={styles.liveBoxLabel}>
-          {calm
-            ? "Inga rapporterade olyckor just nu"
-            : `${count} pågående ${count === 1 ? "olycka" : "olyckor"}`}
-        </span>
+        <span className={styles.liveBoxLabel}>{label}</span>
         {!calm && <span className={styles.liveDot} aria-hidden="true" />}
       </div>
       <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
         <div className={styles.expanderInner}>
           <p className={styles.liveBoxBody}>
-            Pågående olyckor är de som rapporterats till Trafikverket de senaste 90 minuterna. De markeras med en röd, pulserande punkt på kartan och uppdateras automatiskt.
+            Pågående olyckor och aktuella trafikstörningar är de som rapporterats till Trafikverket de senaste 90 minuterna. Olyckor markeras med pulserande vit punkt, störningar med färgade punkter, och båda uppdateras automatiskt.
           </p>
         </div>
       </div>
