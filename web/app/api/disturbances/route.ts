@@ -9,7 +9,7 @@ const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_A
 
 const ACTIVE_WINDOW_MS = 90 * 60 * 1000;
 
-export type DisturbanceCategory = "roadwork" | "traffic" | "obstacle" | "other";
+export type DisturbanceCategory = "roadwork" | "traffic";
 
 export type DisturbancePoint = {
   id: string;
@@ -25,12 +25,11 @@ export type DisturbancePoint = {
   last_seen: string;
 };
 
-function categoryFromMessageType(messageType: string | null): DisturbanceCategory {
+function categoryFromMessageType(messageType: string | null): DisturbanceCategory | null {
   const t = (messageType ?? "").toLowerCase();
   if (t.includes("vägarbete") || t.includes("roadwork")) return "roadwork";
   if (t.includes("kö") || t.includes("trafik") || t.includes("queue")) return "traffic";
-  if (t.includes("hinder") || t.includes("stopp") || t.includes("obstacle")) return "obstacle";
-  return "other";
+  return null;
 }
 
 export async function GET(req: Request) {
@@ -68,21 +67,23 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const points: DisturbancePoint[] = (data ?? []).map((row) => {
+  const points: DisturbancePoint[] = (data ?? []).flatMap((row) => {
     const messageType = (row.message_type ?? null) as string | null;
-    return {
+    const category = categoryFromMessageType(messageType);
+    if (!category) return [];
+    return [{
       id: row.id as string,
       lng: row.lng as number,
       lat: row.lat as number,
       icon_id: (row.icon_id ?? null) as string | null,
       message_type: messageType,
-      category: categoryFromMessageType(messageType),
+      category,
       road_number: (row.road_number ?? null) as string | null,
       message: (row.message ?? null) as string | null,
       severity: (row.severity ?? null) as string | null,
       first_seen: row.first_seen as string,
       last_seen: row.last_seen as string,
-    };
+    }];
   });
 
   return NextResponse.json({ points });

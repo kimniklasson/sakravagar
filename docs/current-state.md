@@ -2,6 +2,18 @@
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
 
+## Senaste ändring — Hastighet-lager, störningsformer och tydligare livebox (2026-04-29)
+
+- ✅ **"Stora/Snabba vägar" är omdefinierat till `Hastighet`:** UI:t visar nu lagret som **Hastighet**, inte som vägtyp/storlek. Produktlöftet är smalare och mer korrekt: bara skyltad hastighet **90 km/h eller högre** enligt NVDB:s `Hastighetsgräns`-data. Vägtyp-rader (`Motorväg`, `Motortrafikled`, `4-fältsväg`, `Vanlig väg mötesfri`) filtreras bort i `/api/large-roads`, eftersom de kan omfatta 80-vägar och riskerar att urholka användarens förtroende.
+- ✅ **API-pagination för hastighetsdata:** `/api/large-roads` paginerar Supabase RPC-resultatet i 1000-raderssidor. Detta fixar att stora bboxar tidigare kunde returnera ofullständiga vägar och ge en "random" panoreringskänsla.
+- ✅ **Tile-baserad klientladdning för Hastighet:** `addLargeRoadsLayer` hämtar 0,75°-tiles, max 6 parallellt, cachear tiles och ritar efter varje färdig tile. Det undviker 8s-lagget vid nya områden och undviker hel-Sverige-timeout. Sverige-bbox via samma RPC timeoutade lokalt; små tiles runt Göteborg/Borås svarade typiskt på ~0,3-0,8s.
+- ✅ **Datakvalitetsfilter för korta hastighetssnuttar:** Rå-NVDB innehåller många mikroskopiska `speed_limit >= 90`-features (i ett stickprov var 182 av 246 speed-features kortare än 500 m, vissa under 1 m). Klienten filtrerar därför bort isolerade hastighetssnuttar och visar bara speed-features som hänger ihop med lika-snabba features till en korridor på minst 500 m. Detta är en produktmässig hotfix; robustare framtidssteg är en server-side/PostGIS-derived "speed corridors"-vy med dissolve/merge och QA.
+- ✅ **Hastighetsbadges:** Hastighetsvärden visas som glesade badges (90/100/110/120) i ett separat punktlager. Badges har svart bakgrund `#222`, vit text, 2px border i samma färg som linjen, och visas bara när underliggande linje är minst 72 px vid aktuell zoom. Linjer och badge-border använder gråskala efter hastighet: 90 `#999999`, 100 `#B8B8B8`, 110 `#D6D6D6`, 120+ `#F2F2F2`.
+- ✅ **Störningslagret smalnat av:** `/api/disturbances` filtrerar nu bort `Hinder` och `Övrigt` och returnerar bara `roadwork` + `traffic`. UI-label är **Störning**. Kartan ritar vägarbete som gul triangel (`#FFE36A`) och kö/trafik som orange fyrkant (`#FF8A4A`) för att visuellt skilja dem från olyckspunkter.
+- ✅ **Liveboxen gäller bara olyckor:** top-left liveboxen räknar inte längre störningar, så calm-state **"Inga rapporterade olyckor just nu"** kan visas även om det finns vägarbeten/köer någonstans i Sverige.
+- ✅ **Copyförtydliganden:** Risk/Flöde säger nu "från stadsnivå och inåt" i stället för "uppåt". Hastighet-copy nämner att lagret är synligt från zoomnivå 8 och inåt.
+- ✅ **Verifiering:** `./node_modules/.bin/tsc -p web/tsconfig.json --noEmit` passerar. Lokala API-checkar verifierade att `/api/large-roads` bara returnerar `high_speed` med hastigheter 90/100/110/120 och att `/api/disturbances` bara returnerar `traffic` + `roadwork`.
+
 ## Senaste ändring — Lastkajen-filter importerat för "Stora vägar" (2026-04-28)
 
 - ✅ **GeoPackage mottaget:** `/Users/kimniklasson/Documents/sakravagar_filter_Geopackage_253085/sakravagar_filter_253085.gpkg`, 1,6 GB, EPSG:3006. Innehåller exakt fyra lager: `Hastighetsgräns`, `Motortrafikled`, `Motorväg`, `Vägtyp`.

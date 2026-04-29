@@ -41,7 +41,6 @@ export default function Map() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
-  const [disturbanceCount, setDisturbanceCount] = useState(0);
   const [riskOn, setRiskOn] = useState(true);
   const [adtOn, setAdtOn] = useState(true);
   const [disturbancesOn, setDisturbancesOn] = useState(true);
@@ -124,7 +123,6 @@ export default function Map() {
           layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
           return refreshDisturbancesLayer(map);
         })
-        .then(({ disturbanceCount }) => setDisturbanceCount(disturbanceCount))
         .finally(() => {
           addPopupHandler(map);
           mapLoadedRef.current = true;
@@ -171,9 +169,7 @@ export default function Map() {
       void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) }).then(
         ({ liveCount }) => setLiveCount(liveCount),
       );
-      void refreshDisturbancesLayer(map).then(({ disturbanceCount }) =>
-        setDisturbanceCount(disturbanceCount),
-      );
+      void refreshDisturbancesLayer(map);
     }, 60_000);
     return () => window.clearInterval(id);
   }, []);
@@ -226,7 +222,6 @@ export default function Map() {
         <InfoBox open={infoOpen} onToggle={() => setInfoOpen((v) => !v)} />
         <LiveBox
           accidentCount={liveCount}
-          disturbanceCount={disturbanceCount}
           open={liveOpen}
           onToggle={() => setLiveOpen((v) => !v)}
         />
@@ -279,7 +274,7 @@ export default function Map() {
           open={riskOpen}
           onToggleLayer={() => setRiskOn((v) => !v)}
           onToggleOpen={() => setRiskOpen((v) => !v)}
-          body="Risk-lagret färgar vägsegment efter olyckor per miljon fordon — så att de farligaste vägarna per resa lyser starkast, inte de mest trafikerade. Synligt vid inzoomning från stadsnivå och uppåt."
+          body="Risk-lagret färgar vägsegment efter olyckor per miljon fordon — så att de farligaste vägarna per resa lyser starkast, inte de mest trafikerade. Synligt från stadsnivå och inåt."
         />
         <LayerBox
           label="Flöde"
@@ -288,25 +283,25 @@ export default function Map() {
           open={adtOpen}
           onToggleLayer={() => setAdtOn((v) => !v)}
           onToggleOpen={() => setAdtOpen((v) => !v)}
-          body="Flödes-lagret färgar vägsegment efter ÅDT (årsdygnstrafik) enligt NVDB — antalet fordon per dygn. Mörkare = mer trafik. Synligt vid inzoomning från stadsnivå och uppåt."
+          body="Flödes-lagret färgar vägsegment efter ÅDT (årsdygnstrafik) enligt NVDB — antalet fordon per dygn. Mörkare = mer trafik. Synligt från stadsnivå och inåt."
         />
         <LayerBox
-          label="Störningar"
+          label="Störning"
           colors={DISTURBANCE_SCALE}
           on={disturbancesOn}
           open={disturbancesOpen}
           onToggleLayer={() => setDisturbancesOn((v) => !v)}
           onToggleOpen={() => setDisturbancesOpen((v) => !v)}
-          body="Aktuella trafikstörningar från Trafikverket, till exempel vägarbeten, köer och hinder. Lagret är färsk driftinformation och ingår inte i riskhistoriken."
+          body="Aktuella trafikstörningar från Trafikverket: vägarbeten och kö/trafik. Lagret är färsk driftinformation och ingår inte i riskhistoriken."
         />
         <LayerBox
-          label="Stora vägar"
+          label="Hastighet"
           colors={LARGE_ROADS_SCALE}
           on={largeRoadsOn}
           open={largeRoadsOpen}
           onToggleLayer={() => setLargeRoadsOn((v) => !v)}
           onToggleOpen={() => setLargeRoadsOpen((v) => !v)}
-          body="Trygghetsfilter för dig som vill undvika motorvägar, motortrafikleder, mötesfria större vägar och vägar med hastighetsgräns 90 km/h eller högre. Bygger på NVDB-data från Lastkajen."
+          body="Visar vägar med skyltad hastighet 90 km/h eller högre enligt NVDB:s hastighetsdata från Lastkajen. Vägtyp utan hastighetsvärde visas inte. Synligt från zoomnivå 8 och inåt."
         />
       </div>
     </>
@@ -403,17 +398,15 @@ const FLOW_SCALE: ScaleStop[] = [
 ];
 
 const LARGE_ROADS_SCALE: ScaleStop[] = [
-  { color: "#8F8B84", label: "90+ väg" },
-  { color: "#A9A59D", label: "Större/mötesfri väg" },
-  { color: "#C8C3B9", label: "Motortrafikled" },
-  { color: "#E6E0D4", label: "Motorväg" },
+  { color: "#999999", label: "90" },
+  { color: "#B8B8B8", label: "100" },
+  { color: "#D6D6D6", label: "110" },
+  { color: "#F2F2F2", label: "120" },
 ];
 
 const DISTURBANCE_SCALE: ScaleStop[] = [
-  { color: "#FFD36E", label: "Vägarbete" },
+  { color: "#FFE36A", label: "Vägarbete" },
   { color: "#FF8A4A", label: "Kö/trafik" },
-  { color: "#E6E0D4", label: "Hinder" },
-  { color: "#9AD7FF", label: "Övrigt" },
 ];
 
 function LayerBox({
@@ -548,19 +541,17 @@ function RoadOrXIcon({ expanded }: { expanded: boolean }) {
 
 function LiveBox({
   accidentCount,
-  disturbanceCount,
   open,
   onToggle,
 }: {
   accidentCount: number;
-  disturbanceCount: number;
   open: boolean;
   onToggle: () => void;
 }) {
-  const calm = accidentCount === 0 && disturbanceCount === 0;
+  const calm = accidentCount === 0;
   const label = calm
-    ? "Inga rapporterade händelser just nu"
-    : `${accidentCount} ${accidentCount === 1 ? "olycka" : "olyckor"} · ${disturbanceCount} ${disturbanceCount === 1 ? "störning" : "störningar"}`;
+    ? "Inga rapporterade olyckor just nu"
+    : `${accidentCount} ${accidentCount === 1 ? "pågående olycka" : "pågående olyckor"}`;
   return (
     <div
       className={`${styles.liveBox} ${calm ? styles.liveBoxCalm : ""}`}
@@ -576,7 +567,7 @@ function LiveBox({
       <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
         <div className={styles.expanderInner}>
           <p className={styles.liveBoxBody}>
-            Pågående olyckor och aktuella trafikstörningar är de som rapporterats till Trafikverket de senaste 90 minuterna. Olyckor markeras med pulserande vit punkt, störningar med färgade punkter, och båda uppdateras automatiskt.
+            Pågående olyckor är de som rapporterats till Trafikverket de senaste 90 minuterna. De markeras med pulserande vit punkt och uppdateras automatiskt.
           </p>
         </div>
       </div>
