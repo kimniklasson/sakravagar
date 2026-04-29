@@ -7,6 +7,7 @@ import type { SegmentDetail } from "@/app/api/segment/route";
 import type { EventPoint } from "@/app/api/events/route";
 import type { DisturbancePoint } from "@/app/api/disturbances/route";
 import type { LargeRoadSegment } from "@/app/api/large-roads/route";
+import type { TrafficFlowSegment } from "@/app/api/traffic-flow/route";
 
 type AdtSegment = {
   fid: number;
@@ -64,6 +65,16 @@ const DISTURBANCE_COLORS = {
   roadwork: "#FFE36A",
   traffic: "#FF8A4A",
 };
+const TRAFFIC_FLOW_SOURCE_ID = "traffic-flow";
+const TRAFFIC_FLOW_LAYER_ID = "traffic-flow-lines";
+const TRAFFIC_FLOW_HIT_LAYER_ID = "traffic-flow-hit-target";
+const TRAFFIC_FLOW_COLORS = {
+  calm: "#72F2D0",
+  moving: "#9FD86B",
+  busy: "#FFD166",
+  slow: "#FF7A3D",
+};
+const TRAFFIC_FLOW_MIN_ZOOM = 7;
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase för de tyngre analyslagren (för många
@@ -458,6 +469,155 @@ export async function refreshDisturbancesLayer(map: MapLibreMap): Promise<{ dist
   const src = map.getSource(DISTURBANCE_SOURCE_ID) as GeoJSONSource | undefined;
   src?.setData(geojson);
   return { disturbanceCount: points.length };
+}
+
+export function addTrafficFlowLayer(map: MapLibreMap): LayerController {
+  if (map.getSource(TRAFFIC_FLOW_SOURCE_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  map.addSource(TRAFFIC_FLOW_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(DISTURBANCE_LAYER_ID)
+    ? DISTURBANCE_LAYER_ID
+    : map.getLayer(LIVE_HALO_LAYER_ID)
+      ? LIVE_HALO_LAYER_ID
+      : map.getLayer(LIVE_CORE_LAYER_ID)
+        ? LIVE_CORE_LAYER_ID
+        : undefined;
+
+  map.addLayer(
+    {
+      id: TRAFFIC_FLOW_LAYER_ID,
+      type: "line",
+      source: TRAFFIC_FLOW_SOURCE_ID,
+      minzoom: TRAFFIC_FLOW_MIN_ZOOM,
+      layout: {
+        "line-cap": "round",
+        "line-join": "round",
+      },
+      paint: {
+        "line-color": [
+          "match", ["get", "category"],
+          "calm", TRAFFIC_FLOW_COLORS.calm,
+          "moving", TRAFFIC_FLOW_COLORS.moving,
+          "busy", TRAFFIC_FLOW_COLORS.busy,
+          "slow", TRAFFIC_FLOW_COLORS.slow,
+          TRAFFIC_FLOW_COLORS.moving,
+        ],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          7, [
+            "interpolate", ["linear"], ["get", "vehicle_flow_rate"],
+            0, 1.5,
+            800, 2.5,
+            1600, 3.5,
+            2500, 4.5,
+          ],
+          12, [
+            "interpolate", ["linear"], ["get", "vehicle_flow_rate"],
+            0, 3,
+            800, 5.5,
+            1600, 8,
+            2500, 10,
+          ],
+        ],
+        "line-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          TRAFFIC_FLOW_MIN_ZOOM, 0.45,
+          TRAFFIC_FLOW_MIN_ZOOM + 1, 0.85,
+        ],
+      },
+    },
+    beforeId,
+  );
+
+  map.addLayer(
+    {
+      id: TRAFFIC_FLOW_HIT_LAYER_ID,
+      type: "line",
+      source: TRAFFIC_FLOW_SOURCE_ID,
+      minzoom: TRAFFIC_FLOW_MIN_ZOOM,
+      paint: {
+        "line-color": "#000000",
+        "line-opacity": 0,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 7, 18, 12, 26, 16, 34],
+      },
+    },
+    beforeId,
+  );
+
+  const loader = createBboxLoader(map, {
+    minZoom: TRAFFIC_FLOW_MIN_ZOOM,
+    bboxPadding: 0.5,
+    maxBboxAreaDeg2: 30,
+    fetchBbox: async (padded) => {
+      await refreshTrafficFlowLayer(map, padded);
+    },
+  });
+
+  return {
+    setVisible: (v) => {
+      if (map.getLayer(TRAFFIC_FLOW_LAYER_ID)) {
+        map.setLayoutProperty(TRAFFIC_FLOW_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      if (map.getLayer(TRAFFIC_FLOW_HIT_LAYER_ID)) {
+        map.setLayoutProperty(TRAFFIC_FLOW_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
+      }
+      loader.setEnabled(v);
+    },
+  };
+}
+
+export async function refreshTrafficFlowLayer(
+  map: MapLibreMap,
+  bbox?: Bbox,
+): Promise<{ trafficFlowCount: number }> {
+  if (!bbox && map.getZoom() < TRAFFIC_FLOW_MIN_ZOOM) {
+    return { trafficFlowCount: 0 };
+  }
+  const targetBbox = bbox ?? (() => {
+    const b = map.getBounds();
+    return {
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    };
+  })();
+  const res = await fetch(`/api/traffic-flow?bbox=${bboxToParam(targetBbox)}`);
+  if (!res.ok) {
+    console.warn("failed to fetch traffic flow", await res.text());
+    return { trafficFlowCount: 0 };
+  }
+
+  const { segments } = (await res.json()) as { segments: TrafficFlowSegment[] };
+  const geojson: GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString> = {
+    type: "FeatureCollection",
+    features: segments.map((s) => ({
+      type: "Feature",
+      geometry: s.geometry,
+      properties: {
+        site_id: s.site_id,
+        fid: s.fid,
+        vehicle_flow_rate: s.vehicle_flow_rate,
+        average_vehicle_speed: s.average_vehicle_speed,
+        data_quality: s.data_quality,
+        measurement_time: s.measurement_time,
+        last_seen: s.last_seen,
+        category: s.category,
+        sample_count: s.sample_count,
+        snap_distance_m: s.snap_distance_m,
+      },
+    })),
+  };
+
+  const src = map.getSource(TRAFFIC_FLOW_SOURCE_ID) as GeoJSONSource | undefined;
+  src?.setData(geojson);
+  return { trafficFlowCount: segments.length };
 }
 
 // rAF-loop som pulserar halo-lagret. Klassiskt "radar-ping": radien expanderar
@@ -1294,9 +1454,9 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// Click → popup för segment, olyckor och aktuella störningar.
+// Click → popup för segment, olyckor och aktuella live-lager.
 //
-// Prioritetsordning vid klick: olyckor → störningar → risk → adt.
+// Prioritetsordning vid klick: olyckor → störningar → trafikläge → risk → adt.
 // Eventcirklarna ligger överst i render-stacken så ett klick rakt på en
 // punkt vinner; klick lite vid sidan om faller igenom till segmentet.
 // Osynliga lager filtreras automatiskt bort eftersom queryRenderedFeatures
@@ -1313,11 +1473,12 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 export function addPopupHandler(map: MapLibreMap): void {
   const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID, ADT_HIT_LAYER_ID, ADT_LAYER_ID];
   const disturbanceLayerIds = [DISTURBANCE_LAYER_ID, DISTURBANCE_HIT_LAYER_ID];
+  const trafficFlowLayerIds = [TRAFFIC_FLOW_LAYER_ID, TRAFFIC_FLOW_HIT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ — klick går
   // igenom till core eller faller till segment). Hit-target sist: fångar
   // klick på historiska events vid låg zoom där CIRCLE_LAYER_ID inte renderas.
   const eventLayerIds = [LIVE_CORE_LAYER_ID, CIRCLE_LAYER_ID, HIT_TARGET_LAYER_ID];
-  const allLayerIds = [...eventLayerIds, ...disturbanceLayerIds, ...segmentLayerIds];
+  const allLayerIds = [...eventLayerIds, ...disturbanceLayerIds, ...trafficFlowLayerIds, ...segmentLayerIds];
 
   for (const id of allLayerIds) {
     map.on("mouseenter", id, () => {
@@ -1346,6 +1507,12 @@ export function addPopupHandler(map: MapLibreMap): void {
       return;
     }
 
+    const trafficFlowFeature = features.find((f) => trafficFlowLayerIds.includes(f.layer.id));
+    if (trafficFlowFeature) {
+      openTrafficFlowPopup(map, e.lngLat, trafficFlowFeature.properties);
+      return;
+    }
+
     let segmentFeature: (typeof features)[number] | undefined;
     for (const id of segmentLayerIds) {
       const f = features.find((x) => x.layer.id === id);
@@ -1360,6 +1527,23 @@ export function addPopupHandler(map: MapLibreMap): void {
     if (!Number.isFinite(fid)) return;
     openSegmentPopup(map, e.lngLat, fid);
   });
+}
+
+function openTrafficFlowPopup(
+  map: MapLibreMap,
+  lngLat: maplibregl.LngLat,
+  props: Record<string, unknown> | null,
+): void {
+  const popup = new maplibregl.Popup({
+    closeButton: true,
+    closeOnClick: true,
+    maxWidth: "320px",
+    className: "seg-popup",
+  })
+    .setLngLat(lngLat)
+    .setHTML(renderTrafficFlow(props ?? {}))
+    .addTo(map);
+  void popup;
 }
 
 function openDisturbancePopup(
@@ -1612,6 +1796,67 @@ function renderDisturbance(props: Record<string, unknown>): string {
       ${messageBlock}
       <div class="seg-popup-footer">
         Aktuell trafikstörning från Trafikverket. Den ingår inte i riskhistoriken.
+      </div>
+    </div>
+  `;
+}
+
+function trafficFlowCategoryLabel(category: string): string {
+  switch (category) {
+    case "calm": return "Lugnt";
+    case "moving": return "Rullar";
+    case "busy": return "Tät trafik";
+    case "slow": return "Långsamt";
+    default: return "Trafikläge";
+  }
+}
+
+function renderTrafficFlow(props: Record<string, unknown>): string {
+  const siteId = typeof props.site_id === "number" || typeof props.site_id === "string"
+    ? String(props.site_id)
+    : "";
+  const flow = typeof props.vehicle_flow_rate === "number"
+    ? `${Math.round(props.vehicle_flow_rate).toLocaleString("sv-SE")} fordon/timme`
+    : "okänt";
+  const speed = typeof props.average_vehicle_speed === "number"
+    ? `${props.average_vehicle_speed.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} km/h`
+    : "okänd";
+  const quality = typeof props.data_quality === "string" ? props.data_quality : "";
+  const category = typeof props.category === "string" ? props.category : "";
+  const samples = typeof props.sample_count === "number" ? props.sample_count : null;
+  const snapDistance = typeof props.snap_distance_m === "number" ? Math.round(props.snap_distance_m) : null;
+  const measurementRaw = typeof props.measurement_time === "string" ? props.measurement_time : "";
+  const dateText = measurementRaw
+    ? new Date(measurementRaw).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+    : "";
+
+  const header = `<div class="seg-popup-road">${escapeHtml(trafficFlowCategoryLabel(category))}</div>`;
+  const dateLine = dateText
+    ? `<div class="seg-popup-date seg-popup-event-date">Mätt ${escapeHtml(dateText)}</div>`
+    : "";
+  const qualityLine = quality
+    ? `<div class="seg-popup-muted seg-popup-event-severity">Datakvalitet: ${escapeHtml(quality)}</div>`
+    : "";
+  const samplesLine = samples && samples > 1
+    ? `<dt>Mätpunkter</dt><dd>${samples.toLocaleString("sv-SE")} körfält/sensorer</dd>`
+    : "";
+  const snapLine = snapDistance !== null
+    ? `<dt>Snappning</dt><dd>${snapDistance.toLocaleString("sv-SE")} m från mätplats</dd>`
+    : "";
+
+  return `
+    <div class="seg-popup-body">
+      ${header}
+      ${dateLine}
+      ${qualityLine}
+      <dl class="seg-popup-stats">
+        <dt>Flöde nu</dt><dd>${escapeHtml(flow)}</dd>
+        <dt>Snitthastighet</dt><dd>${escapeHtml(speed)}</dd>
+        ${samplesLine}
+        ${snapLine}
+      </dl>
+      <div class="seg-popup-footer">
+        Trafikverkets TrafficFlow-data från mätplats${siteId ? ` ${escapeHtml(siteId)}` : ""}, visad på närmaste NVDB-segment. Färgen gäller mätplatsen, inte hela vägen.
       </div>
     </div>
   `;

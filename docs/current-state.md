@@ -2,6 +2,19 @@
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
 
+## Senaste ändring — `Liveflöde` som linjer från TrafficFlow (2026-04-29)
+
+- ✅ **TrafficFlow-schema verifierat mot Trafikverkets API:** `TrafficFlow` schemaversion `1.5` returnerar bl.a. `SiteId`, `MeasurementTime`, `MeasurementOrCalculationPeriod`, `VehicleType`, `VehicleFlowRate`, `AverageVehicleSpeed`, `DataQuality`, lane/side och WGS84-punkt. Stickprov gav cirka 3 300 aktiva `anyVehicle`-rader, varav majoriteten `DataQuality=good`.
+- ✅ **Ny datamodell:** migration `db/migrations/0020_live_traffic_flow.sql` skapar `traffic_flow_measurements` + `traffic_flow_public`. Tabellen håller senaste observation per `site_id:vehicle_type:lane:side`, med `first_seen/last_seen`, punktgeometri och `raw jsonb`.
+- ✅ **Scrape uppdaterad:** både Node-scrapern och Supabase Edge Function hämtar nu tre flöden parallellt: olyckor, störningar och `TrafficFlow`. TrafficFlow filtreras till `Deleted=false` + `VehicleType=anyVehicle` och upsertas till `traffic_flow_measurements`.
+- ✅ **Ny snap-RPC för linjer:** migration `db/migrations/0021_live_traffic_flow_segments.sql` skapar `traffic_flow_segments_in_bbox(...)`. Den aggregerar aktiva `TrafficFlow`-rader per `site_id`, filtrerar bort `bad` datakvalitet och snappar mätplatsen till närmaste `risk_per_segment`-geometri inom 120 m. Första versionen mot `nvdb_trafik_latest` timeoutade; `risk_per_segment` är materialiserad + geom-indexerad och fungerar bättre för live-RPC.
+- ✅ **API ändrat till segment:** `/api/traffic-flow?bbox=...` kräver nu bbox och returnerar `segments` med `LineString`/`MultiLineString`, `fid`, liveflöde, snitthastighet, datakvalitet, antal underliggande körfält/sensorer och snap-avstånd.
+- ✅ **Frontend ritar linjer:** `Liveflöde` renderas nu som färgade vägsegment med bred osynlig klickyta. Popupen förklarar att färgen kommer från mätplatsen och visas på närmaste NVDB-segment, inte att hela vägen är uppmätt.
+- ✅ **Täckningsbeslut:** UI-copyn säger uttryckligen att täckningen är bäst i Stockholm och Göteborg; Malmö/Skåne har mycket gles TrafficFlow-täckning i öppna API:t. Vi visar inte “saknar data” över kartan.
+- ✅ **Verifiering:** `./node_modules/.bin/tsc -p web/tsconfig.json --noEmit`, `./node_modules/.bin/tsc -p scraper/tsconfig.json --noEmit` och `./node_modules/.bin/next build` passerar. Efter SQL-optimeringen svarade RPC:n: liten Göteborg-ruta 70 segment på ~283 ms, Göteborg 616 segment på ~316 ms, Stockholm 1000 segment på ~556 ms.
+- ⚠️ **Att göra före prod:** deploya Edge Function `scrape` om den inte redan är deployad efter TrafficFlow-ändringen. För att lagret ska kännas verkligt live bör cron-frekvensen för `scrape-trafikverket` sannolikt sänkas från 30 min till t.ex. 5 min; annars visar API:t “senaste observerade trafikläge” inom 45 min snarare än minutnära trafik.
+- ⏭️ **Nästa designiteration:** Kim vill pilla med linje/UI-design nästa session. Nuvarande linjer fungerar men konkurrerar visuellt med blå ÅDT/Flöde; överväg starkare Liveflöde-prioritet, nedtonat ÅDT när Liveflöde är på, eller justerad Liveflöde-palett.
+
 ## Senaste ändring — Hastighet-lager, störningsformer och tydligare livebox (2026-04-29)
 
 - ✅ **"Stora/Snabba vägar" är omdefinierat till `Hastighet`:** UI:t visar nu lagret som **Hastighet**, inte som vägtyp/storlek. Produktlöftet är smalare och mer korrekt: bara skyltad hastighet **90 km/h eller högre** enligt NVDB:s `Hastighetsgräns`-data. Vägtyp-rader (`Motorväg`, `Motortrafikled`, `4-fältsväg`, `Vanlig väg mötesfri`) filtreras bort i `/api/large-roads`, eftersom de kan omfatta 80-vägar och riskerar att urholka användarens förtroende.

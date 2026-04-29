@@ -9,9 +9,11 @@ import {
   addDisturbancesLayer,
   addEventsLayer,
   addLargeRoadsLayer,
+  addTrafficFlowLayer,
   addPopupHandler,
   addRiskLayer,
   refreshDisturbancesLayer,
+  refreshTrafficFlowLayer,
   type LayerController,
 } from "./layers";
 
@@ -44,10 +46,12 @@ export default function Map() {
   const [riskOn, setRiskOn] = useState(true);
   const [adtOn, setAdtOn] = useState(true);
   const [disturbancesOn, setDisturbancesOn] = useState(true);
+  const [trafficFlowOn, setTrafficFlowOn] = useState(true);
   const [largeRoadsOn, setLargeRoadsOn] = useState(false);
   const [riskOpen, setRiskOpen] = useState(false);
   const [adtOpen, setAdtOpen] = useState(false);
   const [disturbancesOpen, setDisturbancesOpen] = useState(false);
+  const [trafficFlowOpen, setTrafficFlowOpen] = useState(false);
   const [largeRoadsOpen, setLargeRoadsOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
@@ -56,6 +60,7 @@ export default function Map() {
     risk?: LayerController;
     adt?: LayerController;
     disturbances?: LayerController;
+    trafficFlow?: LayerController;
     largeRoads?: LayerController;
   }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
@@ -121,7 +126,12 @@ export default function Map() {
           setLiveCount(liveCount);
           layerCtrlRef.current.disturbances = addDisturbancesLayer(map);
           layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
-          return refreshDisturbancesLayer(map);
+          layerCtrlRef.current.trafficFlow = addTrafficFlowLayer(map);
+          layerCtrlRef.current.trafficFlow.setVisible(trafficFlowOn);
+          return Promise.all([
+            refreshDisturbancesLayer(map),
+            refreshTrafficFlowLayer(map),
+          ]);
         })
         .finally(() => {
           addPopupHandler(map);
@@ -159,6 +169,10 @@ export default function Map() {
   }, [disturbancesOn]);
 
   useEffect(() => {
+    layerCtrlRef.current.trafficFlow?.setVisible(trafficFlowOn);
+  }, [trafficFlowOn]);
+
+  useEffect(() => {
     layerCtrlRef.current.largeRoads?.setVisible(largeRoadsOn);
   }, [largeRoadsOn]);
 
@@ -170,6 +184,7 @@ export default function Map() {
         ({ liveCount }) => setLiveCount(liveCount),
       );
       void refreshDisturbancesLayer(map);
+      void refreshTrafficFlowLayer(map);
     }, 60_000);
     return () => window.clearInterval(id);
   }, []);
@@ -295,6 +310,15 @@ export default function Map() {
           body="Aktuella trafikstörningar från Trafikverket: vägarbeten och kö/trafik. Lagret är färsk driftinformation och ingår inte i riskhistoriken."
         />
         <LayerBox
+          label="Liveflöde"
+          colors={TRAFFIC_FLOW_SCALE}
+          on={trafficFlowOn}
+          open={trafficFlowOpen}
+          onToggleLayer={() => setTrafficFlowOn((v) => !v)}
+          onToggleOpen={() => setTrafficFlowOpen((v) => !v)}
+          body="Live-mätningar från Trafikverkets TrafficFlow: flöde och snitthastighet per mätplats, snappat till närmaste vägsegment. Täckningen är bäst i Stockholm och Göteborg; i andra områden kan lagret sakna mätplatser även när det finns trafik."
+        />
+        <LayerBox
           label="Hastighet"
           colors={LARGE_ROADS_SCALE}
           on={largeRoadsOn}
@@ -407,6 +431,13 @@ const LARGE_ROADS_SCALE: ScaleStop[] = [
 const DISTURBANCE_SCALE: ScaleStop[] = [
   { color: "#FFE36A", label: "Vägarbete" },
   { color: "#FF8A4A", label: "Kö/trafik" },
+];
+
+const TRAFFIC_FLOW_SCALE: ScaleStop[] = [
+  { color: "#72F2D0", label: "Lugnt" },
+  { color: "#9FD86B", label: "Rullar" },
+  { color: "#FFD166", label: "Tätt" },
+  { color: "#FF7A3D", label: "Långsamt" },
 ];
 
 function LayerBox({

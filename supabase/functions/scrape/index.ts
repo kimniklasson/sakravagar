@@ -1,6 +1,6 @@
-// Edge Function: scrapar Trafikverkets Situation/Deviation-API och upsertar
-// olyckshändelser i `events`. Schemaläggs via pg_cron + pg_net (se migration
-// 20260425_schedule_scrape.sql). Manuell trigger:
+// Edge Function: scrapar Trafikverkets Situation/Deviation- och TrafficFlow-API
+// och upsertar olyckor, störningar och trafikläge. Schemaläggs via pg_cron +
+// pg_net (se migration 0004_pg_cron_scrape.sql). Manuell trigger:
 //   curl -X POST "$SUPABASE_URL/functions/v1/scrape" \
 //        -H "Authorization: Bearer $SCRAPE_SHARED_SECRET"
 //
@@ -25,6 +25,23 @@ type Deviation = {
   Geometry?: { WGS84?: string };
 };
 
+type TrafficFlow = {
+  SiteId: number;
+  MeasurementTime?: string;
+  MeasurementOrCalculationPeriod?: number;
+  VehicleType?: string;
+  VehicleFlowRate?: number;
+  AverageVehicleSpeed?: number;
+  CountyNo?: number;
+  Deleted?: boolean;
+  Geometry?: { WGS84?: string };
+  RegionId?: number;
+  DataQuality?: string;
+  SpecificLane?: string;
+  MeasurementSide?: string;
+  ModifiedTime?: string;
+};
+
 type UpsertRow = {
   id: string;
   icon_id: string | null;
@@ -40,6 +57,26 @@ type UpsertRow = {
 type DisturbanceUpsertRow = UpsertRow & {
   message_type: string | null;
   severity: string | null;
+};
+
+type TrafficFlowUpsertRow = {
+  id: string;
+  site_id: number;
+  measurement_time: string | null;
+  measurement_or_calculation_period: number | null;
+  vehicle_type: string | null;
+  vehicle_flow_rate: number | null;
+  average_vehicle_speed: number | null;
+  data_quality: string | null;
+  county_no: number | null;
+  region_id: number | null;
+  deleted: boolean;
+  specific_lane: string | null;
+  measurement_side: string | null;
+  geom: string;
+  last_seen: string;
+  modified_time: string | null;
+  raw: unknown;
 };
 
 function normalizeSecret(value: string | null): string {
@@ -89,6 +126,34 @@ async function fetchDisturbances(apiKey: string): Promise<Deviation[]> {
   return deviations.filter((d) => d.MessageType !== "Olycka");
 }
 
+async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> {
+  const body = `<REQUEST>
+  <LOGIN authenticationkey="${apiKey}" />
+  <QUERY objecttype="TrafficFlow" namespace="Road.TrafficInfo" schemaversion="1.5" limit="10000">
+    <FILTER>
+      <AND>
+        <EQ name="Deleted" value="false" />
+        <EQ name="VehicleType" value="anyVehicle" />
+      </AND>
+    </FILTER>
+  </QUERY>
+</REQUEST>`;
+
+  const res = await fetch(TRAFIKVERKET_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/xml" },
+    body,
+  });
+  if (!res.ok) {
+    throw new Error(`Trafikverket TrafficFlow API ${res.status}: ${await res.text()}`);
+  }
+  const json = await res.json();
+  const results: Array<{ TrafficFlow?: TrafficFlow[] }> = json?.RESPONSE?.RESULT ?? [];
+  return results
+    .flatMap((r) => r.TrafficFlow ?? [])
+    .filter((f) => f.Deleted !== true && f.VehicleType === "anyVehicle");
+}
+
 function parseWgs84(wkt: string | undefined): { lng: number; lat: number } | null {
   if (!wkt) return null;
   const m = wkt.match(/POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)/i);
@@ -126,6 +191,33 @@ function deviationToRow(d: Deviation, now: string): UpsertRow | null {
   };
 }
 
+function trafficFlowToRow(f: TrafficFlow, now: string): TrafficFlowUpsertRow | null {
+  const coord = parseWgs84(f.Geometry?.WGS84);
+  if (!coord) return null;
+  const vehicleType = f.VehicleType ?? "unknown";
+  const lane = f.SpecificLane ?? "unknown";
+  const side = f.MeasurementSide ?? "unknown";
+  return {
+    id: `${f.SiteId}:${vehicleType}:${lane}:${side}`,
+    site_id: f.SiteId,
+    measurement_time: f.MeasurementTime ?? null,
+    measurement_or_calculation_period: f.MeasurementOrCalculationPeriod ?? null,
+    vehicle_type: f.VehicleType ?? null,
+    vehicle_flow_rate: f.VehicleFlowRate ?? null,
+    average_vehicle_speed: f.AverageVehicleSpeed ?? null,
+    data_quality: f.DataQuality ?? null,
+    county_no: f.CountyNo ?? null,
+    region_id: f.RegionId ?? null,
+    deleted: f.Deleted ?? false,
+    specific_lane: f.SpecificLane ?? null,
+    measurement_side: f.MeasurementSide ?? null,
+    geom: `SRID=4326;POINT(${coord.lng} ${coord.lat})`,
+    last_seen: now,
+    modified_time: f.ModifiedTime ?? null,
+    raw: f,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   const sharedSecret = normalizeSecret(Deno.env.get("SCRAPE_SHARED_SECRET"));
   if (!sharedSecret) {
@@ -150,9 +242,10 @@ Deno.serve(async (req: Request) => {
   const now = new Date().toISOString();
 
   try {
-    const [deviations, disturbances] = await Promise.all([
+    const [deviations, disturbances, trafficFlows] = await Promise.all([
       fetchDeviations(apiKey),
       fetchDisturbances(apiKey),
+      fetchTrafficFlows(apiKey),
     ]);
     const rows = deviations
       .map((d) => deviationToRow(d, now))
@@ -160,6 +253,9 @@ Deno.serve(async (req: Request) => {
     const disturbanceRows = disturbances
       .map((d) => disturbanceToRow(d, now))
       .filter((r): r is DisturbanceUpsertRow => r !== null);
+    const trafficFlowRows = trafficFlows
+      .map((f) => trafficFlowToRow(f, now))
+      .filter((r): r is TrafficFlowUpsertRow => r !== null);
 
     const client = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
@@ -183,6 +279,15 @@ Deno.serve(async (req: Request) => {
       disturbancesUpserted = disturbanceRows.length;
     }
 
+    let trafficFlowUpserted = 0;
+    if (trafficFlowRows.length > 0) {
+      const { error } = await client
+        .from("traffic_flow_measurements")
+        .upsert(trafficFlowRows, { onConflict: "id", ignoreDuplicates: false });
+      if (error) throw new Error(`traffic flow upsert: ${error.message}`);
+      trafficFlowUpserted = trafficFlowRows.length;
+    }
+
     const summary = {
       ok: true,
       fetched: deviations.length,
@@ -191,6 +296,9 @@ Deno.serve(async (req: Request) => {
       disturbances_fetched: disturbances.length,
       disturbances_upserted: disturbancesUpserted,
       disturbances_skipped_no_coord: disturbances.length - disturbanceRows.length,
+      traffic_flow_fetched: trafficFlows.length,
+      traffic_flow_upserted: trafficFlowUpserted,
+      traffic_flow_skipped_no_coord: trafficFlows.length - trafficFlowRows.length,
       elapsed_ms: Date.now() - start,
     };
     console.log("[scrape]", summary);

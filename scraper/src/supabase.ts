@@ -24,6 +24,26 @@ export type DisturbanceUpsertRow = UpsertRow & {
   severity: string | null;
 };
 
+export type TrafficFlowUpsertRow = {
+  id: string;
+  site_id: number;
+  measurement_time: string | null;
+  measurement_or_calculation_period: number | null;
+  vehicle_type: string | null;
+  vehicle_flow_rate: number | null;
+  average_vehicle_speed: number | null;
+  data_quality: string | null;
+  county_no: number | null;
+  region_id: number | null;
+  deleted: boolean;
+  specific_lane: string | null;
+  measurement_side: string | null;
+  geom: string;
+  last_seen: string;
+  modified_time: string | null;
+  raw: unknown;
+};
+
 export type UpsertResult = {
   attempted: number;
   error: Error | null;
@@ -52,6 +72,20 @@ export async function upsertDisturbances(
   if (rows.length === 0) return { attempted: 0, error: null };
 
   const { error } = await client.from("disturbances").upsert(rows, {
+    onConflict: "id",
+    ignoreDuplicates: false,
+  });
+
+  return { attempted: rows.length, error: error ? new Error(error.message) : null };
+}
+
+export async function upsertTrafficFlows(
+  client: SupabaseClient,
+  rows: TrafficFlowUpsertRow[]
+): Promise<UpsertResult> {
+  if (rows.length === 0) return { attempted: 0, error: null };
+
+  const { error } = await client.from("traffic_flow_measurements").upsert(rows, {
     onConflict: "id",
     ignoreDuplicates: false,
   });

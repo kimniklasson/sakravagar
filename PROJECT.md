@@ -80,7 +80,7 @@ Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om 
 
 **Medelhög — realtidslager, inte del av historisk heatmap:**
 - **`RoadCondition`** — friktion/halka. Användbart för "undvik idag"-vy snarare än statisk karta.
-- **`TrafficFlow`** — realtidsmätningar per site (VehicleFlowRate, AverageVehicleSpeed). Trängsel korrelerar med påkörning bakifrån. Bäst som separat realtidslager.
+- **`TrafficFlow`** — realtidsmätningar per site (VehicleFlowRate, AverageVehicleSpeed). Första punktbaserade lagret `Trafikläge` är implementerat 2026-04-29. Nästa steg för highlightade sträckor är snapping/interpolering mot NVDB-segment.
 - **Vägarbeten** — finns redan i `Situation`, filtreras bort idag. Temporär förhöjd risk, visa som overlay.
 
 **Bonus från NVDB i öppna API:et (sedan feb 2025):**

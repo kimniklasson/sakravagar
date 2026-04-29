@@ -42,6 +42,41 @@ const ResponseSchema = z.object({
 
 export type Deviation = z.infer<typeof DeviationSchema>;
 
+const TrafficFlowSchema = z
+  .object({
+    SiteId: z.number(),
+    MeasurementTime: z.string().optional(),
+    MeasurementOrCalculationPeriod: z.number().optional(),
+    VehicleType: z.string().optional(),
+    VehicleFlowRate: z.number().optional(),
+    AverageVehicleSpeed: z.number().optional(),
+    CountyNo: z.number().optional(),
+    Deleted: z.boolean().optional(),
+    Geometry: z
+      .object({
+        WGS84: z.string().optional(),
+      })
+      .optional(),
+    RegionId: z.number().optional(),
+    DataQuality: z.string().optional(),
+    SpecificLane: z.string().optional(),
+    MeasurementSide: z.string().optional(),
+    ModifiedTime: z.string().optional(),
+  })
+  .passthrough();
+
+const TrafficFlowResponseSchema = z.object({
+  RESPONSE: z.object({
+    RESULT: z.array(
+      z.object({
+        TrafficFlow: z.array(TrafficFlowSchema).optional(),
+      })
+    ),
+  }),
+});
+
+export type TrafficFlow = z.infer<typeof TrafficFlowSchema>;
+
 function buildQuery(apiKey: string, messageType?: string): string {
   const filter = messageType
     ? `
@@ -89,6 +124,36 @@ export async function fetchDisturbances(apiKey: string): Promise<Deviation[]> {
   // Störningar är driftinfo, inte historisk olycksdata. Vi sparar allt med
   // koordinat som inte är MessageType=Olycka i separat tabell.
   return deviations.filter((d) => d.MessageType !== "Olycka");
+}
+
+export async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> {
+  const body = `<REQUEST>
+  <LOGIN authenticationkey="${apiKey}" />
+  <QUERY objecttype="TrafficFlow" namespace="Road.TrafficInfo" schemaversion="1.5" limit="10000">
+    <FILTER>
+      <AND>
+        <EQ name="Deleted" value="false" />
+        <EQ name="VehicleType" value="anyVehicle" />
+      </AND>
+    </FILTER>
+  </QUERY>
+</REQUEST>`;
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/xml" },
+    body,
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Trafikverket TrafficFlow API ${res.status}: ${body}`);
+  }
+
+  const json = await res.json();
+  const parsed = TrafficFlowResponseSchema.parse(json);
+  const flows = parsed.RESPONSE.RESULT.flatMap((r) => r.TrafficFlow ?? []);
+  return flows.filter((f) => f.Deleted !== true && f.VehicleType === "anyVehicle");
 }
 
 // WGS84 i Trafikverkets svar är en WKT-sträng: "POINT (15.123 58.456)".
