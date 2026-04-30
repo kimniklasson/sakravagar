@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
@@ -8,20 +8,34 @@ import {
   addAdtLayer,
   addDisturbancesLayer,
   addEventsLayer,
+  addRouteLayer,
+  fetchLiveEvents,
+  focusRoute,
+  focusLiveEvents,
   addLargeRoadsLayer,
   addTrafficFlowLayer,
   addPopupHandler,
   addRiskLayer,
   refreshDisturbancesLayer,
   refreshTrafficFlowLayer,
+  setRouteLayerData,
   type LayerController,
 } from "./layers";
 import type { EventStats } from "@/app/api/events/stats/route";
+import type { GeocodeResult } from "@/app/api/geocode/route";
+import type { RouteLine } from "@/app/api/route/route";
 
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
 
 type TimeWindow = "all" | "7d" | "30d" | "6m" | "1y";
+type RouteStopSource = "manual" | "gps";
+type RouteStop = {
+  id: string;
+  label: string;
+  coordinates: [number, number] | null;
+  source: RouteStopSource;
+};
 
 const TIME_WINDOW_DAYS: Record<Exclude<TimeWindow, "all">, number> = {
   "7d": 7,
@@ -29,6 +43,11 @@ const TIME_WINDOW_DAYS: Record<Exclude<TimeWindow, "all">, number> = {
   "6m": 180,
   "1y": 365,
 };
+
+const initialRouteStops: RouteStop[] = [
+  { id: "from", label: "", coordinates: null, source: "manual" },
+  { id: "to", label: "", coordinates: null, source: "manual" },
+];
 
 function sinceFromWindow(w: TimeWindow): string | null {
   if (w === "all") return null;
@@ -73,6 +92,16 @@ export default function Map() {
   const [timeOpen, setTimeOpen] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
   const [mobileAttributionOpen, setMobileAttributionOpen] = useState(false);
+  const [routeStops, setRouteStops] = useState<RouteStop[]>(initialRouteStops);
+  const [activeRouteStopId, setActiveRouteStopId] = useState<string | null>(null);
+  const [loadingRouteStopId, setLoadingRouteStopId] = useState<string | null>(null);
+  const [geocodingStopId, setGeocodingStopId] = useState<string | null>(null);
+  const [geocodeResultsByStop, setGeocodeResultsByStop] = useState<Record<string, GeocodeResult[]>>({});
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [routeLines, setRouteLines] = useState<RouteLine[]>([]);
+  const dragRouteStopIdRef = useRef<string | null>(null);
+  const lastRouteKeyRef = useRef<string | null>(null);
   const layerCtrlRef = useRef<{
     risk?: LayerController;
     adt?: LayerController;
@@ -92,11 +121,18 @@ export default function Map() {
     setEventStats((await res.json()) as EventStats);
   };
 
+  const refreshLiveCount = async () => {
+    const liveEvents = await fetchLiveEvents();
+    setLiveCount(liveEvents.length);
+  };
+
   useEffect(() => {
     void refreshEventStats();
+    void refreshLiveCount();
     const id = window.setInterval(() => {
       setNow(Date.now());
       void refreshEventStats();
+      void refreshLiveCount();
     }, 60_000);
     return () => window.clearInterval(id);
   }, []);
@@ -152,9 +188,7 @@ export default function Map() {
     map.on("dragend", () => setAtUserLocation(false));
     map.on("moveend", () => {
       if (!mapLoadedRef.current) return;
-      void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) }).then(
-        ({ liveCount }) => setLiveCount(liveCount),
-      );
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) });
     });
 
     map.on("load", () => {
@@ -163,12 +197,13 @@ export default function Map() {
       layerCtrlRef.current.risk = addRiskLayer(map);
       layerCtrlRef.current.largeRoads.setVisible(largeRoadsOn);
       void addEventsLayer(map, { since: sinceFromWindow(timeWindow) })
-        .then(({ liveCount }) => {
-          setLiveCount(liveCount);
+        .then(() => {
+          void refreshLiveCount();
           layerCtrlRef.current.disturbances = addDisturbancesLayer(map);
           layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
           layerCtrlRef.current.trafficFlow = addTrafficFlowLayer(map);
           layerCtrlRef.current.trafficFlow.setVisible(trafficFlowOn);
+          addRouteLayer(map);
           return Promise.all([
             refreshDisturbancesLayer(map),
             refreshTrafficFlowLayer(map),
@@ -192,9 +227,7 @@ export default function Map() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
-    void addEventsLayer(map, { since: sinceFromWindow(timeWindow) }).then(({ liveCount }) =>
-      setLiveCount(liveCount),
-    );
+    void addEventsLayer(map, { since: sinceFromWindow(timeWindow) });
   }, [timeWindow]);
 
   useEffect(() => {
@@ -221,14 +254,66 @@ export default function Map() {
     const id = window.setInterval(() => {
       const map = mapRef.current;
       if (!map || !mapLoadedRef.current) return;
-      void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) }).then(
-        ({ liveCount }) => setLiveCount(liveCount),
-      );
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) });
       void refreshDisturbancesLayer(map);
       void refreshTrafficFlowLayer(map);
     }, 60_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    const activeStop = routeStops.find((stop) => stop.id === activeRouteStopId);
+    if (!activeStop || activeStop.coordinates || activeStop.source === "gps") {
+      setGeocodingStopId(null);
+      return;
+    }
+
+    const query = activeStop.label.trim();
+    if (query.length < 2) {
+      setGeocodeResultsByStop((byStop) => ({ ...byStop, [activeStop.id]: [] }));
+      setGeocodingStopId(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setGeocodingStopId(activeStop.id);
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        q: query,
+        limit: "5",
+        t: String(Date.now()),
+      });
+      void fetch(`/api/geocode?${params.toString()}`, {
+        signal: controller.signal,
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(await res.text());
+          return res.json() as Promise<{ results: GeocodeResult[] }>;
+        })
+        .then(({ results }) => {
+          if (results.length > 0) {
+            setGeocodeResultsByStop((byStop) => ({ ...byStop, [activeStop.id]: results }));
+          } else {
+            setGeocodeResultsByStop((byStop) => {
+              const previous = byStop[activeStop.id] ?? [];
+              return previous.length > 0 ? byStop : { ...byStop, [activeStop.id]: [] };
+            });
+          }
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          console.warn("geocode lookup failed", err);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setGeocodingStopId(null);
+        });
+    }, 260);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [activeRouteStopId, routeStops]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -242,6 +327,236 @@ export default function Map() {
 
   const handleZoomIn = () => mapRef.current?.zoomIn();
   const handleZoomOut = () => mapRef.current?.zoomOut();
+  const clearRoute = () => {
+    lastRouteKeyRef.current = null;
+    setRouteLines([]);
+    setRouteError(null);
+    const map = mapRef.current;
+    if (map && mapLoadedRef.current) setRouteLayerData(map, []);
+  };
+  const setRouteStopLabel = (id: string, label: string) => {
+    clearRoute();
+    setRouteStops((stops) =>
+      stops.map((stop) =>
+        stop.id === id
+          ? { ...stop, label, coordinates: null, source: "manual" }
+          : stop,
+      ),
+    );
+  };
+  const clearRouteStop = (id: string) => {
+    clearRoute();
+    setGeocodeResultsByStop((byStop) => ({ ...byStop, [id]: [] }));
+    setRouteStops((stops) =>
+      stops.map((stop) =>
+        stop.id === id
+          ? { ...stop, label: "", coordinates: null, source: "manual" }
+          : stop,
+      ),
+    );
+  };
+  const addRouteStop = () => {
+    clearRoute();
+    const id = `stop-${Date.now()}`;
+    setRouteStops((stops) => {
+      const destination = stops.at(-1);
+      const next: RouteStop = { id, label: "", coordinates: null, source: "manual" };
+      return destination ? [...stops.slice(0, -1), next, destination] : [next];
+    });
+    setActiveRouteStopId(id);
+  };
+  const reorderRouteStop = (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    clearRoute();
+    setRouteStops((stops) => {
+      const sourceIndex = stops.findIndex((stop) => stop.id === sourceId);
+      const targetIndex = stops.findIndex((stop) => stop.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return stops;
+      const next = [...stops];
+      const [moved] = next.splice(sourceIndex, 1);
+      if (!moved) return stops;
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+  const selectGeocodeResult = (stopId: string, result: GeocodeResult) => {
+    clearRoute();
+    setRouteStops((stops) =>
+      stops.map((stop) =>
+        stop.id === stopId
+          ? { ...stop, label: result.shortLabel, coordinates: result.coordinates, source: "manual" }
+          : stop,
+      ),
+    );
+    setGeocodeResultsByStop((byStop) => ({ ...byStop, [stopId]: [] }));
+  };
+  const geocodeRouteStop = useCallback(async (stop: RouteStop): Promise<RouteStop> => {
+    if (stop.coordinates) return stop;
+    const query = stop.label.trim();
+    if (query.length < 2) throw new Error("Fyll i både från och till.");
+
+    const params = new URLSearchParams({ q: query, limit: "1" });
+    const res = await fetch(`/api/geocode?${params.toString()}`);
+    if (!res.ok) throw new Error("Kunde inte tolka adressen.");
+
+    const { results } = (await res.json()) as { results: GeocodeResult[] };
+    const match = results[0];
+    if (!match) throw new Error(`Hittade ingen träff för "${query}".`);
+
+    return {
+      ...stop,
+      label: match.shortLabel,
+      coordinates: match.coordinates,
+      source: "manual",
+    };
+  }, []);
+  const planRouteForStops = useCallback(async (
+    stopsToPlan: RouteStop[],
+    opts: { auto?: boolean } = {},
+  ) => {
+    const draftKey = stopsToPlan
+      .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
+      .join("|");
+
+    setRouteLoading(true);
+    setRouteError(null);
+    try {
+      const resolvedStops = await Promise.all(stopsToPlan.map(geocodeRouteStop));
+      const routeCoordinates = resolvedStops
+        .map((stop) => stop.coordinates)
+        .filter((coord): coord is [number, number] => coord !== null);
+      if (routeCoordinates.length !== resolvedStops.length) {
+        throw new Error("Fyll i både från och till.");
+      }
+
+      const resolvedKey = resolvedStops
+        .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
+        .join("|");
+      lastRouteKeyRef.current = resolvedKey;
+
+      setRouteStops((current) => {
+        if (current.length !== resolvedStops.length) return current;
+        const currentKey = current
+          .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
+          .join("|");
+        if (currentKey !== draftKey) return current;
+        return resolvedStops;
+      });
+      setGeocodeResultsByStop({});
+
+      const res = await fetch("/api/route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coordinates: routeCoordinates, alternatives: 3 }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Kunde inte hitta en rutt.");
+      }
+      const { routes } = (await res.json()) as { routes: RouteLine[] };
+      if (!routes.length) throw new Error("Kunde inte hitta en rutt.");
+
+      setRouteLines(routes);
+      const map = mapRef.current;
+      if (map && mapLoadedRef.current) {
+        setRouteLayerData(map, routes);
+        focusRoute(map, routes);
+      }
+    } catch (err) {
+      console.warn("route planning failed", err);
+      lastRouteKeyRef.current = null;
+      setRouteLines([]);
+      const map = mapRef.current;
+      if (map && mapLoadedRef.current) setRouteLayerData(map, []);
+      if (!opts.auto || err instanceof Error) {
+        setRouteError(err instanceof Error ? err.message : "Kunde inte hitta en rutt.");
+      }
+    } finally {
+      setRouteLoading(false);
+    }
+  }, [geocodeRouteStop]);
+  useEffect(() => {
+    const readyForRoute = routeStops.length >= 2 && routeStops.every((stop) => stop.label.trim().length >= 2);
+    if (!readyForRoute || loadingRouteStopId || geocodingStopId || routeLoading) return;
+
+    const routeKey = routeStops
+      .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
+      .join("|");
+    if (routeKey === lastRouteKeyRef.current) return;
+
+    const id = window.setTimeout(() => {
+      void planRouteForStops(routeStops, { auto: true });
+    }, 650);
+    return () => window.clearTimeout(id);
+  }, [geocodingStopId, loadingRouteStopId, planRouteForStops, routeLoading, routeStops]);
+  const reverseGeocodeRouteStop = async (id: string, coordinates: [number, number]) => {
+    const params = new URLSearchParams({
+      lng: String(coordinates[0]),
+      lat: String(coordinates[1]),
+    });
+    try {
+      const res = await fetch(`/api/geocode?${params.toString()}`);
+      if (!res.ok) throw new Error(await res.text());
+      const { results } = (await res.json()) as { results: GeocodeResult[] };
+      const label = results[0]?.shortLabel ?? "Din position";
+      setRouteStops((stops) =>
+        stops.map((stop) =>
+          stop.id === id
+            ? { ...stop, label, coordinates, source: "gps" }
+            : stop,
+        ),
+      );
+    } catch (err) {
+      console.warn("route reverse geocoding failed", err);
+      setRouteStops((stops) =>
+        stops.map((stop) =>
+          stop.id === id
+            ? { ...stop, label: "Din position", coordinates, source: "gps" }
+            : stop,
+        ),
+      );
+    } finally {
+      setLoadingRouteStopId(null);
+    }
+  };
+  const handleUsePositionForRouteStop = (id: string) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      window.alert("Platsfunktionen kräver HTTPS. Den fungerar på live-sajten, men inte via lokal http-IP.");
+      return;
+    }
+    setActiveRouteStopId(id);
+    setLoadingRouteStopId(id);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearRoute();
+        const coordinates: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+        setRouteStops((stops) =>
+          stops.map((stop) =>
+            stop.id === id
+              ? { ...stop, label: "Din position", coordinates, source: "gps" }
+              : stop,
+          ),
+        );
+        void reverseGeocodeRouteStop(id, coordinates);
+      },
+      (err) => {
+        console.warn("route geolocation failed", err);
+        setLoadingRouteStopId(null);
+      },
+    );
+  };
+  const handlePlanRoute = async () => {
+    await planRouteForStops(routeStops);
+  };
+  const handleLiveBoxToggle = () => {
+    setLiveOpen((v) => !v);
+    if (liveCount === 0) return;
+    const map = mapRef.current;
+    if (!map) return;
+    setAtUserLocation(false);
+    void focusLiveEvents(map).then(({ liveCount }) => setLiveCount(liveCount));
+  };
   const handleLocate = () => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
     if (typeof window !== "undefined" && !window.isSecureContext) {
@@ -283,7 +598,7 @@ export default function Map() {
         <LiveBox
           accidentCount={liveCount}
           open={liveOpen}
-          onToggle={() => setLiveOpen((v) => !v)}
+          onToggle={handleLiveBoxToggle}
         />
         <TimeBox
           value={timeWindow}
@@ -292,7 +607,42 @@ export default function Map() {
           onToggleOpen={() => setTimeOpen((v) => !v)}
         />
       </div>
+      <div className={styles.routeControls}>
+        <RoutePlannerBox
+          stops={routeStops}
+          activeStopId={activeRouteStopId}
+          loadingStopId={loadingRouteStopId}
+          geocodingStopId={geocodingStopId}
+          geocodeResultsByStop={geocodeResultsByStop}
+          routeLoading={routeLoading}
+          routeError={routeError}
+          routes={routeLines}
+          onFocusStop={setActiveRouteStopId}
+          onDeactivate={() => setActiveRouteStopId(null)}
+          onChangeStop={setRouteStopLabel}
+          onClearStop={clearRouteStop}
+          onSelectGeocode={selectGeocodeResult}
+          onUsePosition={handleUsePositionForRouteStop}
+          onAddStop={addRouteStop}
+          onPlanRoute={handlePlanRoute}
+          onDragStartStop={(id) => { dragRouteStopIdRef.current = id; }}
+          onDropStop={(id) => {
+            const sourceId = dragRouteStopIdRef.current;
+            dragRouteStopIdRef.current = null;
+            if (sourceId) reorderRouteStop(sourceId, id);
+          }}
+        />
+      </div>
       <div className={styles.rightControls}>
+        <button
+          type="button"
+          className={`${styles.iconBtn} ${atUserLocation ? styles.iconBtnActive : ""}`}
+          onClick={handleLocate}
+          aria-label="Visa min position"
+          aria-pressed={atUserLocation}
+        >
+          <LocationIcon />
+        </button>
         <div className={styles.zoomGroup}>
           <button
             type="button"
@@ -311,15 +661,6 @@ export default function Map() {
             <MinusIcon />
           </button>
         </div>
-        <button
-          type="button"
-          className={`${styles.iconBtn} ${atUserLocation ? styles.iconBtnActive : ""}`}
-          onClick={handleLocate}
-          aria-label="Visa min position"
-          aria-pressed={atUserLocation}
-        >
-          <LocationIcon />
-        </button>
         <MobileAttribution
           open={mobileAttributionOpen}
           onToggle={() => setMobileAttributionOpen((v) => !v)}
@@ -489,6 +830,184 @@ const TRAFFIC_FLOW_SCALE: ScaleStop[] = [
   { color: "#FFD166", label: "Tätt" },
   { color: "#FF7A3D", label: "Långsamt" },
 ];
+
+function RoutePlannerBox({
+  stops,
+  activeStopId,
+  loadingStopId,
+  geocodingStopId,
+  geocodeResultsByStop,
+  routeLoading,
+  routeError,
+  routes,
+  onFocusStop,
+  onDeactivate,
+  onChangeStop,
+  onClearStop,
+  onSelectGeocode,
+  onUsePosition,
+  onAddStop,
+  onPlanRoute,
+  onDragStartStop,
+  onDropStop,
+}: {
+  stops: RouteStop[];
+  activeStopId: string | null;
+  loadingStopId: string | null;
+  geocodingStopId: string | null;
+  geocodeResultsByStop: Record<string, GeocodeResult[]>;
+  routeLoading: boolean;
+  routeError: string | null;
+  routes: RouteLine[];
+  onFocusStop: (id: string) => void;
+  onDeactivate: () => void;
+  onChangeStop: (id: string, label: string) => void;
+  onClearStop: (id: string) => void;
+  onSelectGeocode: (id: string, result: GeocodeResult) => void;
+  onUsePosition: (id: string) => void;
+  onAddStop: () => void;
+  onPlanRoute: () => void;
+  onDragStartStop: (id: string) => void;
+  onDropStop: (id: string) => void;
+}) {
+  const activeStop = stops.find((stop) => stop.id === activeStopId) ?? null;
+  const canPlanRoute = stops.length >= 2 && stops.every((stop) => stop.coordinates !== null);
+  const primaryRoute = routes[0] ?? null;
+
+  return (
+    <div
+      className={styles.routeBox}
+      onBlur={(e) => {
+        const next = e.relatedTarget;
+        if (next instanceof Node && e.currentTarget.contains(next)) return;
+        onDeactivate();
+      }}
+    >
+      <div className={styles.routeStops}>
+        {stops.map((stop, index) => {
+          const isFirst = index === 0;
+          const isLast = index === stops.length - 1;
+          const loading = loadingStopId === stop.id || geocodingStopId === stop.id;
+          const placeholder = isFirst ? "Från adress" : isLast ? "Till adress" : "Stopp";
+          const suggestions = activeStopId === stop.id ? geocodeResultsByStop[stop.id] ?? [] : [];
+          return (
+            <div
+              key={stop.id}
+              className={styles.routeStopGroup}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => onDropStop(stop.id)}
+            >
+              <div
+                className={`${styles.routeInputRow} ${
+                  isFirst ? styles.routeInputRowFirst : ""
+                } ${isLast ? styles.routeInputRowLast : ""}`}
+              >
+                {loading ? (
+                  <span className={styles.routeSpinner} aria-hidden="true" />
+                ) : (
+                  <span className={`${styles.routeIcon} ${styles.routeSearchIcon}`} aria-hidden="true" />
+                )}
+                <input
+                  className={styles.routeInput}
+                  value={stop.label}
+                  onFocus={() => onFocusStop(stop.id)}
+                  onChange={(e) => onChangeStop(stop.id, e.target.value)}
+                  placeholder={placeholder}
+                  aria-label={placeholder}
+                />
+                {stop.label && (
+                  <button
+                    type="button"
+                    className={styles.routeClearBtn}
+                    onClick={() => onClearStop(stop.id)}
+                    aria-label={`Rensa ${placeholder.toLowerCase()}`}
+                  >
+                    <span className={`${styles.routeIcon} ${styles.routeCloseIcon}`} aria-hidden="true" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.routeDragBtn}
+                  draggable
+                  onDragStart={() => onDragStartStop(stop.id)}
+                  onDragEnd={() => onDragStartStop("")}
+                  aria-label={`Flytta ${placeholder.toLowerCase()}`}
+                >
+                  <span className={`${styles.routeIcon} ${styles.routeDragIcon}`} aria-hidden="true" />
+                </button>
+              </div>
+              {suggestions.length > 0 && (
+                <div className={styles.routeSuggestions}>
+                  {suggestions.map((result) => (
+                    <button
+                      key={result.id}
+                      type="button"
+                      className={styles.routeSuggestion}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onSelectGeocode(stop.id, result)}
+                    >
+                      {result.shortLabel}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {activeStop && activeStop.id === stops[0]?.id && !activeStop.label && (
+        <button
+          type="button"
+          className={styles.routePositionBtn}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onUsePosition(activeStop.id)}
+        >
+          <LocationIcon className={styles.routePositionIcon} />
+          <span className={styles.routePositionLabel}>Din plats</span>
+        </button>
+      )}
+      <div className={styles.routeActions}>
+        <button type="button" className={styles.routeActionBtn} onClick={onAddStop}>
+          <PlusIcon className={styles.routeActionIcon} />
+          <span>Lägg till ett stopp</span>
+        </button>
+        <button
+          type="button"
+          className={styles.routeOptionsBtn}
+          disabled={!canPlanRoute || routeLoading}
+          aria-disabled={!canPlanRoute || routeLoading}
+          onClick={onPlanRoute}
+        >
+          {routeLoading ? "Räknar" : "Alternativ"}
+        </button>
+      </div>
+      {(routeError || primaryRoute) && (
+        <div className={styles.routeStatus} aria-live="polite">
+          {routeError
+            ? routeError
+            : primaryRoute
+              ? `${formatRouteDistance(primaryRoute.distanceMeters)} · ${formatRouteDuration(primaryRoute.durationSeconds)}${
+                  routes.length > 1 ? ` · ${routes.length} alternativ` : ""
+                }`
+              : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatRouteDistance(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters / 10) * 10} m`;
+  return `${(meters / 1000).toFixed(meters < 10_000 ? 1 : 0).replace(".", ",")} km`;
+}
+
+function formatRouteDuration(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
+}
 
 function LayerBox({
   label,
@@ -776,10 +1295,10 @@ function DropdownIcon() {
   );
 }
 
-function PlusIcon() {
+function PlusIcon({ className }: { className?: string } = {}) {
   return (
     <svg
-      className={styles.btnIcon}
+      className={`${styles.btnIcon} ${className ?? ""}`}
       width="16"
       height="16"
       viewBox="0 0 16 16"
@@ -808,10 +1327,10 @@ function MinusIcon() {
   );
 }
 
-function LocationIcon() {
+function LocationIcon({ className }: { className?: string } = {}) {
   return (
     <svg
-      className={styles.btnIcon}
+      className={`${styles.btnIcon} ${className ?? ""}`}
       width="16"
       height="16"
       viewBox="0 0 17 17"

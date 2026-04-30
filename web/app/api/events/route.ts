@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const LIVE_THRESHOLD_MS = 90 * 60 * 1000;
 
 export type EventPoint = {
   id: string;
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const since = searchParams.get("since");
+  const liveOnly = searchParams.get("live") === "1" || searchParams.get("live") === "true";
   const { bbox, error: bboxError } = parseBboxParam(searchParams.get("bbox"), {
     required: true,
     maxArea: 5000,
@@ -47,6 +49,9 @@ export async function GET(req: Request) {
   // skulle göra att gamla pågående olyckor felaktigt dyker upp i "senaste 7
   // dagar".
   if (since) query = query.gte("first_seen", since);
+  if (liveOnly) {
+    query = query.gte("last_seen", new Date(Date.now() - LIVE_THRESHOLD_MS).toISOString());
+  }
 
   query = query
     .gte("lng", bbox.minLng)

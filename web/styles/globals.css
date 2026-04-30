@@ -67,6 +67,12 @@ a:hover {
   letter-spacing: var(--type-small-tracking);
 }
 
+.type-small-x {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  letter-spacing: 0;
+}
+
 /* Segment-popup (MapLibre Popup, klickad på NVDB-lager).
    MapLibre renderar popup-DOM utanför Reacts träd så vi kan inte
    använda CSS Modules — klasserna sätts i layers.ts:s renderSegment(). */

@@ -7,18 +7,19 @@ Idé, validering och strategi i [PROJECT.md](./PROJECT.md). Vägval i [docs/deci
 ## Arkitektur
 
 ```
-GitHub Actions (30 min) ──► Trafikverket Öppna API
-         │
-         ▼ upsert
-   Supabase Postgres + PostGIS
-         │
-         ▼ PostgREST
-   Next.js på Vercel + MapLibre GL
+Supabase pg_cron ──► Edge Function scrape ──► Trafikverket Öppna API
+        │                         │
+        │                         ▼ upsert
+        └────────────────► Supabase Postgres + PostGIS
+                                  │
+                                  ▼ API/RPC
+                         Next.js + MapLibre GL
 ```
 
-- **Scraper** (`scraper/`) — Node/TS, körs av GH Actions, skriver till Supabase
-- **Web** (`web/`) — Next.js App Router, MapLibre-karta, läser från Supabase
-- **DB** (`db/`) — SQL-migrations
+- **Scraper** (`supabase/functions/scrape/`) — prod-scraper via Edge Function + pg_cron
+- **Scraper CLI** (`scraper/`) — Node/TS-version för manuell körning/nödknapp
+- **Web** (`web/`) — Next.js App Router, MapLibre-karta, API-rutter mot Supabase samt geocoding/routing-proxies
+- **DB** (`db/`) — SQL-migrations, RPC:er, vyer och materialiserade vyer
 - **Shared** (`shared/`) — TS-typer delade mellan scraper och web
 
 ## Kom igång (utvecklare)
@@ -29,8 +30,8 @@ Förutsätter att konton är uppsatta enligt [setup-checklistan](#setup-checklis
 corepack enable            # pnpm via Node >=20
 pnpm install
 cp .env.example .env       # fyll i värden
-pnpm scrape:dev            # engångskörning mot Trafikverket → Supabase
 pnpm web                   # Next.js dev på :3000
+pnpm scrape:dev            # manuell engångsscrape vid behov
 ```
 
 ## Setup-checklista
@@ -38,28 +39,28 @@ pnpm web                   # Next.js dev på :3000
 Engångsgrejer som inte kan automatiseras:
 
 - [ ] Konto på [data.trafikverket.se](https://data.trafikverket.se/) och beställd nyckel för **Öppet API / TrafficInformation** (inte Datex II)
-- [ ] Nytt Supabase-projekt på befintligt konto, region EU-nord/Frankfurt
+- [ ] Nytt Supabase-projekt på befintligt konto, region EU-nord/Stockholm
 - [ ] PostGIS aktiverad: Supabase → Database → Extensions → `postgis`
-- [ ] Schemat applicerat: kör [`db/migrations/0001_init.sql`](./db/migrations/0001_init.sql) i SQL Editor
-- [ ] GitHub-repo (publikt, för gratis Actions-minuter)
-- [ ] Repo-secrets satta: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
-- [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL` + `SUPABASE_ANON_KEY`
+- [ ] Schemat applicerat: kör migrationskedjan i [`db/migrations/`](./db/migrations/)
+- [ ] Edge Function `scrape` deployad och `pg_cron`/`pg_net` aktiverat via migration
+- [ ] Repo-secrets satta om GitHub Actions-nödknappen ska användas: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
+- [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL` + `SUPABASE_ANON_KEY` samt dedikerade `NOMINATIM_*`/`OSRM_*`-värden före publik routingtrafik
 
 ## Deploy
 
-- **Scraper** deployas inte separat — GH Actions kör direkt från repot vid varje schema-triggering.
+- **Scraper** deployas som Supabase Edge Function. GitHub Actions finns bara som manuell nödknapp.
 - **Web** deployas automatiskt när main uppdateras (Vercel Git-integration).
 
 ## Struktur
 
 ```
 trafik/
-├── scraper/               # Node/TS cron-scraper
+├── scraper/               # Node/TS scraper CLI
 ├── web/                   # Next.js-frontend
 ├── shared/                # delade TS-typer
 ├── db/                    # SQL-migrations
-├── .github/workflows/     # cron.yml
-├── docs/                  # ADR-lite beslut
+├── .github/workflows/     # manuell scrape-nödknapp
+├── docs/                  # current-state + ADR-lite beslut
 ├── PROJECT.md             # strategi & validering
 └── README.md              # (du är här)
 ```

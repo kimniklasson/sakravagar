@@ -1,6 +1,6 @@
 # Trafiksäkerhets-app — projektanteckningar
 
-Senast uppdaterad: 2026-04-24
+Senast uppdaterad: 2026-04-30
 
 ## Idén
 
@@ -8,9 +8,9 @@ Webbapp som visar historisk olycksdata på svenska vägar för att hjälpa nerv�
 
 ## Nuvarande inriktning (efter validering)
 
-**MVP = heatmap, inte routing.**
+**MVP = kartbaserad risk/trygghetsvy, inte routing.**
 
-Visa vägar färgkodade efter olycksfrekvens baserat på egen insamlad historik. Routing som potentiell fas 2 när datat växt och värdet är validerat.
+Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk normaliserad mot trafikflöde. Routing är potentiell fas 2 när historiken är större och värdet är validerat.
 
 ## Validering — vad vi verifierat
 
@@ -20,12 +20,12 @@ Visa vägar färgkodade efter olycksfrekvens baserat på egen insamlad historik.
 - ❌ **Transportstyrelsens publika olycksstatistik**: bara XLSX, bara nationell/länsnivå. För grovt för vägbaserad analys.
 - ❌ **Trafikanalys**: samma — länsnivå som finaste uppdelning.
 - ✅ **Trafikverkets öppna API** (api.trafikinfo.trafikverket.se): `Situation`/`Deviation`-objekt med olyckor i realtid, inkl. koordinater. **CC0-licens** — fri att lagra, använda kommersiellt, redistribuera.
-- ✅ **NVDB**: svenska vägnätet, gratis via Lastkajen. Sparar för senare när routing blir aktuellt.
+- ✅ **NVDB/Lastkajen**: svenska vägnätet, ÅDT och hastighetsdata. Används redan för risknormalisering, flödeslager och hastighetslager.
 
 ### Juridik & villkor
 
 - Trafikverkets API: CC0 1.0 — inga restriktioner. Attribution ej krävs men artigt.
-- Trafikverket övervakar trafik, hör av sig vid excess. Våra ~50 requests/dag är icke-problem.
+- Trafikverket övervakar trafik, hör av sig vid excess. Nuvarande polling är låg volym.
 
 ### Konkurrens
 
@@ -36,10 +36,10 @@ Visa vägar färgkodade efter olycksfrekvens baserat på egen insamlad historik.
 ## Teknisk arkitektur (beslutad)
 
 ### Datainsamling
-- **GitHub Actions cron** — publikt repo för obegränsade minuter (privat fungerar också men tightare marginal)
-- **Polling-intervall: 30 min** att starta med. Utvärdera efter 1 månad baserat på typisk `aktiv-tid` per händelse. Justera om medianen är långt över eller nära 30 min.
-- **Deduplicering på händelsens `Id`** — lagra första gången sedd, uppdatera `last_seen` vid varje återkomst
-- Secrets (API-nyckel, DB-creds) via GitHub Actions secrets, inte i kod
+- **Supabase pg_cron + Edge Function `scrape`** — hämtar Trafikverket-flöden och upsertar i Supabase.
+- **GitHub Actions** finns kvar som manuell nödknapp, inte som primär schemaläggning.
+- **Polling-intervall:** scrape-cron är fortfarande lugn nog för Trafikverkets API, men TrafficFlow kan behöva tätare intervall om det ska kännas minutnära.
+- **Deduplicering:** Trafikverkets `Deviation.Id` bevarar tekniska rader; användarnära risk/popup dedupar logiska olyckor per segment, meddelande, vägnummer och timme.
 
 ### Lagring
 - **Supabase free tier** — Postgres med PostGIS. Nytt projekt på befintligt konto (delar inte quota med andra projekt)
@@ -59,29 +59,25 @@ Visa vägar färgkodade efter olycksfrekvens baserat på egen insamlad historik.
 
 **Viktigt: starta insamlingen så snart som möjligt, även innan UI byggts.** Varje dag utan polling = en dag mindre historik vid lansering.
 
-## Nästa steg (imorgon och framåt)
+## Nuvarande byggfokus
 
-1. Registrera API-nyckel hos Trafikverket ([data.trafikverket.se](https://data.trafikverket.se/))
-2. Utforska `Situation`-objektet — hämta en testbatch, inspektera fält (Id, IconId, Geometry, ModifiedTime, etc.)
-3. Designa schema i Supabase (events-tabell med dedupe på Id, first_seen/last_seen)
-4. Bygg minimal Python/Node-scraper
-5. Lägg upp GitHub Actions cron (30 min intervall)
-6. Verifiera att data flödar in ett par dagar
-7. Sedan: börja tänka på frontend/heatmap
+1. Fortsätt små UX-fixar i kartan medan datalagren stabiliseras.
+2. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
+3. När Kim levererar ny samlad design/interaktionsspec: bygg vidare på befintliga lager, tokens och MapLibre-struktur.
 
 ## Potentiella framtida datalager
 
 Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om den viktas mot fler riskfaktorer. Kandidater, rankade efter relevans för "rädd förare"-usecaset:
 
 **Hög prioritet — riskproxy oberoende av historik:**
-- **`RoadData` v1** (öppna API:et, verifierat 2026-04-24) — `SpeedLimit` ✅, `RoadWidth`, `BearingCapacity`, `RoadOwner`, `RoadConstruction2009`. 90+ km/h och smala vägar överrepresenterade i dödsolyckor. Också: `RoadGeometry` v1 ger LINESTRING per vägsegment → kan snappa olyckor till segment utan NVDB.
-- **ÅDT (årsdygnstrafik)** — kritisk *normalisering* av olyckstäthet. Utan ÅDT visar heatmappen mest "stora vägar", inte "farliga vägar". **Finns inte i öppna trafikinfo-API:et** (verifierat 2026-04-24 — saknas i `RoadData`, `TrafficFlow` är realtids-punktmätningar ej årsgenomsnitt). **Ligger i Lastkajen** (VTF/NVDB — fordons-, MC- och cykelflöden + hastighetsdata per segment). Licens **CC0** — OK för publik/kommersiell app. Kräver registrering (gratis) och acceptans av villkor. Engångsimport (uppdateras årligen), inte polling → shapefile → PostGIS.
+- **`RoadData` v1** (öppna API:et, verifierat 2026-04-24) — `SpeedLimit`, `RoadWidth`, `BearingCapacity`, `RoadOwner`, `RoadConstruction2009`. Kan bli kompletterande källa, men NVDB/Lastkajen används redan för ÅDT/hastighet.
+- **ÅDT (årsdygnstrafik)** — redan importerat från Lastkajen och används för risknormalisering samt Flöde-lagret.
 - **`TrafficSafetyCamera`** — ATK-kameror sätts där dödsolyckor skett historiskt. Proxy för kända farliga sträckor, trivial att lägga in.
 
 **Medelhög — realtidslager, inte del av historisk heatmap:**
 - **`RoadCondition`** — friktion/halka. Användbart för "undvik idag"-vy snarare än statisk karta.
-- **`TrafficFlow`** — realtidsmätningar per site (VehicleFlowRate, AverageVehicleSpeed). Första punktbaserade lagret `Trafikläge` är implementerat 2026-04-29. Nästa steg för highlightade sträckor är snapping/interpolering mot NVDB-segment.
-- **Vägarbeten** — finns redan i `Situation`, filtreras bort idag. Temporär förhöjd risk, visa som overlay.
+- **`TrafficFlow`** — implementerat som `Liveflöde`, snappat till närmaste vägsegment.
+- **Vägarbeten/köer** — implementerat som separat `Störning`-overlay, inte del av historisk risk.
 
 **Bonus från NVDB i öppna API:et (sedan feb 2025):**
 12 NVDB-mängder tillgängliga via `api.trafikinfo`: `Hastighetsgräns`, `Vägbredd`, `Bärighet`, `AntalKörfält2`, `FunktionellVägklass`, `FörbjudenFärdriktning`, `Gatunamn`, `Höjdhinder_upp_till_45_dm`, `Väghållare`, `Vägnummer`, `Vägtrafiknät`, `ÖvrigtVägnamn`. Överlappar delvis `RoadData`. ÅDT ingår *inte* i denna lista.
@@ -89,11 +85,8 @@ Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om 
 **Behöver utredas:**
 - **Viltolyckor / viltstängsel** — viltolyckor ägs av Nationella Viltolycksrådet, separat datakälla. Viltstängsel kan finnas i NVDB via Lastkajen. Relevant för nervösa förare i skogsområden men kräver egen integration.
 
-**Nästa konkreta steg:** ladda ÅDT från Lastkajen (registrera konto, ladda ned VTF-shapefile, importera till PostGIS). Bör göras innan heatmap-färgskalan kalibreras — normalisering mot trafikvolym ändrar trösklarna helt.
-
 ## Öppna frågor / överväganden
 
-- Ska vi även logga icke-olycka-händelser (stopp, vägarbeten)? Troligen nej i början — håll scope tight. *Vägarbeten kan bli relevant som overlay senare, se datalager-sektion.*
 - Hur kategorisera allvarlighetsgrad? Kanske via `IconId` eller text i `Message`.
 - Eventuellt parallellt: mejla Transportstyrelsen om STRADA-access för framtida berikning.
 
@@ -103,4 +96,3 @@ Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om 
 - [Trafikverket Datautbytesportal](https://data.trafikverket.se/)
 - [STRADA uttagswebb](https://www.transportstyrelsen.se/sv/om-oss/statistik-och-analys/statistik-inom-vagtrafik/olycksstatistik/om-strada/anvandarstod1/strada-uttagswebb/)
 - [Supabase pricing](https://supabase.com/pricing)
-- [GitHub Actions — minutes per plan](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions)

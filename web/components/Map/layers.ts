@@ -7,6 +7,7 @@ import type { SegmentDetail } from "@/app/api/segment/route";
 import type { EventPoint } from "@/app/api/events/route";
 import type { DisturbancePoint } from "@/app/api/disturbances/route";
 import type { LargeRoadSegment } from "@/app/api/large-roads/route";
+import type { RouteLine } from "@/app/api/route/route";
 import type { TrafficFlowSegment } from "@/app/api/traffic-flow/route";
 
 type AdtSegment = {
@@ -46,6 +47,12 @@ const LIVE_CORE_LAYER_ID = "events-live-core";
 // droppar olyckor ur feeden när de avslutas, så last_seen slutar uppdateras
 // och vi kan klassa dem som historiska.
 const LIVE_THRESHOLD_MS = 90 * 60 * 1000;
+const SWEDEN_EVENTS_BBOX: Bbox = {
+  west: 10.5,
+  south: 55,
+  east: 24.5,
+  north: 69.5,
+};
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
@@ -76,6 +83,11 @@ const TRAFFIC_FLOW_COLORS = {
   slow: "#FF7A3D",
 };
 const TRAFFIC_FLOW_MIN_ZOOM = 7;
+const ROUTE_SOURCE_ID = "route";
+const ROUTE_ALT_LAYER_ID = "route-alt-lines";
+const ROUTE_ALT_CASING_LAYER_ID = "route-alt-casing";
+const ROUTE_PRIMARY_LAYER_ID = "route-primary-line";
+const ROUTE_PRIMARY_CASING_LAYER_ID = "route-primary-casing";
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase för de tyngre analyslagren (för många
@@ -372,6 +384,202 @@ export async function addEventsLayer(
   startLivePulse(map);
 
   return { liveCount };
+}
+
+export async function fetchLiveEvents(): Promise<EventPoint[]> {
+  const params = new URLSearchParams({
+    bbox: bboxToParam(SWEDEN_EVENTS_BBOX),
+    live: "1",
+  });
+  const res = await fetch(`/api/events?${params.toString()}`);
+  if (!res.ok) {
+    console.error("failed to fetch live events", await res.text());
+    return [];
+  }
+
+  const { points } = (await res.json()) as { points: EventPoint[] };
+  const liveCutoff = Date.now() - LIVE_THRESHOLD_MS;
+  return points.filter((p) => Date.parse(p.last_seen) >= liveCutoff);
+}
+
+export async function focusLiveEvents(map: MapLibreMap): Promise<{ liveCount: number }> {
+  const liveEvents = await fetchLiveEvents();
+  const coordinates = liveEvents.map((p) => [p.lng, p.lat] as [number, number]);
+  if (coordinates.length === 0) return { liveCount: 0 };
+
+  if (coordinates.length === 1) {
+    map.flyTo({
+      center: coordinates[0],
+      zoom: 10,
+      duration: 900,
+      essential: true,
+    });
+    return { liveCount: liveEvents.length };
+  }
+
+  const bounds = coordinates.reduce(
+    (acc, coord) => acc.extend(coord),
+    new maplibregl.LngLatBounds(coordinates[0], coordinates[0]),
+  );
+  const samePoint = bounds.getWest() === bounds.getEast() && bounds.getSouth() === bounds.getNorth();
+  if (samePoint) {
+    map.flyTo({
+      center: coordinates[0],
+      zoom: 10,
+      duration: 900,
+      essential: true,
+    });
+    return { liveCount: liveEvents.length };
+  }
+
+  const narrow = typeof window !== "undefined" && window.innerWidth < 720;
+  map.fitBounds(bounds, {
+    padding: narrow
+      ? { top: 96, right: 24, bottom: 140, left: 24 }
+      : { top: 80, right: 360, bottom: 80, left: 360 },
+    maxZoom: 10,
+    duration: 900,
+    essential: true,
+  });
+
+  return { liveCount: liveEvents.length };
+}
+
+export function addRouteLayer(map: MapLibreMap): LayerController {
+  if (map.getSource(ROUTE_SOURCE_ID)) {
+    return { setVisible: () => {} };
+  }
+
+  map.addSource(ROUTE_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(LIVE_HALO_LAYER_ID)
+    ? LIVE_HALO_LAYER_ID
+    : map.getLayer(LIVE_CORE_LAYER_ID)
+      ? LIVE_CORE_LAYER_ID
+      : undefined;
+
+  map.addLayer(
+    {
+      id: ROUTE_ALT_CASING_LAYER_ID,
+      type: "line",
+      source: ROUTE_SOURCE_ID,
+      filter: ["!=", ["get", "selected"], true],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "rgba(17, 17, 17, 0.9)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 4, 12, 7, 16, 11],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_ALT_LAYER_ID,
+      type: "line",
+      source: ROUTE_SOURCE_ID,
+      filter: ["!=", ["get", "selected"], true],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "#ffffff",
+        "line-opacity": 0.45,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 12, 4, 16, 7],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_PRIMARY_CASING_LAYER_ID,
+      type: "line",
+      source: ROUTE_SOURCE_ID,
+      filter: ["==", ["get", "selected"], true],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "rgba(17, 17, 17, 0.95)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 6, 12, 9, 16, 13],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_PRIMARY_LAYER_ID,
+      type: "line",
+      source: ROUTE_SOURCE_ID,
+      filter: ["==", ["get", "selected"], true],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "#72F2D0",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3, 12, 6, 16, 9],
+      },
+    },
+    beforeId,
+  );
+
+  return {
+    setVisible: (v) => {
+      for (const id of [
+        ROUTE_ALT_CASING_LAYER_ID,
+        ROUTE_ALT_LAYER_ID,
+        ROUTE_PRIMARY_CASING_LAYER_ID,
+        ROUTE_PRIMARY_LAYER_ID,
+      ]) {
+        if (map.getLayer(id)) {
+          map.setLayoutProperty(id, "visibility", v ? "visible" : "none");
+        }
+      }
+    },
+  };
+}
+
+export function setRouteLayerData(map: MapLibreMap, routes: RouteLine[]): void {
+  if (!map.getSource(ROUTE_SOURCE_ID)) addRouteLayer(map);
+  const source = map.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
+  if (!source) return;
+
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = routes.map((route, index) => ({
+    type: "Feature",
+    geometry: route.geometry,
+    properties: {
+      id: route.id,
+      selected: index === 0,
+      distance_meters: route.distanceMeters,
+      duration_seconds: route.durationSeconds,
+      safety_score: route.safetyScore,
+    },
+  }));
+  source.setData({ type: "FeatureCollection", features });
+}
+
+export function focusRoute(map: MapLibreMap, routes: RouteLine[]): void {
+  const first = routes[0];
+  if (!first) return;
+
+  const coordinates = first.geometry.coordinates.filter(
+    (coord): coord is [number, number] =>
+      Array.isArray(coord) &&
+      coord.length >= 2 &&
+      typeof coord[0] === "number" &&
+      typeof coord[1] === "number",
+  );
+  if (!coordinates.length) return;
+
+  const bounds = coordinates.reduce(
+    (acc, coord) => acc.extend(coord),
+    new maplibregl.LngLatBounds(coordinates[0], coordinates[0]),
+  );
+  const narrow = typeof window !== "undefined" && window.innerWidth < 720;
+  map.fitBounds(bounds, {
+    padding: narrow
+      ? { top: 220, right: 24, bottom: 140, left: 24 }
+      : { top: 80, right: 360, bottom: 80, left: 360 },
+    maxZoom: 14,
+    duration: 900,
+    essential: true,
+  });
 }
 
 export function addDisturbancesLayer(map: MapLibreMap): LayerController {

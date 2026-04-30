@@ -7,6 +7,7 @@ Next.js App Router + MapLibre GL. Läser events från Supabase via `/api/events`
 ```sh
 cp .env.example .env.local
 # fyll i SUPABASE_URL och SUPABASE_ANON_KEY
+# geocoding/routing har lokala defaults i .env.example, men skarp trafik bör ha dedikerad provider
 pnpm install
 pnpm --filter @trafik/web run dev
 # öppna http://localhost:3000
@@ -20,7 +21,7 @@ web/
 │   ├── layout.tsx            # root layout
 │   ├── page.tsx              # huvudsida (laddar Map dynamiskt, ssr:false)
 │   ├── page.module.css
-│   └── api/events/route.ts   # bbox/since-query mot Supabase
+│   └── api/                  # bbox-data, geocoding och routing
 ├── components/
 │   └── Map/
 │       ├── Map.tsx           # MapLibre-init ('use client')
@@ -60,5 +61,5 @@ Kim tar beslut om definitiv visualisering när riktig data flödar in.
 1. Import repo i Vercel dashboard
 2. Root directory: `web`
 3. Framework: Next.js (autodetekteras)
-4. Environment variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+4. Environment variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, samt ev. `NOMINATIM_*` och `OSRM_*` för dedikerade providers
 5. Deploy

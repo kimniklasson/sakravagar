@@ -14,6 +14,7 @@
 }
 
 .controls,
+.routeControls,
 .layerControls,
 .rightControls {
   --overlay-inset: 40px;
@@ -31,6 +32,15 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  width: var(--overlay-width);
+  font-family: var(--font-univers);
+}
+
+.routeControls {
+  position: absolute;
+  top: var(--overlay-inset);
+  right: var(--overlay-inset);
+  z-index: 1;
   width: var(--overlay-width);
   font-family: var(--font-univers);
 }
@@ -244,6 +254,288 @@
   composes: type-medium from global;
   margin: 16px 0 0;
   /* Ärver färg från .liveBox (vit) eller .liveBoxCalm (mörk). */
+}
+
+/* === Route planner === */
+
+.routeBox {
+  position: relative;
+  border-radius: 8px;
+  background: rgba(85, 85, 85, 0.3);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  padding: 16px;
+  color: var(--color-white);
+}
+
+.routeStops {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.routeStopGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.routeInputRow {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 12px 16px;
+  border-radius: 0;
+  background: #555555;
+  color: var(--color-white);
+}
+
+.routeInputRowFirst {
+  border-radius: 4px 4px 0 0;
+}
+
+.routeInputRowLast {
+  border-radius: 0 0 4px 4px;
+}
+
+.routeInputRowFirst.routeInputRowLast {
+  border-radius: 4px;
+}
+
+.routeSuggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 1px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(17, 17, 17, 0.78);
+}
+
+.routeSuggestion {
+  composes: type-medium from global;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 16px 9px 34px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-white);
+  font-family: var(--font-univers);
+  text-align: left;
+  cursor: pointer;
+}
+
+.routeSuggestion:hover,
+.routeSuggestion:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+}
+
+.routeIcon {
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+
+.routeSearchIcon {
+  color: var(--color-white);
+  mask-image: url("/icons/search.svg");
+  -webkit-mask-image: url("/icons/search.svg");
+}
+
+.routeDragIcon {
+  width: 11px;
+  height: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  mask-image: url("/icons/draghandles.svg");
+  -webkit-mask-image: url("/icons/draghandles.svg");
+}
+
+.routeCloseIcon {
+  color: var(--color-white);
+  mask-image: url("/icons/close-circle.svg");
+  -webkit-mask-image: url("/icons/close-circle.svg");
+}
+
+.routeInput {
+  composes: type-medium from global;
+  min-width: 0;
+  flex: 1;
+  height: 16px;
+  margin: 0 8px;
+  padding: 4px 0 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-white);
+  font-family: var(--font-univers);
+}
+
+.routeInput::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+  opacity: 1;
+}
+
+.routeClearBtn,
+.routeDragBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.routeClearBtn {
+  cursor: pointer;
+}
+
+.routeDragBtn {
+  margin-left: 2px;
+  cursor: grab;
+}
+
+.routeDragBtn:active {
+  cursor: grabbing;
+}
+
+.routePositionBtn {
+  position: absolute;
+  top: 56px;
+  right: 64px;
+  left: 48px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(17, 17, 17, 0.7);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: var(--color-white);
+  cursor: pointer;
+  transform-origin: top left;
+  animation: routePositionIn 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.routePositionLabel {
+  composes: type-small from global;
+  text-transform: uppercase;
+}
+
+.routePositionIcon {
+  width: 12px;
+  height: 12px;
+}
+
+.routeActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.routeActionBtn,
+.routeOptionsBtn {
+  composes: type-small-x from global;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-univers);
+}
+
+.routeActionBtn {
+  cursor: pointer;
+}
+
+.routeOptionsBtn {
+  cursor: default;
+}
+
+.routeOptionsBtn:disabled {
+  opacity: 0.5;
+}
+
+.routeOptionsBtn:not(:disabled) {
+  color: var(--color-white);
+  cursor: pointer;
+}
+
+.routeStatus {
+  composes: type-small-x from global;
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.btnIcon.routeActionIcon {
+  width: 10px;
+  height: 10px;
+  color: var(--color-white);
+}
+
+.btnIcon.routeActionIcon path {
+  stroke-width: 1;
+}
+
+.routeSpinner {
+  position: relative;
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.routeSpinner::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-top-color: var(--color-white);
+  border-right-color: var(--color-white);
+  animation: routeSpinnerChase 700ms linear infinite;
+}
+
+@keyframes routeSpinnerChase {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes routePositionIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* === Layer-toggle controls (bottom-left) === */
@@ -513,22 +805,23 @@
   vector-effect: non-scaling-stroke;
 }
 
-/* === Right-side controls (top): zoom + locate === */
+/* === Bottom-center controls: locate + zoom === */
 
 .rightControls {
   position: absolute;
-  top: var(--overlay-inset);
-  right: var(--overlay-inset);
+  bottom: var(--overlay-inset);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 2px;
   font-family: var(--font-univers);
 }
 
 .zoomGroup {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 1px;
 }
 
@@ -579,11 +872,11 @@
 
 /* Plus + minus visuellt sammansatta: rundade ytterkanter, raka inre. */
 .zoomPlus {
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px 0 0 8px;
 }
 
 .zoomMinus {
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 8px 8px 0;
 }
 
 .btnIcon {
@@ -615,6 +908,7 @@
 
 @media (max-width: 1023px) {
   .controls,
+  .routeControls,
   .layerControls,
   .rightControls {
     --overlay-inset: 24px;
@@ -633,6 +927,7 @@
 
 @media (max-width: 767px) {
   .controls,
+  .routeControls,
   .layerControls,
   .rightControls {
     --overlay-inset: 24px;
@@ -646,6 +941,14 @@
     left: var(--overlay-inset);
     right: auto;
     width: calc(100vw - (var(--overlay-inset) * 2));
+    z-index: 3;
+  }
+
+  .routeControls {
+    top: calc(var(--overlay-inset) + env(safe-area-inset-top) + 252px);
+    right: var(--overlay-inset);
+    left: var(--overlay-inset);
+    width: auto;
     z-index: 3;
   }
 
@@ -702,14 +1005,19 @@
 
   .rightControls {
     top: auto;
-    right: var(--overlay-inset);
+    right: auto;
     bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 4;
     gap: 4px;
   }
 
   .mobileAttributionBtn {
     display: flex;
+    position: fixed;
+    right: var(--overlay-inset);
+    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
   }
 
   .mobileAttributionBackdrop {
@@ -789,6 +1097,7 @@
   }
 
   .controlsInfoOpen ~ .rightControls,
+  .controlsInfoOpen ~ .routeControls,
   .controlsInfoOpen ~ .layerControls {
     opacity: 0;
     pointer-events: none;
