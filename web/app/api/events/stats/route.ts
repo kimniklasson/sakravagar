@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { jsonResponse } from "../../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export type EventStats = {
 
 export async function GET() {
   if (!url || !anon) {
-    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
   }
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
@@ -41,7 +41,7 @@ export async function GET() {
 
   const error = oldestResult.error ?? latestResult.error;
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonResponse({ error: error.message }, { status: 500 });
   }
 
   const oldestFirstSeen = oldestResult.data?.first_seen ?? null;
@@ -50,9 +50,9 @@ export async function GET() {
     ? Math.max(1, Math.ceil((Date.now() - Date.parse(oldestFirstSeen)) / 86400_000))
     : null;
 
-  return NextResponse.json({
+  return jsonResponse({
     oldestFirstSeen,
     latestLastSeen,
     periodDays,
-  } satisfies EventStats);
+  } satisfies EventStats, { cacheSeconds: 30 });
 }

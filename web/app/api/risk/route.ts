@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { jsonResponse, parseBboxParam } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,30 +19,28 @@ type RiskRow = RiskSegment;
 
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
   }
 
   const { searchParams } = new URL(req.url);
-  const bbox = searchParams.get("bbox");
-  if (!bbox) {
-    return NextResponse.json({ error: "bbox required" }, { status: 400 });
+  const { bbox, error: bboxError } = parseBboxParam(searchParams.get("bbox"), {
+    required: true,
+    maxArea: 8,
+  });
+  if (bboxError || !bbox) {
+    return jsonResponse({ error: bboxError }, { status: 400 });
   }
-  const nums = bbox.split(",").map(Number);
-  if (nums.length !== 4 || !nums.every(Number.isFinite)) {
-    return NextResponse.json({ error: "bbox must be 4 numbers" }, { status: 400 });
-  }
-  const [minLng, minLat, maxLng, maxLat] = nums as [number, number, number, number];
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
   const { data, error } = await client.rpc("risk_in_bbox", {
-    min_lng: minLng,
-    min_lat: minLat,
-    max_lng: maxLng,
-    max_lat: maxLat,
+    min_lng: bbox.minLng,
+    min_lat: bbox.minLat,
+    max_lng: bbox.maxLng,
+    max_lat: bbox.maxLat,
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonResponse({ error: error.message }, { status: 500 });
   }
 
   const segments: RiskSegment[] = ((data ?? []) as RiskRow[]).map((row) => ({
@@ -53,5 +51,5 @@ export async function GET(req: Request) {
     geometry: row.geometry,
   }));
 
-  return NextResponse.json({ segments });
+  return jsonResponse({ segments }, { cacheSeconds: 30 });
 }

@@ -150,6 +150,12 @@ export default function Map() {
     // dragend räcker som "användar-pan"-signal — zoom (knappar/scroll/pinch)
     // ändrar inte centrum så locate-state ska inte växla av av zoom.
     map.on("dragend", () => setAtUserLocation(false));
+    map.on("moveend", () => {
+      if (!mapLoadedRef.current) return;
+      void addEventsLayer(map, { since: sinceFromWindow(timeWindowRef.current) }).then(
+        ({ liveCount }) => setLiveCount(liveCount),
+      );
+    });
 
     map.on("load", () => {
       layerCtrlRef.current.largeRoads = addLargeRoadsLayer(map);

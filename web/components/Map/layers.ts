@@ -27,6 +27,7 @@ type RiskSegment = {
 
 export type LayerController = { setVisible: (v: boolean) => void };
 type HeatmapStop = { density: number; color: string; alpha: number };
+type Bbox = { west: number; south: number; east: number; north: number };
 
 const DEFAULT_HEATMAP_STOPS: HeatmapStop[] = [
   { density: 0, color: "#000000", alpha: 0 },
@@ -229,7 +230,9 @@ export async function addEventsLayer(
   map: MapLibreMap,
   opts: { since?: string | null } = {},
 ): Promise<{ liveCount: number }> {
-  const url = opts.since ? `/api/events?since=${encodeURIComponent(opts.since)}` : "/api/events";
+  const params = new URLSearchParams({ bbox: bboxToParam(mapBoundsBbox(map, 0.2)) });
+  if (opts.since) params.set("since", opts.since);
+  const url = `/api/events?${params.toString()}`;
   const res = await fetch(url);
   if (!res.ok) {
     console.error("failed to fetch events", await res.text());
@@ -654,7 +657,6 @@ function startLivePulse(map: MapLibreMap): void {
 // - `setEnabled(false)` pausar fetch (när lagret är toggled off).
 //   Vid `setEnabled(true)` triggas refresh; cachen behålls så ingen onödig
 //   fetch sker om viewporten inte hunnit röra sig.
-type Bbox = { west: number; south: number; east: number; north: number };
 type BboxLoader = { setEnabled: (v: boolean) => void };
 type AdtTile = Bbox & { key: string; centerLng: number; centerLat: number };
 type LargeRoadTile = Bbox & { key: string; centerLng: number; centerLat: number };
@@ -756,6 +758,24 @@ function createBboxLoader(
 
 function bboxToParam(b: Bbox): string {
   return [b.west, b.south, b.east, b.north].map((n) => n.toFixed(4)).join(",");
+}
+
+function mapBoundsBbox(map: MapLibreMap, padding = 0): Bbox {
+  const b = map.getBounds();
+  const viewport: Bbox = {
+    west: b.getWest(),
+    south: b.getSouth(),
+    east: b.getEast(),
+    north: b.getNorth(),
+  };
+  const padW = (viewport.east - viewport.west) * padding;
+  const padH = (viewport.north - viewport.south) * padding;
+  return {
+    west: Math.max(-180, viewport.west - padW),
+    south: Math.max(-90, viewport.south - padH),
+    east: Math.min(180, viewport.east + padW),
+    north: Math.min(90, viewport.north + padH),
+  };
 }
 
 function adtTilesForBbox(b: Bbox, center: { lng: number; lat: number }): AdtTile[] {

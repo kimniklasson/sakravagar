@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { jsonResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,28 +30,28 @@ export type SegmentDetail = {
 
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
   }
 
   const { searchParams } = new URL(req.url);
   const fidRaw = searchParams.get("fid");
   if (!fidRaw) {
-    return NextResponse.json({ error: "fid required" }, { status: 400 });
+    return jsonResponse({ error: "fid required" }, { status: 400 });
   }
   const fid = Number(fidRaw);
   if (!Number.isFinite(fid) || !Number.isInteger(fid)) {
-    return NextResponse.json({ error: "fid must be an integer" }, { status: 400 });
+    return jsonResponse({ error: "fid must be an integer" }, { status: 400 });
   }
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
   const { data, error } = await client.rpc("segment_detail", { p_fid: fid });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonResponse({ error: error.message }, { status: 500 });
   }
   if (!data) {
-    return NextResponse.json({ error: "segment not found" }, { status: 404 });
+    return jsonResponse({ error: "segment not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ segment: data as SegmentDetail });
+  return jsonResponse({ segment: data as SegmentDetail }, { cacheSeconds: 120 });
 }

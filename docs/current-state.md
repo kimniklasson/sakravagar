@@ -1,6 +1,17 @@
-# Current state — 2026-04-30 (stabila flödeslinjer, brand polish, verktygsåtkomst)
+# Current state — 2026-04-30 (review fixes, stabilitet, verktygskedja)
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
+
+## Senaste ändring — review-fixar: säkerhet, bbox-skydd, dedup och ESLint CLI (2026-04-30)
+
+- ✅ **DB-åtkomst stramades åt:** ny migration `db/migrations/0023_security_limits_dedup.sql` revokar table-wide `SELECT` för `anon`/`authenticated` på `events` och `nvdb_trafik`. `events.raw` är därmed inte längre direkt läsbart via PostgREST; publika läsningar ska gå via vyer/API/RPC. `events` och `nvdb_trafik` får bara column-level grants för kolumner som behövs av befintliga publika vyer.
+- ✅ **Riskkartan använder popupens dedup-definition:** samma migration bygger om `risk_per_segment` så `events_count` dedupas per `fid + message + road_number + date_trunc('hour', first_seen)`. Det matchar `segment_detail`/popupen och gör popupens definition av "en olycka" till source of truth även för kartfärgen.
+- ✅ **Tunga RPC:er har server-side limits:** `risk_in_bbox`, `adt_in_bbox`, `large_roads_in_bbox` och `traffic_flow_segments_in_bbox` har nu `limit` i SQL-lagret. Detta kompletterar API:ernas bbox-area guards och hindrar publika anrop från att returnera obegränsade GeoJSON-svar.
+- ✅ **Gemensam bbox-validering + cache headers:** ny `web/app/api/_utils.ts` innehåller `parseBboxParam()` och `jsonResponse()`. API-rutterna validerar koordinatordning, giltiga lat/lng-gränser och max-area per endpoint innan de anropar Supabase. Svar får kort `Cache-Control` med `s-maxage` + `stale-while-revalidate`.
+- ✅ **Events-lagret är viewport-baserat:** `/api/events` kräver nu `bbox`, och `addEventsLayer()` skickar aktuell kartvy med 20% padding. `Map.tsx` uppdaterar eventlagret på `moveend`. Det tar bort den gamla globala 5000-radershämtningen som skulle bli biased när historiken växer.
+- ✅ **Lint/tooling fixad:** `pnpm` är låst till repo-lokal `.pnpm-store` via `.npmrc`, och `.pnpm-store/` är git-ignorerad. `web` har nu ESLint CLI via `eslint`, `eslint-config-next@15.5.15` och `@eslint/eslintrc`, med flat config i `web/eslint.config.mjs`. `pnpm --filter @trafik/web run lint` kör nu `eslint .` utan interaktiv Next-prompt.
+- ✅ **Verifiering:** `pnpm --filter @trafik/web run lint`, `pnpm typecheck`, `pnpm --filter @trafik/web run build` och `git diff --check` passerar. Lokal preview kördes på `http://localhost:3010`; efter pnpm-install behövde dev-servern startas om eftersom den gamla processen pekade på borttagna `.next` chunks.
+- ⚠️ **Att göra i Supabase:** kör migration `db/migrations/0023_security_limits_dedup.sql` i SQL Editor innan prod förväntas ha de nya DB-rättigheterna och dedupade riskvärdena.
 
 ## Senaste ändring — stabila blå flödeslinjer + brand polish (2026-04-30)
 
@@ -358,7 +369,7 @@ Alla MVP-element finns nu på plats; nästa naturliga steg är **bottom-left fö
 - **CTE-kedjor med data-modifying branches kan ha tysta fail-modes.** `snap_pending_events` har en `match` (cross join lateral, inner-join-semantik) och en `update` (kör för alla pending) i samma CTE-kedja. När match-grenen returnerar 0 rader för ett event blir det inte snappat, men update-grenen markerar det ändå som processed — eventet blir "stuck". Vi har en `resnap_orphan_events()` + dagligt cron-jobb (0012) som plockar upp dessa, men lärdomen är att framtida CTE-kedjor som lägger till och uppdaterar bör kontrolleras för att se till att de behandlar samma rader, eller åtminstone har en separat catch-all-mekanism.
 - **NVDB `element_id` är INTE en fysisk segment-identifier.** Det är en logisk grupperare för "vägelement" som kan inkludera flera fysiskt olika fids längs en längre vägdel. T.ex. element 12753:300613 består av 5 fids över ~7 km E20 (Bragnum + Galmetorp + ...). Dedup eller aggregering på element_id-nivå slår alltså ihop olika fysiska sträckor — fel. Korrekt nivå för risk-aggregering och click-info är fid. För att hantera år-dubbletter (samma fid mätt över flera år) använder vi `rank() over (partition by element_id order by matarsperiod desc)` och filtrerar `matar_rank = 1` — det filtrerar bort äldre årets mätningar utan att slå ihop syskon-fids inom samma år.
 - **`<->` kNN-operator returnerar bbox-distance, inte true distance.** Under diagnostiken av Galmetorp-eventet såg vi att `select fid, st_distance(...) from nvdb_trafik_latest order by geom <-> point limit 1` returnerade ETT segment ena gången och ett ANNAT (1158m bort) andra gången — beroende på query-planer / index-cache. För säker närmaste-segment-sökning, använd större `LIMIT N` (t.ex. 10) och re-rank på `st_distance(...)` i en outer query. snap_pending_events räddas av `st_dwithin(...,75)`-filtret som gör att fel matches automatiskt droppas, men diagnostik-queries direkt mot dist är opålitliga.
-- **Risk-färgning på kartan vs popupens procent-tal är inte direkt jämförbara just nu.** Kartfärgen (`risk_in_bbox` → `risk_per_segment` MV) är beräknad på *odeduplicerad* events_count, medan popupens `risk_per_passage_pct` är beräknad på dedup-talet. Vid normal datavolym konvergerar de, men i tunt dataläge kan kartan färga en sträcka kraftigt rött medan popupen visar ett betydligt lägre tal. Att flytta dedup-logiken in i MV:n skulle göra dem konsistenta men kräver omräkning av `events_count` vid varje refresh — TBD om/när det blir ett problem (troligen acceptabelt så länge vi har tunn data och det är ändå preliminärt).
+- **Risk-färgning och popup ska räkna samma olyckor.** Sedan migration 0023 använder `risk_per_segment` samma dedup-definition som popupen: `fid + message + road_number + first_seen-hour`. Om riskvärdena ser oväntade ut i framtiden ska felsökningen börja i denna gemensamma definition, inte i separata kart-/popup-beräkningar.
 - **Preview-MCP fungerar ej i `~/Desktop/`** — macOS TCC + Claude.app:s "disclaimer helper" har generisk code-signing-ID som gör att TCC-grants inte persisterar för spawnade MCP-processer ([issue #36832](https://github.com/anthropics/claude-code/issues/36832)). Bash-tooket inom Claude Code fungerar (huvudprocessen har grants), men `mcp__Claude_Preview__preview_start` faller på `Operation not permitted`. Workaround: flytta projektet till `~/dev/`, `~/Code/`, eller liknande icke-skyddad mapp, ELLER ge Claude.app Full Disk Access. Kim har valt att köra `pnpm web` lokalt själv i en terminal istället för att flytta nu.
 
 ## Filer att känna till
@@ -381,6 +392,7 @@ Alla MVP-element finns nu på plats; nästa naturliga steg är **bottom-left fö
 | `web/public/styles/sakravagar_dark.json` | MapLibre style.json — fork av OpenFreeMap Dark, brand-customized i Maputnik. Tile/sprite/glyph-sources pekar på `tiles.openfreemap.org` så vi behåller gratis-no-key-setupen. |
 | `web/styles/globals.css` | Globala stilar inkl. `.seg-popup-*` (popup-styling — global eftersom MapLibre Popup ligger utanför Reacts CSS Modules-tråd). |
 | `web/app/api/events/route.ts` | Hämtar `events_public` från Supabase. |
+| `web/app/api/_utils.ts` | Delade API-helpers: bbox-validering (`parseBboxParam`) och JSON-svar med kort `Cache-Control` (`jsonResponse`). |
 | `web/app/api/adt/route.ts` | Kallar RPC `adt_in_bbox(min_lng,min_lat,max_lng,max_lat)`. Kräver `bbox`-param. |
 | `web/app/api/tsk/route.ts` | Kallar RPC `tsk_in_bbox`. Samma mönster som /api/adt. |
 | `web/app/api/risk/route.ts` | Kallar RPC `risk_in_bbox`. Returnerar fid, adt_total, events_count, risk_per_milj_fordon, geometry. |
@@ -394,6 +406,9 @@ Alla MVP-element finns nu på plats; nästa naturliga steg är **bottom-left fö
 | `db/migrations/0012_resnap_orphans.sql` | Self-healing snap-pipeline. Snap-radie 50→75m + `resnap_orphan_events()` + dagligt pg_cron-jobb 03:30 UTC. |
 | `db/migrations/0013_fix_segment_dedup.sql` | ⚠️ Fel premiss. Aggregerade per element_id vilket slog ihop fysiskt olika sträckor. Ersatt av 0014. Ej giltig att köra om — 0014 sätter rätt state. |
 | `db/migrations/0014_correct_dedup_strategy.sql` | Korrekt dedup. `nvdb_trafik_latest` filtrerar äldre matarsperiod per element_id men behåller alla syskon-fids. `risk_per_segment` aggregerar per fid igen. |
+| `db/migrations/0023_security_limits_dedup.sql` | Review-fix: revokar table-wide publika grants, bygger om `risk_per_segment` med popupens dedup-definition, återskapar bbox-RPC:er med server-side `limit`. |
+| `web/eslint.config.mjs` | ESLint flat config för CLI. Extendar `next/core-web-vitals` + `next/typescript`; stänger av `@next/next/no-img-element` eftersom SVG-loggan avsiktligt renderas som vanlig `<img>`. |
+| `.npmrc` | Sätter `store-dir=.pnpm-store` så pnpm inte pekar mot gammal användarpath. |
 | `.env` (rooten, ej committad) | `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ANON_KEY`, `DATABASE_URL` (session pooler, URL-encodad). |
 | `db/migrations/0001_init.sql` | Events-tabell + `events_public`-vy. |
 | `db/migrations/0002_nvdb.sql` | Index + vyer `adt_public`, `tsk_public`, `tsk_rank`. |

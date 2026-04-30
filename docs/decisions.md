@@ -69,3 +69,27 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 **Valt:** Primärnyckel på `Deviation.Id`. Upsert med `first_seen` bevarad via default, `last_seen` uppdaterad.
 
 **Varför:** Samma olycka rapporteras i flera polling-rundor så länge den är aktiv. Vi vill veta både när vi först såg den och senaste gången — det ger oss "aktiv tid" som är värdefullt för framtida analys.
+
+## 2026-04-30 — Segmentrisk: popupens dedup-definition är source of truth
+
+**Valt:** Både `risk_per_segment` och `segment_detail` räknar olyckor dedupat per `fid + message + road_number + first_seen-hour`.
+
+**Varför:** Trafikverkets feed kan skapa flera tekniska rader som i praktiken beskriver samma incident. Om vi är tillräckligt säkra på att det är samma händelse ska användaren se och räkna den som en olycka, inte som flera. Popupen var redan den mest användarnära definitionen; migration 0023 flyttar samma logik till risk-MV:n så kartfärg och popup inte säger olika saker.
+
+**Konsekvens:** Riskvärden kan bli lägre än tidigare på segment där feeden skapat dubbletter, men de blir mer begripliga och konsekventa. Om vi senare hittar bättre upstream-fält för incident-identitet bör den gemensamma dedup-regeln uppdateras på ett ställe och användas av både karta och popup.
+
+## 2026-04-30 — Publika API:er ska begränsa bbox på servern
+
+**Valt:** Alla tunga kartendpoints validerar bbox på serversidan och SQL-RPC:erna har response-limits.
+
+**Varför:** Klientens zoom- och tile-logik skyddar bara vanliga användarflöden. Publika endpoints kan anropas direkt, så servern måste själv neka orimliga koordinater/stora bboxar och hindra obegränsade GeoJSON-svar.
+
+**Konsekvens:** Frontend måste alltid skicka bbox till `/api/events` och tyngre lager. För hel-Sverige-vyer tillåts events/störningar fortsatt stora bboxar, men NVDB/Risk-lagren hålls till mindre ytor.
+
+## 2026-04-30 — ESLint via CLI, inte `next lint`
+
+**Valt:** `web` använder ESLint flat config (`eslint.config.mjs`) och scriptet `lint` kör `eslint .`.
+
+**Varför:** `next lint` är deprecated och startade en interaktiv setup-prompt i projektet. ESLint CLI är repeterbart i CI/lokal terminal och fångar React/Next/TypeScript-regler utan prompt.
+
+**Konsekvens:** `eslint`, `eslint-config-next` och `@eslint/eslintrc` är devDependencies. Pnpm-store är låst till repo-lokal `.pnpm-store` via `.npmrc` eftersom den gamla installationen pekade mot en felaktig user-path.

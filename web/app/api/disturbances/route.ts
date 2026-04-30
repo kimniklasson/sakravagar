@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { jsonResponse, parseBboxParam } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,11 +34,17 @@ function categoryFromMessageType(messageType: string | null): DisturbanceCategor
 
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
   }
 
   const { searchParams } = new URL(req.url);
-  const bbox = searchParams.get("bbox"); // "minLng,minLat,maxLng,maxLat"
+  const { bbox, error: bboxError } = parseBboxParam(searchParams.get("bbox"), {
+    required: false,
+    maxArea: 5000,
+  });
+  if (bboxError) {
+    return jsonResponse({ error: bboxError }, { status: 400 });
+  }
   const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
@@ -51,20 +57,16 @@ export async function GET(req: Request) {
     .limit(2000);
 
   if (bbox) {
-    const nums = bbox.split(",").map(Number);
-    if (nums.length === 4 && nums.every(Number.isFinite)) {
-      const [minLng, minLat, maxLng, maxLat] = nums as [number, number, number, number];
-      query = query
-        .gte("lng", minLng)
-        .lte("lng", maxLng)
-        .gte("lat", minLat)
-        .lte("lat", maxLat);
-    }
+    query = query
+      .gte("lng", bbox.minLng)
+      .lte("lng", bbox.maxLng)
+      .gte("lat", bbox.minLat)
+      .lte("lat", bbox.maxLat);
   }
 
   const { data, error } = await query;
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonResponse({ error: error.message }, { status: 500 });
   }
 
   const points: DisturbancePoint[] = (data ?? []).flatMap((row) => {
@@ -86,5 +88,5 @@ export async function GET(req: Request) {
     }];
   });
 
-  return NextResponse.json({ points });
+  return jsonResponse({ points }, { cacheSeconds: 30 });
 }
