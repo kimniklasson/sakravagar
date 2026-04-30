@@ -16,6 +16,7 @@ import {
   refreshTrafficFlowLayer,
   type LayerController,
 } from "./layers";
+import type { EventStats } from "@/app/api/events/stats/route";
 
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
@@ -35,6 +36,20 @@ function sinceFromWindow(w: TimeWindow): string | null {
   return new Date(Date.now() - days * 86400_000).toISOString();
 }
 
+function minutesSince(iso: string | null, now: number): number | null {
+  if (!iso) return null;
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return null;
+  return Math.max(0, Math.floor((now - time) / 60_000));
+}
+
+function liveUpdatedText(latestLastSeen: string | null, now: number): string {
+  const minutes = minutesSince(latestLastSeen, now);
+  if (minutes === null) return "Uppdaterat nyligen";
+  if (minutes < 1) return "Uppdaterat nyss";
+  return `Uppdaterat ${minutes} min. sedan`;
+}
+
 export default function Map() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -43,6 +58,8 @@ export default function Map() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
+  const [eventStats, setEventStats] = useState<EventStats | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [riskOn, setRiskOn] = useState(true);
   const [adtOn, setAdtOn] = useState(true);
   const [disturbancesOn, setDisturbancesOn] = useState(true);
@@ -65,6 +82,24 @@ export default function Map() {
   }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
   useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
+
+  const refreshEventStats = async () => {
+    const res = await fetch("/api/events/stats");
+    if (!res.ok) {
+      console.warn("failed to fetch event stats", await res.text());
+      return;
+    }
+    setEventStats((await res.json()) as EventStats);
+  };
+
+  useEffect(() => {
+    void refreshEventStats();
+    const id = window.setInterval(() => {
+      setNow(Date.now());
+      void refreshEventStats();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -234,7 +269,11 @@ export default function Map() {
         />
       )}
       <div className={`${styles.controls} ${infoOpen ? styles.controlsInfoOpen : ""}`}>
-        <InfoBox open={infoOpen} onToggle={() => setInfoOpen((v) => !v)} />
+        <InfoBox
+          open={infoOpen}
+          onToggle={() => setInfoOpen((v) => !v)}
+          updatedText={liveUpdatedText(eventStats?.latestLastSeen ?? null, now)}
+        />
         <LiveBox
           accidentCount={liveCount}
           open={liveOpen}
@@ -290,6 +329,11 @@ export default function Map() {
           onToggleLayer={() => setRiskOn((v) => !v)}
           onToggleOpen={() => setRiskOpen((v) => !v)}
           body="Risk-lagret färgar vägsegment efter olyckor per miljon fordon — så att de farligaste vägarna per resa lyser starkast, inte de mest trafikerade. Synligt från stadsnivå och inåt."
+          meta={
+            eventStats?.periodDays
+              ? `Tidsperiod för olyckor: ${eventStats.periodDays} dagar`
+              : "Tidsperiod för olyckor: laddar"
+          }
         />
         <LayerBox
           label="Flöde"
@@ -448,6 +492,7 @@ function LayerBox({
   onToggleLayer,
   onToggleOpen,
   body,
+  meta,
 }: {
   label: string;
   colors: ScaleStop[];
@@ -456,6 +501,7 @@ function LayerBox({
   onToggleLayer: () => void;
   onToggleOpen: () => void;
   body: string;
+  meta?: string;
 }) {
   return (
     <div
@@ -491,13 +537,22 @@ function LayerBox({
       <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
         <div className={styles.expanderInner}>
           <p className={styles.layerBoxBody}>{body}</p>
+          {meta && <div className={styles.layerBoxMeta}>{meta}</div>}
         </div>
       </div>
     </div>
   );
 }
 
-function InfoBox({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function InfoBox({
+  open,
+  onToggle,
+  updatedText,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  updatedText: string;
+}) {
   // Kollapsad: hela boxen är klickbar och öppnar.
   // Öppen: bara X-ikonen stänger (klick på text/länkar i innehållet ska inte stänga).
   const handleBoxClick = open ? undefined : onToggle;
@@ -509,7 +564,11 @@ function InfoBox({ open, onToggle }: { open: boolean; onToggle: () => void }) {
       aria-expanded={open}
     >
       <div className={styles.infoBoxHeader}>
-        <span className={styles.infoBoxLogo}>Säkravägar.se</span>
+        <img
+          className={styles.infoBoxLogo}
+          src="/logo/sakravagar_logo.svg"
+          alt="SäkraVägar"
+        />
         <button
           type="button"
           className={styles.infoBoxIconBtn}
@@ -525,6 +584,7 @@ function InfoBox({ open, onToggle }: { open: boolean; onToggle: () => void }) {
       <p className={styles.infoBoxIntro}>
         För dig som känner oro i trafiken och vill planera din resa med mer kontroll, lugn och tillit.
       </p>
+      <p className={styles.infoBoxUpdated}>{updatedText}</p>
       <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
         <div className={styles.expanderInner}>
           <div className={styles.infoBoxBody}>

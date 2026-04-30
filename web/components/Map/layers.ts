@@ -80,6 +80,9 @@ const TRAFFIC_FLOW_MIN_ZOOM = 7;
 // sån query timeoutar mot Supabase för de tyngre analyslagren (för många
 // segment). Zoom 9 är ~2° vilket fungerar bra för Risk/ÅDT.
 const NVDB_MIN_ZOOM = 9;
+const ADT_TILE_DEG = 0.6;
+const ADT_TILE_PADDING = 0.2;
+const ADT_MAX_CONCURRENT_TILES = 8;
 
 // Hastighetslagret är betydligt glesare än Risk/ÅDT och behöver vara synligt
 // tidigare för att fungera som orienteringslager när kartan är utzoomad.
@@ -653,6 +656,7 @@ function startLivePulse(map: MapLibreMap): void {
 //   fetch sker om viewporten inte hunnit röra sig.
 type Bbox = { west: number; south: number; east: number; north: number };
 type BboxLoader = { setEnabled: (v: boolean) => void };
+type AdtTile = Bbox & { key: string; centerLng: number; centerLat: number };
 type LargeRoadTile = Bbox & { key: string; centerLng: number; centerLat: number };
 type Coordinate2D = [number, number];
 type SpeedBadgeCandidate = {
@@ -752,6 +756,38 @@ function createBboxLoader(
 
 function bboxToParam(b: Bbox): string {
   return [b.west, b.south, b.east, b.north].map((n) => n.toFixed(4)).join(",");
+}
+
+function adtTilesForBbox(b: Bbox, center: { lng: number; lat: number }): AdtTile[] {
+  const minX = Math.floor(b.west / ADT_TILE_DEG);
+  const maxX = Math.floor(b.east / ADT_TILE_DEG);
+  const minY = Math.floor(b.south / ADT_TILE_DEG);
+  const maxY = Math.floor(b.north / ADT_TILE_DEG);
+  const tiles: AdtTile[] = [];
+
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      const west = x * ADT_TILE_DEG;
+      const south = y * ADT_TILE_DEG;
+      const east = west + ADT_TILE_DEG;
+      const north = south + ADT_TILE_DEG;
+      tiles.push({
+        key: `${x}:${y}`,
+        west,
+        south,
+        east,
+        north,
+        centerLng: west + ADT_TILE_DEG / 2,
+        centerLat: south + ADT_TILE_DEG / 2,
+      });
+    }
+  }
+
+  return tiles.sort((a, bTile) => {
+    const da = (a.centerLng - center.lng) ** 2 + (a.centerLat - center.lat) ** 2;
+    const db = (bTile.centerLng - center.lng) ** 2 + (bTile.centerLat - center.lat) ** 2;
+    return da - db;
+  });
 }
 
 function largeRoadTilesForBbox(b: Bbox, center: { lng: number; lat: number }): LargeRoadTile[] {
@@ -964,7 +1000,7 @@ function visibleLargeRoadKeys(entries: Array<[string, LargeRoadFeature]>): Set<s
   return visible;
 }
 
-// ÅDT-lager: bbox-driven, fyller på via /api/adt vid moveend när zoom ≥ 9.
+// ÅDT-lager: tile-cacheat via /api/adt vid moveend när zoom ≥ 9.
 // Färgar linjer efter trafikflöde (ljusblåvitt → blått). Läggs under risk
 // och events så att det läses som underlagsdata, inte slutsatsen.
 export function addAdtLayer(map: MapLibreMap): LayerController {
@@ -1037,32 +1073,98 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     beforeId,
   );
 
-  const loader = createBboxLoader(map, {
-    minZoom: NVDB_MIN_ZOOM,
-    fetchBbox: async (padded) => {
-      const res = await fetch(`/api/adt?bbox=${bboxToParam(padded)}`);
-      if (!res.ok) {
-        console.error("failed to fetch adt", await res.text());
-        return;
-      }
-      const { segments } = (await res.json()) as { segments: AdtSegment[] };
-      const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
-        type: "FeatureCollection",
-        features: segments.map((s) => ({
-          type: "Feature",
-          geometry: s.geometry,
-          properties: {
-            fid: s.fid,
-            adt_total: s.adt_total,
-            adt_tung: s.adt_tung,
-            matar: s.matar,
-          },
-        })),
-      };
-      const src = map.getSource(ADT_SOURCE_ID) as GeoJSONSource | undefined;
-      src?.setData(fc);
-    },
-  });
+  const featureCache = new Map<number, GeoJSON.Feature<GeoJSON.LineString>>();
+  const fetchedTiles = new Set<string>();
+  const queuedTiles = new Set<string>();
+  const inFlightTiles = new Set<string>();
+  const tileQueue: AdtTile[] = [];
+  let activeTileFetches = 0;
+  let enabled = true;
+
+  const updateSource = () => {
+    const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+      type: "FeatureCollection",
+      features: Array.from(featureCache.values()),
+    };
+    const src = map.getSource(ADT_SOURCE_ID) as GeoJSONSource | undefined;
+    src?.setData(fc);
+  };
+
+  const fetchTile = async (tile: AdtTile) => {
+    const res = await fetch(`/api/adt?bbox=${bboxToParam(tile)}`);
+    if (!res.ok) {
+      console.error("failed to fetch adt", await res.text());
+      return;
+    }
+    const { segments } = (await res.json()) as { segments: AdtSegment[] };
+    for (const s of segments) {
+      featureCache.set(s.fid, {
+        type: "Feature",
+        geometry: s.geometry,
+        properties: {
+          fid: s.fid,
+          adt_total: s.adt_total,
+          adt_tung: s.adt_tung,
+          matar: s.matar,
+        },
+      });
+    }
+    fetchedTiles.add(tile.key);
+    updateSource();
+  };
+
+  const pumpTiles = () => {
+    if (!enabled) return;
+    while (activeTileFetches < ADT_MAX_CONCURRENT_TILES && tileQueue.length > 0) {
+      const tile = tileQueue.shift();
+      if (!tile) return;
+      queuedTiles.delete(tile.key);
+      if (fetchedTiles.has(tile.key) || inFlightTiles.has(tile.key)) continue;
+
+      activeTileFetches++;
+      inFlightTiles.add(tile.key);
+      void fetchTile(tile).finally(() => {
+        activeTileFetches--;
+        inFlightTiles.delete(tile.key);
+        pumpTiles();
+      });
+    }
+  };
+
+  const refreshTiles = () => {
+    if (!enabled) return;
+    if (map.getZoom() < NVDB_MIN_ZOOM) return;
+
+    const b = map.getBounds();
+    const viewport: Bbox = {
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    };
+    const padW = (viewport.east - viewport.west) * ADT_TILE_PADDING;
+    const padH = (viewport.north - viewport.south) * ADT_TILE_PADDING;
+    const padded: Bbox = {
+      west: viewport.west - padW,
+      south: viewport.south - padH,
+      east: viewport.east + padW,
+      north: viewport.north + padH,
+    };
+    const center = map.getCenter();
+    const nextTiles = adtTilesForBbox(padded, center).filter(
+      (tile) => !fetchedTiles.has(tile.key) &&
+        !queuedTiles.has(tile.key) &&
+        !inFlightTiles.has(tile.key),
+    );
+    for (const tile of nextTiles) queuedTiles.add(tile.key);
+    tileQueue.unshift(...nextTiles);
+    pumpTiles();
+  };
+
+  map.on("moveend", refreshTiles);
+  map.on("zoomend", refreshTiles);
+  map.on("idle", refreshTiles);
+  window.setTimeout(refreshTiles, 0);
 
   return {
     setVisible: (v) => {
@@ -1072,7 +1174,8 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
       if (map.getLayer(ADT_HIT_LAYER_ID)) {
         map.setLayoutProperty(ADT_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
       }
-      loader.setEnabled(v);
+      enabled = v;
+      if (v) refreshTiles();
     },
   };
 }

@@ -7,6 +7,9 @@ export const metadata: Metadata = {
   title: "Trafik — olycksdata på svenska vägar",
   description:
     "Historisk olycksdata som hjälper nervösa förare hitta tryggare rutter.",
+  icons: {
+    icon: "/logo/sakravagar_symbol.svg",
+  },
 };
 
 export const viewport: Viewport = {

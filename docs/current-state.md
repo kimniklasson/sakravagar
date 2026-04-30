@@ -1,6 +1,17 @@
-# Current state — 2026-04-27 (overlays komplett: top-left + bottom-left + right-side, 3-tier typografi)
+# Current state — 2026-04-30 (stabila flödeslinjer, brand polish, verktygsåtkomst)
 
 Körbar sammanfattning för att fortsätta i ny session. Läs denna + `PROJECT.md` + `docs/decisions.md` för full kontext.
+
+## Senaste ändring — stabila blå flödeslinjer + brand polish (2026-04-30)
+
+- ✅ **ÅDT/Flöde stabiliserat:** det blå `Flöde`-lagret är nu tile-cacheat i klienten (`ADT_TILE_DEG = 0.6`, max 8 parallella tile-anrop) i stället för att ersätta hela GeoJSON-källan med en stor bbox. Segment cacheas per `fid`, så pan/zoom fyller på data i stället för att få linjer att blinka, försvinna eller flytta mellan vyer.
+- ✅ **ÅDT-RPC optimerad:** migration `db/migrations/0022_stabilize_flow_segments.sql` ersätter `adt_in_bbox` så den läser från materialiserade/indexerade `risk_per_segment` i stället för att ranka råa `nvdb_trafik`-rader per bbox. Detta tog Grästorp/Skåne-rutor från återkommande `statement timeout` på ~3,5s till stabila `200` på ungefär 0,6-1,9s.
+- ✅ **Liveflöde stabiliserat:** samma migration gör `traffic_flow_segments_in_bbox` mer bbox-stabil genom att först hitta candidate `site_id`s i bbox, sedan aggregera alla aktiva rader för hela mätplatsen innan snap till närmaste `risk_per_segment`. Tie-break på `fid` gör nearest-neighbor-resultatet deterministiskt.
+- ✅ **Preview-DB uppdaterad:** migration 0022 kördes mot Supabase-databasen som lokal preview använder. Viktigt: vid fresh deploy måste migrationen fortfarande finnas i migrationskedjan.
+- ✅ **Brand/UI-polish:** `Säkravägar.se`-texten i beige infobox ersattes med `/logo/sakravagar_logo.svg` (20px hög), favicon pekar på `/logo/sakravagar_symbol.svg`, och logo-filerna ligger i `web/public/logo/`.
+- ✅ **Färskhet och transparens:** ny route `/api/events/stats` returnerar äldsta `first_seen`, senaste `last_seen` och beräknad olycksperiod i dagar. Infoboxen visar `Uppdaterat X min. sedan`; Risk-expanderaren visar en intern meta-box: `Tidsperiod för olyckor: X dagar`.
+- ✅ **Verifiering:** `pnpm -r run typecheck` och `git diff --check` passerar. In-app browser verifierade att logga, uppdateringsrad, riskperiod-box och blå flödeslinjer renderar korrekt.
+- ✅ **Lokala verktyg fixade:** `pnpm 9.0.0`, `supabase 2.95.4` och `psql 18.3` finns nu tillgängliga. SSH-nyckeln byttes från `id_ed25519_github_showcase` till standardnamnen `id_ed25519` / `id_ed25519.pub`; `ssh -T git@github.com` autentiserar som `kimniklasson`.
 
 ## Senaste ändring — `Liveflöde` som linjer från TrafficFlow (2026-04-29)
 
