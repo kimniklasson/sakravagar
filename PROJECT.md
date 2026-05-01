@@ -39,6 +39,7 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 - **Supabase pg_cron + Edge Function `scrape`** — hämtar Trafikverket-flöden och upsertar i Supabase.
 - **GitHub Actions** finns kvar som manuell nödknapp, inte som primär schemaläggning.
 - **Polling-intervall:** scrape-cron är fortfarande lugn nog för Trafikverkets API, men TrafficFlow kan behöva tätare intervall om det ska kännas minutnära.
+- **Pollinganalys 2026-05-01:** 226 olycksevents analyserade efter ungefär en veckas insamling. `pg_cron` hade 301 lyckade körningar, median-gap 30 min, max-gap 30 min. Observerad olyckstid hade median 30 min och 35% single-observation-events. Trafikverkets `StartTime`→`EndTime` hade p10 cirka 45 min, p25 cirka 58 min och inga events under 30 min. Rekommendation: behåll 30 min och kör om `pnpm --filter @trafik/scraper run analyze:polling` efter ytterligare 1–2 veckor.
 - **Deduplicering:** Trafikverkets `Deviation.Id` bevarar tekniska rader; användarnära risk/popup dedupar logiska olyckor per segment, meddelande, vägnummer och timme.
 
 ### Lagring

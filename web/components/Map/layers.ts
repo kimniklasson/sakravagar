@@ -27,6 +27,7 @@ type RiskSegment = {
 };
 
 export type LayerController = { setVisible: (v: boolean) => void };
+export type RouteClickHandler = (routeId: string) => void;
 type HeatmapStop = { density: number; color: string; alpha: number };
 type Bbox = { west: number; south: number; east: number; north: number };
 
@@ -86,6 +87,7 @@ const TRAFFIC_FLOW_MIN_ZOOM = 7;
 const ROUTE_SOURCE_ID = "route";
 const ROUTE_ALT_LAYER_ID = "route-alt-lines";
 const ROUTE_ALT_CASING_LAYER_ID = "route-alt-casing";
+const ROUTE_ALT_HIT_LAYER_ID = "route-alt-hit";
 const ROUTE_PRIMARY_LAYER_ID = "route-primary-line";
 const ROUTE_PRIMARY_CASING_LAYER_ID = "route-primary-casing";
 
@@ -445,7 +447,7 @@ export async function focusLiveEvents(map: MapLibreMap): Promise<{ liveCount: nu
   return { liveCount: liveEvents.length };
 }
 
-export function addRouteLayer(map: MapLibreMap): LayerController {
+export function addRouteLayer(map: MapLibreMap, onRouteClick?: RouteClickHandler): LayerController {
   if (map.getSource(ROUTE_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
@@ -492,6 +494,20 @@ export function addRouteLayer(map: MapLibreMap): LayerController {
   );
   map.addLayer(
     {
+      id: ROUTE_ALT_HIT_LAYER_ID,
+      type: "line",
+      source: ROUTE_SOURCE_ID,
+      filter: ["!=", ["get", "selected"], true],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "rgba(255, 255, 255, 0)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 14, 12, 20, 16, 28],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
       id: ROUTE_PRIMARY_CASING_LAYER_ID,
       type: "line",
       source: ROUTE_SOURCE_ID,
@@ -519,11 +535,25 @@ export function addRouteLayer(map: MapLibreMap): LayerController {
     beforeId,
   );
 
+  if (onRouteClick) {
+    map.on("click", ROUTE_ALT_HIT_LAYER_ID, (event) => {
+      const routeId = event.features?.[0]?.properties?.id;
+      if (typeof routeId === "string" && routeId.length > 0) onRouteClick(routeId);
+    });
+    map.on("mouseenter", ROUTE_ALT_HIT_LAYER_ID, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", ROUTE_ALT_HIT_LAYER_ID, () => {
+      map.getCanvas().style.cursor = "";
+    });
+  }
+
   return {
     setVisible: (v) => {
       for (const id of [
         ROUTE_ALT_CASING_LAYER_ID,
         ROUTE_ALT_LAYER_ID,
+        ROUTE_ALT_HIT_LAYER_ID,
         ROUTE_PRIMARY_CASING_LAYER_ID,
         ROUTE_PRIMARY_LAYER_ID,
       ]) {

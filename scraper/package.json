@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx --env-file=../.env src/index.ts",
+    "analyze:polling": "tsx --env-file=../.env src/analyze-polling.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

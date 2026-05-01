@@ -1,15 +1,17 @@
 # db
 
-Databasschema för trafik-appen. Supabase Postgres + PostGIS.
+Databasschema för trafik-appen. Supabase Postgres + PostGIS, med migrations för events, NVDB/ÅDT, segmentrisk, störningar, TrafficFlow och publika RPC:er.
 
 ## Applicera schema
 
-Tre alternativ:
+För ett nytt Supabase-projekt: kör migrationskedjan i `migrations/` i ordning.
+
+Tre alternativ för lokal/initial applicering:
 
 ### 1. Supabase SQL Editor (enklast för MVP)
 1. Öppna ditt Supabase-projekt → SQL Editor → New query
-2. Klistra in innehållet från `migrations/0001_init.sql`
-3. Kör
+2. Klistra in en migration i taget från `migrations/`
+3. Kör i nummerordning
 
 ### 2. Supabase CLI
 ```sh
@@ -20,10 +22,14 @@ supabase db push
 
 ### 3. psql direkt
 ```sh
-psql "$DATABASE_URL" -f migrations/0001_init.sql
+for f in migrations/*.sql; do
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+done
 ```
 
 ## Schema i korthet
+
+Kärntabellen för Trafikverket-olyckor är `events`.
 
 | Kolumn          | Syfte |
 |-----------------|-------|
@@ -45,4 +51,29 @@ Om vi senare vill extrahera ett fält vi inte tänkt på slipper vi scrapa om ga
 
 ## Framtida migrations
 
-Numrera i ordning: `0002_*.sql`, `0003_*.sql`. En ADR-post per migration i `docs/decisions.md` om valet är icke-trivialt.
+Numrera i ordning: `0024_*.sql`, `0025_*.sql` osv. En ADR-post i `docs/decisions.md` om valet är icke-trivialt.
+
+## Viktiga migrations
+
+- `0004_pg_cron_scrape.sql` — schemalägger Edge Function-scrape via `pg_cron`/`pg_net`.
+- `0008_risk_pipeline.sql` + `0009_risk_cron.sql` — snapping och segmentrisk.
+- `0011_segment_detail_v2.sql` — popupdetaljer och dedup.
+- `0014_correct_dedup_strategy.sql` — `fid`-baserad risk i stället för `element_id`.
+- `0018_live_disturbances.sql` — separat störningslager.
+- `0019_large_roads_filter.sql` — hastighets-/stora-vägar-filter.
+- `0020_live_traffic_flow.sql` till `0022_stabilize_flow_segments.sql` — TrafficFlow.
+- `0023_security_limits_dedup.sql` — publika grants, limits och dedupad risk-MV.
+
+## Dataregler
+
+- Pågående olycka = `last_seen >= now() - 90 min`.
+- Risk och popup dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`.
+- Risk aggregeras per `fid`, inte `element_id`.
+- `events.raw` ska inte exponeras publikt.
+- Publika, tunga RPC:er ska ha både bbox-filter och response-limit.
+
+## Supabase-gotchas
+
+- PostGIS ligger i schemat `extensions`. `security definer`-funktioner med explicit `search_path` måste inkludera `extensions`.
+- Supabase free tier har kort `statement_timeout`; undvik stora bboxar och globala risk-/NVDB-anrop.
+- Lastkajen bulkimport ska använda session pooler på port `5432`, inte transaction pooler `6543`.

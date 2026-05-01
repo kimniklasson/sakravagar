@@ -2,6 +2,8 @@
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
+Senaste större arbetslogg: `docs/session-2026-05-01.md`.
+
 ## Produktläge
 
 Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar historiska olyckor, aktuella olyckor och vägbaserade risk-/trygghetslager. Routing använder nu self-hostad GraphHopper som första riktiga steg mot "undvik om möjligt"-routing med egna vägvikter, men filtervikterna behöver fortsatt kalibreras.
@@ -30,12 +32,14 @@ Ruttplanerarstatus:
 - Rensa-knapp finns på fält med text. Normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
 - När en rutt finns expanderar boxen med tid till destination, distans och "Undvik om möjligt"-filter. Alla filter är off default.
 - Undvik-filter finns för `Vägar med olyckshistorik`, `Höga hastigheter (90+)` och `Störningar (kö/vägarbeten)`. Info-ikonen till vänster expanderar kort förklaring per filter; toggeln till höger ändrar ruttvalet.
-- Toggle visar loading-copy `Jämför alternativ...`, räknar om bland ruttkandidaterna och visar tid-/distansdiff mot snabbaste rutten, t.ex. `(+6 min)` och `(+4,2 km)`.
+- Toggle visar loading-copy `Jämför alternativ...` och gör ett nytt `/api/route`-anrop med aktiva preferenser när minst ett filter är på. Initial rutt utan filter hämtar bara snabbaste vägen.
+- När ett filter är aktivt visas tidsbudget-slider: `0 / 10 / 20 / 30 / 45 / 60 / ∞`. UI:t väljer tryggaste kandidat inom vald extra restid i stället för en dold tid-vs-trygghet-formel.
+- Vald rutt visar kvarvarande exponering för aktiva filter, t.ex. kilometer 90+ kvar, antal störningar nära rutten eller kvarvarande olycksriskpoäng.
 - Failstate visas i 5 sekunder. Om flera kandidater finns men inget bättre matchar aktiva filter visas `Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen.` Om bara en kandidat finns visas `Hittade inga alternativa rutter att jämföra.`
-- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland GraphHopper-/OSRM-kandidaterna.
-- `/api/route` returnerar `avoidScores` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten.
-- GraphHopper-kandidater: `/api/route` hämtar först snabbaste GraphHopper-rutten och sedan en "calm" custom model-kandidat med lägre prioritet för `MOTORWAY`, `TRUNK`, `max_speed >= 90` och `max_speed >= 80`. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas.
-- Filterranking i UI:t jämför varje alternativs relativa förbättring mot snabbaste rutten. Extra tid/distans är ett mjukt motstånd, inte en hård spärr. Exempel: Floda -> Rönnäng har snabb kandidat ~77 min och lugnare kandidat ~93 min; `Höga hastigheter (90+)` bör välja den lugnare om den har klart lägre highSpeed-score. Olyckor/störningar byter bara om alternativet faktiskt är bättre på de aktiva parametrarna.
+- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland GraphHopper-/OSRM-kandidaterna. Vita alternativrutter har en bred osynlig hit-line och kan klickas på kartan för att bli vald primärrutt.
+- `/api/route` accepterar `avoid` och `maxExtraMinutes`, och returnerar `avoidScores` + `exposure` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten.
+- GraphHopper-kandidater: utan aktiva filter hämtas snabbaste GraphHopper-rutten. Med aktiva filter hämtas snabbaste baseline + GraphHopper `alternative_route`. Om `highSpeed` är aktiv hämtas även en "calm" custom model-kandidat och calm alternatives med lägre prioritet för `MOTORWAY`, `TRUNK`, `max_speed >= 90` och `max_speed >= 80`. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas.
+- Filterranking i UI:t är nu constraint-baserad: välj lägst genomsnittlig avoid-score bland kandidater inom tidsbudgeten. Vid lika trygghet väljs mindre extra tid och därefter kortare total tid.
 - Layout desktop: info/live/tidsfönster ligger i vänsterstacken, ruttplaneraren ligger separat uppe till höger, och zoom/location ligger centrerat längst ner. `fitBounds` för rutter/live tar hänsyn till både vänster- och högerkontroller.
 - Nya assets ligger i `web/public/icons/search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`. Plus/location återanvänder inline-ikonerna i `Map.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
@@ -45,7 +49,7 @@ Kvar för ruttplaneraren:
 - Nominatim är fortfarande publik default för geocoding; byt till dedikerad provider/self-host/avtalad instans före större publik trafik.
 - GraphHopper-calm-profilen är första fungerande riktiga omruttningen för höghastighet/motorväg, men olyckshistorik och störningar påverkar fortfarande efterhandsrankning snarare än GraphHoppers vägkostnad.
 - Nästa routingsteg: generera custom areas/penalty zones från störningar och risksegment så `accidentHistory` och `disturbances` kan påverka GraphHopper-kostnad, inte bara UI-rankning.
-- Kalibrera filtervikter. Särskilt balansen mellan extra minuter och risk-/hastighetsförbättring behöver testas på verkliga exempel.
+- Kalibrera factor-scores och tidsbudget-default på verkliga exempel.
 - Finlira routeplanner-UI enligt Kims senaste designfeedback.
 - Senare: tydligare swap-knapp för bara Från/Till, och riktig alternativpanel när flera rutter finns.
 

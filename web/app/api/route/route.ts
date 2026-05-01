@@ -18,6 +18,7 @@ const MAX_SWEDEN_LAT = 70;
 
 export type RouteLine = {
   id: string;
+  source: string;
   distanceMeters: number;
   durationSeconds: number;
   geometry: GeoJSON.LineString;
@@ -27,9 +28,19 @@ export type RouteLine = {
     highSpeed: number | null;
     disturbances: number | null;
   };
+  exposure: {
+    accidentHistory: number | null;
+    highSpeedMeters: number | null;
+    disturbances: number | null;
+  };
 };
 
+type RouteAvoidOption = keyof RouteLine["avoidScores"];
+
+type RouteAvoidState = Record<RouteAvoidOption, boolean>;
+
 type OsrmRoute = {
+  source?: string;
   distance: number;
   duration: number;
   geometry: GeoJSON.LineString;
@@ -55,6 +66,8 @@ type GraphHopperResponse = {
 type RouteRequest = {
   coordinates?: unknown;
   alternatives?: unknown;
+  avoid?: unknown;
+  maxExtraMinutes?: unknown;
 };
 
 type RiskRow = {
@@ -93,6 +106,14 @@ const calmRouteCustomModel = {
   ],
 };
 
+const routeAvoidOptions = ["accidentHistory", "highSpeed", "disturbances"] as const;
+
+const noAvoids: RouteAvoidState = {
+  accidentHistory: false,
+  highSpeed: false,
+  disturbances: false,
+};
+
 function isCoordinate(value: unknown): value is [number, number] {
   if (!Array.isArray(value) || value.length !== 2) return false;
   const [lng, lat] = value;
@@ -106,6 +127,20 @@ function isCoordinate(value: unknown): value is [number, number] {
     lat >= MIN_SWEDEN_LAT &&
     lat <= MAX_SWEDEN_LAT
   );
+}
+
+function parseAvoidState(value: unknown): RouteAvoidState {
+  if (!value || typeof value !== "object") return noAvoids;
+  const input = value as Partial<Record<RouteAvoidOption, unknown>>;
+  return {
+    accidentHistory: input.accidentHistory === true,
+    highSpeed: input.highSpeed === true,
+    disturbances: input.disturbances === true,
+  };
+}
+
+function activeAvoidOptions(avoid: RouteAvoidState): RouteAvoidOption[] {
+  return routeAvoidOptions.filter((option) => avoid[option]);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -237,8 +272,13 @@ function routeOriginLat(route: OsrmRoute): number {
   return coords.reduce((sum, coord) => sum + (coord[1] ?? 60), 0) / coords.length;
 }
 
-function scoreRisk(route: OsrmRoute, rows: RiskRow[]): number | null {
-  if (!rows.length) return 0;
+type RouteMetric = {
+  score: number | null;
+  exposure: number | null;
+};
+
+function scoreRisk(route: OsrmRoute, rows: RiskRow[]): RouteMetric {
+  if (!rows.length) return { score: 0, exposure: 0 };
   const line = route.geometry.coordinates;
   const originLat = routeOriginLat(route);
   let score = 0;
@@ -255,14 +295,16 @@ function scoreRisk(route: OsrmRoute, rows: RiskRow[]): number | null {
     }
   }
 
-  return score / Math.max(1, route.distance / 1000);
+  const normalized = score / Math.max(1, route.distance / 1000);
+  return { score: normalized, exposure: normalized };
 }
 
-function scoreHighSpeed(route: OsrmRoute, rows: LargeRoadRow[]): number | null {
-  if (!rows.length) return 0;
+function scoreHighSpeed(route: OsrmRoute, rows: LargeRoadRow[]): RouteMetric {
+  if (!rows.length) return { score: 0, exposure: 0 };
   const line = route.geometry.coordinates;
   const originLat = routeOriginLat(route);
   let score = 0;
+  let highSpeedMeters = 0;
 
   for (const row of rows) {
     const speed = row.speed_limit ?? 0;
@@ -274,11 +316,15 @@ function scoreHighSpeed(route: OsrmRoute, rows: LargeRoadRow[]): number | null {
     });
     if (nearRoute) {
       const lengthKm = Math.max(0.05, (row.length_m ?? 100) / 1000);
+      highSpeedMeters += lengthKm * 1000;
       score += lengthKm * (1 + (speed - 90) / 20);
     }
   }
 
-  return score / Math.max(1, route.distance / 1000);
+  return {
+    score: score / Math.max(1, route.distance / 1000),
+    exposure: highSpeedMeters,
+  };
 }
 
 function disturbanceWeight(messageType: string | null): number {
@@ -288,25 +334,39 @@ function disturbanceWeight(messageType: string | null): number {
   return 0.8;
 }
 
-function scoreDisturbances(route: OsrmRoute, rows: DisturbanceRow[]): number | null {
-  if (!rows.length) return 0;
+function scoreDisturbances(route: OsrmRoute, rows: DisturbanceRow[]): RouteMetric {
+  if (!rows.length) return { score: 0, exposure: 0 };
   const line = route.geometry.coordinates;
   const originLat = routeOriginLat(route);
   let score = 0;
+  let count = 0;
 
   for (const row of rows) {
     const distance = distancePointToLineMeters([row.lng, row.lat], line, originLat);
-    if (distance <= 450) score += disturbanceWeight(row.message_type);
+    if (distance <= 450) {
+      count += 1;
+      score += disturbanceWeight(row.message_type);
+    }
   }
 
-  return score / Math.max(1, route.distance / 10_000);
+  return {
+    score: score / Math.max(1, route.distance / 10_000),
+    exposure: count,
+  };
 }
 
-async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteLine["avoidScores"][]> {
+async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<RouteLine, "avoidScores" | "exposure">>> {
   const empty = routes.map(() => ({
-    accidentHistory: null,
-    highSpeed: null,
-    disturbances: null,
+    avoidScores: {
+      accidentHistory: null,
+      highSpeed: null,
+      disturbances: null,
+    },
+    exposure: {
+      accidentHistory: null,
+      highSpeedMeters: null,
+      disturbances: null,
+    },
   }));
   if (!supabaseUrl || !supabaseAnon) return empty;
 
@@ -356,9 +416,16 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteLine["a
       const highSpeed = scoreHighSpeed(route, largeRoadRows);
       const disturbances = scoreDisturbances(route, disturbanceRows);
       return {
-        accidentHistory,
-        highSpeed,
-        disturbances,
+        avoidScores: {
+          accidentHistory: accidentHistory.score,
+          highSpeed: highSpeed.score,
+          disturbances: disturbances.score,
+        },
+        exposure: {
+          accidentHistory: accidentHistory.exposure,
+          highSpeedMeters: highSpeed.exposure,
+          disturbances: disturbances.exposure,
+        },
       };
     });
   } catch (err) {
@@ -393,12 +460,19 @@ async function fetchOsrmRoutes(coordinates: [number, number][], alternatives: nu
     throw new Error(osrm.message ?? "route not found");
   }
 
-  return osrm.routes;
+  return osrm.routes.map((route, index) => ({
+    ...route,
+    source: index === 0 ? "fastest" : `osrm-alternative-${index}`,
+  }));
 }
 
 async function fetchGraphHopperRoute(
   coordinates: [number, number][],
-  customModel?: typeof calmRouteCustomModel,
+  opts: {
+    source: string;
+    customModel?: typeof calmRouteCustomModel;
+    alternativeRoutes?: number;
+  },
 ): Promise<OsrmRoute[]> {
   if (!GRAPHHOPPER_BASE_URL) throw new Error("GraphHopper base URL missing");
 
@@ -412,9 +486,16 @@ async function fetchGraphHopperRoute(
     calc_points: true,
   };
 
-  if (customModel) {
+  if (opts.customModel) {
     body["ch.disable"] = true;
-    body.custom_model = customModel;
+    body.custom_model = opts.customModel;
+  }
+
+  if (opts.alternativeRoutes && opts.alternativeRoutes > 1) {
+    body.algorithm = "alternative_route";
+    body["alternative_route.max_paths"] = Math.max(2, Math.min(4, opts.alternativeRoutes));
+    body["alternative_route.max_weight_factor"] = 1.45;
+    body["alternative_route.max_share_factor"] = 0.65;
   }
 
   const headers: HeadersInit = {
@@ -438,7 +519,8 @@ async function fetchGraphHopperRoute(
     throw new Error(graphhopper.message ?? "route not found");
   }
 
-  return graphhopper.paths.map((path) => ({
+  return graphhopper.paths.map((path, index) => ({
+    source: index === 0 ? opts.source : `${opts.source}-alternative-${index}`,
     distance: path.distance,
     duration: path.time / 1000,
     geometry: path.points,
@@ -448,30 +530,49 @@ async function fetchGraphHopperRoute(
 async function fetchProviderRoutes(
   coordinates: [number, number][],
   alternatives: number,
+  avoid: RouteAvoidState,
 ): Promise<OsrmRoute[]> {
+  const activeOptions = activeAvoidOptions(avoid);
   if (!GRAPHHOPPER_BASE_URL) {
-    return fetchOsrmRoutes(coordinates, alternatives);
+    return fetchOsrmRoutes(coordinates, activeOptions.length > 0 ? alternatives : 0);
   }
 
-  const [fastestResult, calmResult] = await Promise.allSettled([
-    fetchGraphHopperRoute(coordinates),
-    fetchGraphHopperRoute(coordinates, calmRouteCustomModel),
-  ]);
-  const routes = [
-    ...(fastestResult.status === "fulfilled" ? fastestResult.value : []),
-    ...(calmResult.status === "fulfilled" ? calmResult.value : []),
+  const requests: Array<Promise<OsrmRoute[]>> = [
+    fetchGraphHopperRoute(coordinates, { source: "fastest" }),
   ];
 
+  if (activeOptions.length > 0) {
+    requests.push(
+      fetchGraphHopperRoute(coordinates, {
+        source: "fastest-alternatives",
+        alternativeRoutes: alternatives + 1,
+      }),
+    );
+  }
+
+  if (avoid.highSpeed) {
+    requests.push(
+      fetchGraphHopperRoute(coordinates, {
+        source: "avoid-high-speed",
+        customModel: calmRouteCustomModel,
+      }),
+      fetchGraphHopperRoute(coordinates, {
+        source: "avoid-high-speed-alternatives",
+        customModel: calmRouteCustomModel,
+        alternativeRoutes: alternatives + 1,
+      }),
+    );
+  }
+
+  const results = await Promise.allSettled(requests);
+  const routes = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+
   if (!routes.length) {
-    const reason = fastestResult.status === "rejected"
-      ? fastestResult.reason
-      : calmResult.status === "rejected"
-        ? calmResult.reason
-        : null;
+    const reason = results.find((result) => result.status === "rejected")?.reason;
     throw reason instanceof Error ? reason : new Error("route provider failed");
   }
 
-  return dedupeRoutes(routes).slice(0, Math.max(1, alternatives + 1));
+  return dedupeRoutes(routes).slice(0, activeOptions.length > 0 ? Math.max(2, alternatives + 1) : 1);
 }
 
 export async function POST(req: Request) {
@@ -498,24 +599,35 @@ export async function POST(req: Request) {
     typeof body.alternatives === "number"
       ? Math.max(0, Math.min(3, Math.floor(body.alternatives)))
       : 2;
+  const avoid = parseAvoidState(body.avoid);
+  const maxExtraMinutes =
+    typeof body.maxExtraMinutes === "number" && Number.isFinite(body.maxExtraMinutes)
+      ? Math.max(0, body.maxExtraMinutes)
+      : null;
 
   try {
-    const providerRoutes = await fetchProviderRoutes(coordinates, alternatives);
+    const providerRoutes = await fetchProviderRoutes(coordinates, alternatives, avoid);
     const scores = await scoreRouteAlternatives(providerRoutes);
     const routes: RouteLine[] = providerRoutes.map((route, index) => ({
       id: `route-${index + 1}`,
+      source: route.source ?? `candidate-${index + 1}`,
       distanceMeters: route.distance,
       durationSeconds: route.duration,
       geometry: route.geometry,
-      safetyScore: scores[index]?.accidentHistory ?? null,
-      avoidScores: scores[index] ?? {
+      safetyScore: scores[index]?.avoidScores.accidentHistory ?? null,
+      avoidScores: scores[index]?.avoidScores ?? {
         accidentHistory: null,
         highSpeed: null,
         disturbances: null,
       },
+      exposure: scores[index]?.exposure ?? {
+        accidentHistory: null,
+        highSpeedMeters: null,
+        disturbances: null,
+      },
     }));
 
-    return jsonResponse({ routes }, { cacheSeconds: 300 });
+    return jsonResponse({ routes, avoid, maxExtraMinutes }, { cacheSeconds: 300 });
   } catch (err) {
     console.error("routing failed", err);
     return jsonResponse({ error: "routing failed" }, { status: 502 });

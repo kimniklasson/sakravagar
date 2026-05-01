@@ -2,7 +2,7 @@
 
 Historisk olycksdata på svenska vägar — en webbapp som hjälper nervösa förare känna trygghet och välja säkrare rutter.
 
-Idé, validering och strategi i [PROJECT.md](./PROJECT.md). Vägval i [docs/decisions.md](./docs/decisions.md).
+Idé, validering och strategi i [PROJECT.md](./PROJECT.md). Nuläge i [docs/current-state.md](./docs/current-state.md), vägval i [docs/decisions.md](./docs/decisions.md), utvecklarflöde i [docs/dev-workflow.md](./docs/dev-workflow.md), routingdrift i [docs/routing-ops.md](./docs/routing-ops.md) och senaste större sessionslogg i [docs/session-2026-05-01.md](./docs/session-2026-05-01.md).
 
 ## Arkitektur
 
@@ -44,7 +44,7 @@ Engångsgrejer som inte kan automatiseras:
 - [ ] Schemat applicerat: kör migrationskedjan i [`db/migrations/`](./db/migrations/)
 - [ ] Edge Function `scrape` deployad och `pg_cron`/`pg_net` aktiverat via migration
 - [ ] Repo-secrets satta om GitHub Actions-nödknappen ska användas: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
-- [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL` + `SUPABASE_ANON_KEY` samt dedikerade `NOMINATIM_*`/`OSRM_*`-värden före publik routingtrafik
+- [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN` samt dedikerade `NOMINATIM_*`/`OSRM_*`-värden före större publik trafik
 
 ## Deploy
 
@@ -60,7 +60,7 @@ trafik/
 ├── shared/                # delade TS-typer
 ├── db/                    # SQL-migrations
 ├── .github/workflows/     # manuell scrape-nödknapp
-├── docs/                  # current-state + ADR-lite beslut
+├── docs/                  # nuläge, ADR-lite beslut, API och ops
 ├── PROJECT.md             # strategi & validering
 └── README.md              # (du är här)
 ```

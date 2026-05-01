@@ -32,6 +32,7 @@ type TimeWindow = "all" | "7d" | "30d" | "6m" | "1y";
 type RouteStopSource = "manual" | "gps";
 type RouteAvoidOption = "accidentHistory" | "highSpeed" | "disturbances";
 type RouteAvoidState = Record<RouteAvoidOption, boolean>;
+type RouteTimeBudget = number | "unlimited";
 type RouteStop = {
   id: string;
   label: string;
@@ -78,12 +79,24 @@ const routeAvoidLabels: Record<RouteAvoidOption, string> = {
 
 const routeAvoidDescriptions: Record<RouteAvoidOption, string> = {
   accidentHistory:
-    "Jämför tillgängliga ruttalternativ och prioriterar vägar med lägre historisk olycksrisk när det finns ett rimligt alternativ.",
+    "Prioriterar rutter med lägre historisk olycksrisk inom den extra restid du accepterar.",
   highSpeed:
-    "Jämför tillgängliga ruttalternativ och prioriterar mindre höghastighetsväg när det finns ett rimligt alternativ.",
+    "Prioriterar rutter med mindre 90+ km/h-väg inom den extra restid du accepterar.",
   disturbances:
-    "Jämför tillgängliga ruttalternativ och prioriterar rutter längre från aktuella köer och vägarbeten när det finns ett rimligt alternativ.",
+    "Prioriterar rutter längre från aktuella köer och vägarbeten inom den extra restid du accepterar.",
 };
+
+const routeTimeBudgetOptions: Array<{ label: string; value: RouteTimeBudget }> = [
+  { label: "0 min", value: 0 },
+  { label: "10 min", value: 10 },
+  { label: "20 min", value: 20 },
+  { label: "30 min", value: 30 },
+  { label: "45 min", value: 45 },
+  { label: "60 min", value: 60 },
+  { label: "Så mycket som krävs", value: "unlimited" },
+];
+
+const defaultRouteTimeBudgetIndex = 3;
 
 function sinceFromWindow(w: TimeWindow): string | null {
   if (w === "all") return null;
@@ -114,21 +127,10 @@ function routeScoreValue(route: RouteLine, option: RouteAvoidOption): number | n
   return typeof score === "number" && Number.isFinite(score) ? score : null;
 }
 
-function routeAvoidImprovement(
-  baseline: RouteLine,
-  route: RouteLine,
-  option: RouteAvoidOption,
-): number | null {
-  const baselineValue = routeScoreValue(baseline, option);
-  const routeValue = routeScoreValue(route, option);
-  if (baselineValue === null || routeValue === null) return null;
-  const denominator = Math.max(1, Math.abs(baselineValue));
-  return (baselineValue - routeValue) / denominator;
-}
-
 function selectRouteCandidates(
   candidates: RouteLine[],
   avoids: RouteAvoidState,
+  timeBudget: RouteTimeBudget,
 ): { routes: RouteLine[]; selectedIndex: number; active: boolean; hasComparableScores: boolean } {
   if (!candidates.length) {
     return { routes: [], selectedIndex: -1, active: false, hasComparableScores: false };
@@ -147,29 +149,37 @@ function selectRouteCandidates(
     return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores: false };
   }
 
+  const optionMax = new globalThis.Map<RouteAvoidOption, number>();
+  for (const option of activeOptions) {
+    const max = Math.max(
+      ...candidates.map((route) => routeScoreValue(route, option) ?? 0),
+      1,
+    );
+    optionMax.set(option, max);
+  }
+
   let hasComparableScores = false;
   const scored = candidates.map((route, index) => {
-    let improvement = 0;
+    let avoidCost = 0;
     let available = 0;
 
     for (const option of activeOptions) {
-      const value = routeAvoidImprovement(baseline, route, option);
+      const value = routeScoreValue(route, option);
       if (value === null) continue;
       available += 1;
-      improvement += value;
+      avoidCost += value / Math.max(1, optionMax.get(option) ?? 1);
     }
 
     if (available > 0) hasComparableScores = true;
-    const averageImprovement = available > 0 ? improvement / available : 0;
+    const averageAvoidCost = available > 0 ? avoidCost / available : Number.POSITIVE_INFINITY;
     const extraMinutes = Math.max(0, (route.durationSeconds - baseline.durationSeconds) / 60);
-    const extraKm = Math.max(0, (route.distanceMeters - baseline.distanceMeters) / 1000);
+    const withinBudget = timeBudget === "unlimited" || extraMinutes <= timeBudget;
     return {
       index,
       route,
       comparable: available > 0,
-      score: available > 0
-        ? extraMinutes * 0.05 + extraKm * 0.02 - averageImprovement * 3
-        : Number.POSITIVE_INFINITY,
+      withinBudget,
+      score: available > 0 && withinBudget ? averageAvoidCost : Number.POSITIVE_INFINITY,
     };
   });
 
@@ -179,6 +189,9 @@ function selectRouteCandidates(
 
   scored.sort((a, b) => {
     if (a.score !== b.score) return a.score - b.score;
+    const aExtra = Math.max(0, (a.route.durationSeconds - baseline.durationSeconds) / 60);
+    const bExtra = Math.max(0, (b.route.durationSeconds - baseline.durationSeconds) / 60);
+    if (aExtra !== bExtra) return aExtra - bExtra;
     if (a.route.durationSeconds !== b.route.durationSeconds) {
       return a.route.durationSeconds - b.route.durationSeconds;
     }
@@ -186,7 +199,7 @@ function selectRouteCandidates(
   });
 
   const selected = scored[0];
-  if (!selected || !selected.comparable) {
+  if (!selected || !selected.comparable || !selected.withinBudget) {
     return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores };
   }
 
@@ -232,6 +245,7 @@ export default function Map() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [routeNoticeText, setRouteNoticeText] = useState<string | null>(null);
   const [routeAvoids, setRouteAvoids] = useState<RouteAvoidState>(initialRouteAvoids);
+  const [routeTimeBudgetIndex, setRouteTimeBudgetIndex] = useState(defaultRouteTimeBudgetIndex);
   const [expandedRouteAvoid, setExpandedRouteAvoid] = useState<RouteAvoidOption | null>(null);
   const [routeCandidates, setRouteCandidates] = useState<RouteLine[]>([]);
   const [routeLines, setRouteLines] = useState<RouteLine[]>([]);
@@ -247,6 +261,18 @@ export default function Map() {
   }>({});
   const timeWindowRef = useRef<TimeWindow>(timeWindow);
   useEffect(() => { timeWindowRef.current = timeWindow; }, [timeWindow]);
+
+  const selectRouteById = useCallback((routeId: string) => {
+    setRouteLines((current) => {
+      const selected = current.find((route) => route.id === routeId);
+      if (!selected || current[0]?.id === routeId) return current;
+      const next = [selected, ...current.filter((route) => route.id !== routeId)];
+      const map = mapRef.current;
+      if (map && mapLoadedRef.current) setRouteLayerData(map, next);
+      setRouteNoticeText(null);
+      return next;
+    });
+  }, []);
 
   const refreshEventStats = async () => {
     const res = await fetch("/api/events/stats");
@@ -339,7 +365,7 @@ export default function Map() {
           layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
           layerCtrlRef.current.trafficFlow = addTrafficFlowLayer(map);
           layerCtrlRef.current.trafficFlow.setVisible(trafficFlowOn);
-          addRouteLayer(map);
+          addRouteLayer(map, selectRouteById);
           return Promise.all([
             refreshDisturbancesLayer(map),
             refreshTrafficFlowLayer(map),
@@ -475,12 +501,14 @@ export default function Map() {
 
   const handleZoomIn = () => mapRef.current?.zoomIn();
   const handleZoomOut = () => mapRef.current?.zoomOut();
+  const currentRouteTimeBudget = routeTimeBudgetOptions[routeTimeBudgetIndex]?.value ?? 30;
   const applyRouteSelection = useCallback((
     candidates: RouteLine[],
     avoids: RouteAvoidState,
+    timeBudget: RouteTimeBudget,
     opts: { focus?: boolean; showNoBetter?: boolean } = {},
   ) => {
-    const selection = selectRouteCandidates(candidates, avoids);
+    const selection = selectRouteCandidates(candidates, avoids, timeBudget);
     setRouteLines(selection.routes);
     const shouldShowNotice = Boolean(opts.showNoBetter && selection.active && selection.selectedIndex === 0);
     setRouteNoticeText(
@@ -591,13 +619,24 @@ export default function Map() {
   }, []);
   const planRouteForStops = useCallback(async (
     stopsToPlan: RouteStop[],
-    opts: { auto?: boolean } = {},
+    opts: {
+      auto?: boolean;
+      compare?: boolean;
+      avoids?: RouteAvoidState;
+      timeBudget?: RouteTimeBudget;
+    } = {},
   ) => {
+    const avoids = opts.avoids ?? routeAvoids;
+    const timeBudget = opts.timeBudget ?? currentRouteTimeBudget;
     const draftKey = stopsToPlan
       .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
       .join("|");
 
-    setRouteLoading(true);
+    if (opts.compare) {
+      setRouteCompareLoading(true);
+    } else {
+      setRouteLoading(true);
+    }
     setRouteError(null);
     try {
       const resolvedStops = await Promise.all(stopsToPlan.map(geocodeRouteStop));
@@ -626,7 +665,12 @@ export default function Map() {
       const res = await fetch("/api/route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coordinates: routeCoordinates, alternatives: 3 }),
+        body: JSON.stringify({
+          coordinates: routeCoordinates,
+          alternatives: 3,
+          avoid: avoids,
+          maxExtraMinutes: timeBudget === "unlimited" ? null : timeBudget,
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -636,7 +680,7 @@ export default function Map() {
       if (!routes.length) throw new Error("Kunde inte hitta en rutt.");
 
       setRouteCandidates(routes);
-      applyRouteSelection(routes, routeAvoids, { focus: true });
+      applyRouteSelection(routes, avoids, timeBudget, { focus: !opts.compare });
     } catch (err) {
       console.warn("route planning failed", err);
       lastRouteKeyRef.current = null;
@@ -648,9 +692,13 @@ export default function Map() {
         setRouteError(err instanceof Error ? err.message : "Kunde inte hitta en rutt.");
       }
     } finally {
-      setRouteLoading(false);
+      if (opts.compare) {
+        setRouteCompareLoading(false);
+      } else {
+        setRouteLoading(false);
+      }
     }
-  }, [applyRouteSelection, geocodeRouteStop, routeAvoids]);
+  }, [applyRouteSelection, currentRouteTimeBudget, geocodeRouteStop, routeAvoids]);
   useEffect(() => {
     const readyForRoute = routeStops.length >= 2 && routeStops.every((stop) => stop.label.trim().length >= 2);
     if (!readyForRoute || loadingRouteStopId || geocodingStopId || routeLoading) return;
@@ -744,16 +792,29 @@ export default function Map() {
         setRouteCompareLoading(true);
         routeCompareTimerRef.current = window.setTimeout(() => {
           routeCompareTimerRef.current = null;
-          setRouteCompareLoading(false);
-          applyRouteSelection(routeCandidates, next, { showNoBetter: true });
+          void planRouteForStops(routeStops, {
+            compare: true,
+            avoids: next,
+            timeBudget: currentRouteTimeBudget,
+          });
         }, 520);
       } else {
         setRouteCompareLoading(false);
-        applyRouteSelection(routeCandidates, next);
+        const baselineOnly = routeCandidates[0] ? [routeCandidates[0]] : routeCandidates;
+        setRouteCandidates(baselineOnly);
+        applyRouteSelection(baselineOnly, next, currentRouteTimeBudget);
       }
 
       return next;
     });
+  };
+  const handleRouteTimeBudgetChange = (index: number) => {
+    const nextIndex = Math.max(0, Math.min(routeTimeBudgetOptions.length - 1, index));
+    const nextBudget = routeTimeBudgetOptions[nextIndex]?.value ?? 30;
+    setRouteTimeBudgetIndex(nextIndex);
+    if (routeCandidates.length > 0 && activeAvoidCount(routeAvoids) > 0) {
+      applyRouteSelection(routeCandidates, routeAvoids, nextBudget, { showNoBetter: true });
+    }
   };
   const handleLiveBoxToggle = () => {
     setLiveOpen((v) => !v);
@@ -825,6 +886,7 @@ export default function Map() {
           routeError={routeError}
           routeNoticeText={routeNoticeText}
           routeAvoids={routeAvoids}
+          routeTimeBudgetIndex={routeTimeBudgetIndex}
           expandedRouteAvoid={expandedRouteAvoid}
           routes={routeLines}
           baselineRoute={routeCandidates[0] ?? null}
@@ -836,6 +898,7 @@ export default function Map() {
           onUsePosition={handleUsePositionForRouteStop}
           onAddStop={addRouteStop}
           onToggleAvoid={handleToggleRouteAvoid}
+          onChangeTimeBudget={handleRouteTimeBudgetChange}
           onToggleAvoidInfo={(option) =>
             setExpandedRouteAvoid((current) => (current === option ? null : option))
           }
@@ -1045,6 +1108,50 @@ const TRAFFIC_FLOW_SCALE: ScaleStop[] = [
   { color: "#FF7A3D", label: "Långsamt" },
 ];
 
+function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
+  if (option === "highSpeed") return route.exposure?.highSpeedMeters ?? null;
+  return route.exposure?.[option] ?? null;
+}
+
+function routeExposureSummary(
+  primary: RouteLine | null,
+  baseline: RouteLine | null,
+  avoids: RouteAvoidState,
+): string[] {
+  if (!primary || !baseline) return [];
+  return (Object.keys(routeAvoidLabels) as RouteAvoidOption[])
+    .filter((option) => avoids[option])
+    .map((option) => {
+      const current = routeExposureValue(primary, option);
+      const base = routeExposureValue(baseline, option);
+      if (current === null || base === null) return null;
+
+      if (option === "highSpeed") {
+        const reduced = Math.max(0, base - current);
+        if (current <= 100) return "Höga hastigheter undviks på vald rutt.";
+        return reduced > 100
+          ? `Höga hastigheter kvar: ${formatRouteDistance(current)} (${formatRouteDistance(reduced)} mindre än snabbaste).`
+          : `Höga hastigheter kvar: ${formatRouteDistance(current)}.`;
+      }
+
+      if (option === "disturbances") {
+        const rounded = Math.round(current);
+        const reduced = Math.max(0, Math.round(base - current));
+        if (rounded === 0) return "Aktuella störningar undviks på vald rutt.";
+        return reduced > 0
+          ? `Störningar nära rutten: ${rounded} (${reduced} färre än snabbaste).`
+          : `Störningar nära rutten: ${rounded}.`;
+      }
+
+      const reduced = Math.max(0, base - current);
+      if (current <= 0.05) return "Historisk olycksrisk undviks nästan helt på vald rutt.";
+      return reduced > 0.05
+        ? `Olyckshistorik kvar: riskpoäng ${current.toFixed(1)} (${reduced.toFixed(1)} lägre än snabbaste).`
+        : `Olyckshistorik kvar: riskpoäng ${current.toFixed(1)}.`;
+    })
+    .filter((summary): summary is string => Boolean(summary));
+}
+
 function RoutePlannerBox({
   stops,
   activeStopId,
@@ -1056,6 +1163,7 @@ function RoutePlannerBox({
   routeError,
   routeNoticeText,
   routeAvoids,
+  routeTimeBudgetIndex,
   expandedRouteAvoid,
   routes,
   baselineRoute,
@@ -1067,6 +1175,7 @@ function RoutePlannerBox({
   onUsePosition,
   onAddStop,
   onToggleAvoid,
+  onChangeTimeBudget,
   onToggleAvoidInfo,
   onDragStartStop,
   onDropStop,
@@ -1081,6 +1190,7 @@ function RoutePlannerBox({
   routeError: string | null;
   routeNoticeText: string | null;
   routeAvoids: RouteAvoidState;
+  routeTimeBudgetIndex: number;
   expandedRouteAvoid: RouteAvoidOption | null;
   routes: RouteLine[];
   baselineRoute: RouteLine | null;
@@ -1092,6 +1202,7 @@ function RoutePlannerBox({
   onUsePosition: (id: string) => void;
   onAddStop: () => void;
   onToggleAvoid: (option: RouteAvoidOption) => void;
+  onChangeTimeBudget: (index: number) => void;
   onToggleAvoidInfo: (option: RouteAvoidOption) => void;
   onDragStartStop: (id: string) => void;
   onDropStop: (id: string) => void;
@@ -1108,6 +1219,10 @@ function RoutePlannerBox({
   const routeDiffMeters = primaryRoute && baselineRoute
     ? primaryRoute.distanceMeters - baselineRoute.distanceMeters
     : 0;
+  const activeAvoids = activeAvoidCount(routeAvoids);
+  const showTimeBudget = activeAvoids > 0 && showRouteDetails;
+  const timeBudget = routeTimeBudgetOptions[routeTimeBudgetIndex]?.value ?? 30;
+  const exposureSummaries = routeExposureSummary(primaryRoute, baselineRoute, routeAvoids);
 
   return (
     <div
@@ -1245,12 +1360,6 @@ function RoutePlannerBox({
               </div>
             </div>
           ) : null}
-          {routeNoticeText && (
-            <div className={styles.routeNotice} aria-live="polite">
-              <WarningIcon className={styles.routeNoticeIcon} />
-              <span>{routeNoticeText}</span>
-            </div>
-          )}
           <div className={styles.routeAvoidSection}>
             <div className={styles.routeAvoidHeading}>Undvik om möjligt</div>
             <div className={styles.routeAvoidList}>
@@ -1298,7 +1407,49 @@ function RoutePlannerBox({
                 </div>
               ))}
             </div>
+            {showTimeBudget && (
+              <div className={styles.routeTimeBudget}>
+                <div className={styles.routeTimeBudgetHeader}>
+                  <span>Max extra restid</span>
+                  <span>
+                    {timeBudget === "unlimited" ? "Så mycket som krävs" : `${timeBudget} min`}
+                  </span>
+                </div>
+                <input
+                  className={styles.routeTimeBudgetSlider}
+                  type="range"
+                  min={0}
+                  max={routeTimeBudgetOptions.length - 1}
+                  step={1}
+                  value={routeTimeBudgetIndex}
+                  onChange={(e) => onChangeTimeBudget(Number(e.target.value))}
+                  aria-label="Max extra restid för tryggare rutt"
+                />
+                <div className={styles.routeTimeBudgetTicks} aria-hidden="true">
+                  {routeTimeBudgetOptions.map((option, index) => (
+                    <span key={option.label} className={index === routeTimeBudgetIndex ? styles.routeTimeBudgetTickActive : ""}>
+                      {option.value === "unlimited" ? "∞" : option.value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
+          {exposureSummaries.length > 0 && (
+            <div className={styles.routeExposureList} aria-live="polite">
+              {exposureSummaries.map((summary) => (
+                <div key={summary} className={styles.routeExposureItem}>
+                  {summary}
+                </div>
+              ))}
+            </div>
+          )}
+          {routeNoticeText && (
+            <div className={styles.routeNotice} aria-live="polite">
+              <WarningIcon className={styles.routeNoticeIcon} />
+              <span>{routeNoticeText}</span>
+            </div>
+          )}
         </div>
       )}
       {routeError && (

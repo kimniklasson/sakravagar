@@ -571,6 +571,23 @@
   flex-shrink: 0;
 }
 
+.routeExposureList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.routeExposureItem {
+  composes: type-small-x from global;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.25;
+}
+
 .routeAvoidSection {
   margin-top: 13px;
 }
@@ -683,6 +700,44 @@
   composes: type-medium from global;
   margin: 0;
   padding: 0 24px 16px;
+  color: var(--color-white);
+}
+
+.routeTimeBudget {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 4px;
+  background: rgba(17, 17, 17, 0.52);
+}
+
+.routeTimeBudgetHeader {
+  composes: type-small-x from global;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.routeTimeBudgetHeader span:last-child {
+  color: var(--color-white);
+  text-align: right;
+}
+
+.routeTimeBudgetSlider {
+  width: 100%;
+  margin: 12px 0 6px;
+  accent-color: var(--color-white);
+}
+
+.routeTimeBudgetTicks {
+  composes: type-small-x from global;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  color: rgba(255, 255, 255, 0.46);
+  text-align: center;
+}
+
+.routeTimeBudgetTickActive {
   color: var(--color-white);
 }
 

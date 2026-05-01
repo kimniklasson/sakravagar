@@ -54,6 +54,8 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Utvärderas:** Efter 1 månad med riktig data. Beräkna median `aktiv-tid` per händelse. Om median är klart över 30 min → sänk till 60 min (halvera API-trafiken).
 
+**Första datacheck 2026-05-01:** Behåll 30 min. Efter cirka en veckas insamling fanns 226 olycksevents. `pg_cron` hade kört scrape-jobbet 301 gånger utan failures och med 30 min som maxgap. Observerad `last_seen - first_seen` hade median 30 min; 35% var single-observation-events. Trafikverkets `raw.StartTime -> raw.EndTime` hade p10 cirka 45 min och inga events under 30 min, vilket talar emot att 30-minuterspolling missar många olyckor just nu. Kör om analysen efter ytterligare 1–2 veckor och igen efter en månad.
+
 ## 2026-04-25 — Cron flyttad från GH Actions till Supabase pg_cron
 
 **Valt:** Schemalägg scrapen via `pg_cron` + `pg_net` direkt i Supabase, som anropar en Edge Function `scrape` (Deno-port av Node-scrapern). GH Actions-workflowen behållen som manuell `workflow_dispatch`-knapp.
