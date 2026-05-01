@@ -4,7 +4,7 @@ Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för
 
 ## Produktläge
 
-Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar historiska olyckor, aktuella olyckor och vägbaserade risk-/trygghetslager. Routing finns nu som första planerarprototyp, men riktig "undvik"-routing med egna vägvikter är fortfarande framtida fas.
+Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar historiska olyckor, aktuella olyckor och vägbaserade risk-/trygghetslager. Routing använder nu self-hostad GraphHopper som första riktiga steg mot "undvik om möjligt"-routing med egna vägvikter, men filtervikterna behöver fortsatt kalibreras.
 
 Aktiva lager i UI:t:
 
@@ -17,33 +17,35 @@ Aktiva lager i UI:t:
 
 Senaste UI-beteende: den röda liveboxen visar globalt antal pågående olyckor. Klick på boxen fokuserar kartan på aktiva olyckor: 1 olycka flyger till zoom 10, 2+ kör `fitBounds` så alla syns.
 
-Ruttplaneraren finns under liveboxen och har nu första fungerande geocoding/routing-kopplingen. Adressfält söker via egen `/api/geocode`-proxy mot Nominatim, GPS reverse-geocodas till läsbar plats när provider svarar, och rutten räknas automatiskt via egen `/api/route`-proxy mot OSRM när alla stopp kan tolkas.
+Ruttplaneraren finns under liveboxen och har fungerande geocoding/routing-koppling. Adressfält söker via egen `/api/geocode`-proxy mot Nominatim, GPS reverse-geocodas till läsbar plats när provider svarar, och rutten räknas automatiskt via egen `/api/route`. `/api/route` använder GraphHopper när `GRAPHHOPPER_BASE_URL` finns och faller tillbaka till OSRM annars.
 
 Ruttplanerarstatus:
 
 - `Från`/`Till`-fält finns i `RoutePlannerBox` i `web/components/Map/Map.tsx`.
 - `Din plats` visas bara när `Från adress` faktiskt har fokus och är tomt. Den ligger som absolut overlay under första fältet, startar ungefär vid textkolumnen och animerar in.
-- GPS-flowet använder `navigator.geolocation`, visar CSS-loader i fältet under hämtning, sätter koordinat direkt och uppdaterar label via reverse geocoding om möjligt.
+- GPS-flowet använder `navigator.geolocation`, visar CSS-loader och `Hämtar plats...` under hämtning, sätter koordinat direkt och uppdaterar label via reverse geocoding om möjligt. Om plats nekas/timeoutar eller reverse geocoding misslyckas visas begripligt felmeddelande i ruttpanelen.
 - Textinput debouncar mot `/api/geocode`, visar upp till 5 svenska träffar och sätter stop-koordinat när användaren väljer en träff. Om användaren bara skriver färdigt använder auto-routing bästa geocoding-träffen för stopp som saknar koordinat.
 - Geocoding-resultat visas som korta etiketter (`väg/plats, ort`) i UI:t. Backend rankar träffar efter hur väl den visade etiketten matchar queryn, och behåller föregående träffar under laddning så listan inte blinkar tom vid svaga mellanqueries som `Hästsk`.
 - `Lägg till ett stopp` lägger in nytt stopp före destinationen. Draghandles har enkel HTML drag/drop-reorder av stop-arrayen.
 - Rensa-knapp finns på fält med text. Normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
 - När en rutt finns expanderar boxen med tid till destination, distans och "Undvik om möjligt"-filter. Alla filter är off default.
 - Undvik-filter finns för `Vägar med olyckshistorik`, `Höga hastigheter (90+)` och `Störningar (kö/vägarbeten)`. Info-ikonen till vänster expanderar kort förklaring per filter; toggeln till höger ändrar ruttvalet.
-- Toggle visar loading-copy `Jämför alternativ...`, räknar om bland de ruttalternativ OSRM returnerat och visar tid-/distansdiff mot snabbaste rutten, t.ex. `(+6 min)` och `(+4,2 km)`.
-- Failstate visas i 5 sekunder. Om OSRM gav flera alternativ men inget bättre matchar filtren visas `Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen.` Om OSRM bara gav en rutt visas `Hittade inga alternativa rutter att jämföra.`
-- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland OSRM:s returnerade alternativ; de skapar ännu inte nya rutter.
+- Toggle visar loading-copy `Jämför alternativ...`, räknar om bland ruttkandidaterna och visar tid-/distansdiff mot snabbaste rutten, t.ex. `(+6 min)` och `(+4,2 km)`.
+- Failstate visas i 5 sekunder. Om flera kandidater finns men inget bättre matchar aktiva filter visas `Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen.` Om bara en kandidat finns visas `Hittade inga alternativa rutter att jämföra.`
+- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland GraphHopper-/OSRM-kandidaterna.
 - `/api/route` returnerar `avoidScores` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten.
+- GraphHopper-kandidater: `/api/route` hämtar först snabbaste GraphHopper-rutten och sedan en "calm" custom model-kandidat med lägre prioritet för `MOTORWAY`, `TRUNK`, `max_speed >= 90` och `max_speed >= 80`. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas.
+- Filterranking i UI:t jämför varje alternativs relativa förbättring mot snabbaste rutten. Extra tid/distans är ett mjukt motstånd, inte en hård spärr. Exempel: Floda -> Rönnäng har snabb kandidat ~77 min och lugnare kandidat ~93 min; `Höga hastigheter (90+)` bör välja den lugnare om den har klart lägre highSpeed-score. Olyckor/störningar byter bara om alternativet faktiskt är bättre på de aktiva parametrarna.
 - Layout desktop: info/live/tidsfönster ligger i vänsterstacken, ruttplaneraren ligger separat uppe till höger, och zoom/location ligger centrerat längst ner. `fitBounds` för rutter/live tar hänsyn till både vänster- och högerkontroller.
-- Nya assets ligger i `web/public/icons/search.svg`, `draghandles.svg`, `close-circle.svg`. Plus/location återanvänder inline-ikonerna i `Map.tsx`.
+- Nya assets ligger i `web/public/icons/search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`. Plus/location återanvänder inline-ikonerna i `Map.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
 
 Kvar för ruttplaneraren:
 
-- Byt från publika Nominatim/OSRM-defaults till dedikerad provider, self-host eller avtalad instans före skarp publik trafik.
-- Största kvarvarande produkt-/teknikfrågan: riktig omruttning. Dagens filter jämför bara OSRM:s befintliga alternativ. För t.ex. Floda → Göteborg returnerar publika OSRM ofta bara E20-rutten, trots att användaren vet att lugnare vägar finns. Då kan vi bara visa "inga alternativa rutter att jämföra".
-- Utred routingmotor/provider med egna vägvikter eller profiler så `Höga hastigheter (90+)` faktiskt kan undvika/missgynna 90+ vägar och hitta mindre vägar när det är rimligt.
-- När riktig omruttning finns: låt olyckshistorik, störningar och eventuellt trafikflöde påverka routingkostnad i stället för att bara ranka färdiga alternativ.
+- Nominatim är fortfarande publik default för geocoding; byt till dedikerad provider/self-host/avtalad instans före större publik trafik.
+- GraphHopper-calm-profilen är första fungerande riktiga omruttningen för höghastighet/motorväg, men olyckshistorik och störningar påverkar fortfarande efterhandsrankning snarare än GraphHoppers vägkostnad.
+- Nästa routingsteg: generera custom areas/penalty zones från störningar och risksegment så `accidentHistory` och `disturbances` kan påverka GraphHopper-kostnad, inte bara UI-rankning.
+- Kalibrera filtervikter. Särskilt balansen mellan extra minuter och risk-/hastighetsförbättring behöver testas på verkliga exempel.
 - Finlira routeplanner-UI enligt Kims senaste designfeedback.
 - Senare: tydligare swap-knapp för bara Från/Till, och riktig alternativpanel när flera rutter finns.
 
@@ -52,7 +54,31 @@ Kvar för ruttplaneraren:
 - **Scrape:** Supabase `pg_cron` + `pg_net` anropar Edge Function `supabase/functions/scrape`. GitHub Actions-workflowet finns kvar som manuell nödknapp.
 - **Databas:** Supabase Postgres + PostGIS. SQL-migrations ligger i `db/migrations/`.
 - **Webb:** Next.js App Router i `web/`, MapLibre GL JS, CSS Modules + design tokens.
+- **Routing:** Self-hostad GraphHopper på Hetzner bakom Caddy/HTTPS och header-token. Vercel anropar via `/api/route`; GraphHopper är inte publikt exponerad direkt.
 - **Delade typer:** `shared/`, men frontendens API-rutter exporterar också lokala response-typer där det är smidigast.
+
+## Domäner och routing-infra
+
+- App-domän: `https://säkravägar.se` (`xn--skravgar-0zae.se`) på Vercel production.
+- Gammal Vercel-domän finns kvar: `https://sakravagar.vercel.app/`.
+- DNS hanteras i Cloudflare free plan. Loopia är registrar för `säkravägar.se`; Loopia nameservers ska peka på Cloudflare (`blair.ns.cloudflare.com`, `scott.ns.cloudflare.com` vid setup 2026-05-01).
+- Cloudflare DNS-poster:
+  - `A @ -> 76.76.21.21` för Vercel root.
+  - `CNAME www -> cname.vercel-dns.com`.
+  - `A routing -> 116.203.135.46`, DNS only.
+- Routing-server: Hetzner CPX32, Ubuntu 24.04, IPv4 `116.203.135.46`, ungefär 8 GB RAM/150 GB disk. Kostnad ungefär 250 kr/mån inkl. svensk moms.
+- GraphHopper ligger i `/opt/graphhopper` på servern. Version: `graphhopper-web-11.0.jar`. Sverige-OSM ligger i `/opt/graphhopper/data/sweden-latest.osm.pbf`, graph cache i `/opt/graphhopper/graph-cache`.
+- Systemd-service: `graphhopper.service`, lyssnar bara på `localhost:8989` och admin på `localhost:8990`.
+- Caddy-service: `caddy.service`, exponerar `https://routing.säkravägar.se` / `https://routing.xn--skravgar-0zae.se`, reverse-proxyar till `127.0.0.1:8989` bara när requesten har rätt `X-Routing-Token`.
+- Token ligger på servern i `/root/routing-token.txt`. Dela inte värdet i chat/loggar/repo. Vercel env vars:
+  - `GRAPHHOPPER_BASE_URL=https://routing.xn--skravgar-0zae.se`
+  - `GRAPHHOPPER_TOKEN=<värdet från /root/routing-token.txt>`
+- UFW på servern: incoming default deny, outgoing allow. Publikt öppna portar: `22`, `80`, `443`. GraphHopper-port `8989` är localhost-only.
+- 4 GB swap finns i `/swapfile` för importmarginal. Första Sverige-importen peakade runt 3.1 GB RAM och använde ingen swap.
+- Testade 2026-05-01:
+  - `https://routing.säkravägar.se/info` utan token -> `404`.
+  - Samma med `X-Routing-Token` -> `200`.
+  - Floda -> Göteborg via GraphHopper svarade med snabb kandidat och calm-kandidat.
 
 Trafikverket-flöden som scrapas:
 
@@ -98,7 +124,7 @@ Renderprinciper:
 - `web/app/api/disturbances/route.ts` — aktiva vägarbeten/köer.
 - `web/app/api/traffic-flow/route.ts` — aktiva TrafficFlow-segment.
 - `web/app/api/geocode/route.ts` — Nominatim-proxy för search/reverse, Sverige-bounds, svensk `Accept-Language`, kortetiketter och lokal resultatrankning.
-- `web/app/api/route/route.ts` — OSRM-proxy för bilrutter med upp till tre alternativ.
+- `web/app/api/route/route.ts` — routingproxy. Använder GraphHopper om `GRAPHHOPPER_BASE_URL` finns, annars OSRM. Returnerar ruttkandidater och `avoidScores`.
 - `web/app/api/segment/route.ts` — `segment_detail(p_fid)` för popup.
 - `web/app/api/_utils.ts` — bbox-validering och JSON/cache-headers.
 
@@ -126,6 +152,9 @@ Alla tunga bbox-rutter ska ha både API-side area guard och SQL-side limit.
 - Kör inte `next build` medan `next dev` är igång. Stoppa dev-servern först om `.next` beter sig konstigt.
 - Lokal geolocation kräver secure context; vanlig lokal HTTP visar alert, HTTPS-prod bör fungera.
 - Lastkajen DB-import ska använda Supabase session pooler på port 5432, inte transaction pooler 6543.
+- GraphHopper custom model fungerar inte i speed mode/CH; skicka `ch.disable: true` i POST-body för custom model-rutter. Snabbaste basrutten kan använda CH.
+- Om GraphHopper-cache ska byggas om efter config/OSM-byte: stoppa `graphhopper.service`, ta bort eller flytta `/opt/graphhopper/graph-cache`, starta service igen. Import kan ta några minuter och bör följas med `journalctl -u graphhopper -f`.
+- Lokalt devtest med GraphHopper kräver env vars. Kör exempelvis `TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt') GRAPHHOPPER_BASE_URL='https://routing.xn--skravgar-0zae.se' GRAPHHOPPER_TOKEN="$TOKEN" pnpm web`. Utan env faller `/api/route` tillbaka till OSRM och reproducerar inte production-routing.
 
 ## Verifiering
 
@@ -146,8 +175,17 @@ pnpm web
 
 Om port 3000 är upptagen väljer Next en annan port.
 
+För lokal preview som matchar production-routing:
+
+```sh
+TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt') \
+GRAPHHOPPER_BASE_URL='https://routing.xn--skravgar-0zae.se' \
+GRAPHHOPPER_TOKEN="$TOKEN" \
+pnpm web
+```
+
 ## Nästa fokus
 
-- Finlira routeplanner-UI visuellt, men prioritera teknisk väg för riktig "lugnare rutt" framför mer kosmetik om tiden är kort.
-- Utred OSRM/GraphHopper/Valhalla eller annan lösning för custom routingprofil där höghastighetsvägar kan få högre kostnad.
+- Testa och kalibrera routeplanner-filter på fler verkliga sträckor. Kända case: Floda -> Rönnäng ska byta till lugnare kandidat när `Höga hastigheter (90+)` slås på.
+- Flytta `accidentHistory` och `disturbances` närmare GraphHopper-kostnaden via custom areas/penalty zones i stället för bara efterhandsrankning.
 - När olyckshistoriken mognat: kalibrera riskskalan om från preliminära värden till mer stabila brytpunkter.
