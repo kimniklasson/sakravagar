@@ -30,6 +30,8 @@ const SWEDEN_ZOOM = 4.2;
 
 type TimeWindow = "all" | "7d" | "30d" | "6m" | "1y";
 type RouteStopSource = "manual" | "gps";
+type RouteAvoidOption = "accidentHistory" | "highSpeed" | "disturbances";
+type RouteAvoidState = Record<RouteAvoidOption, boolean>;
 type RouteStop = {
   id: string;
   label: string;
@@ -49,6 +51,27 @@ const initialRouteStops: RouteStop[] = [
   { id: "to", label: "", coordinates: null, source: "manual" },
 ];
 
+const initialRouteAvoids: RouteAvoidState = {
+  accidentHistory: false,
+  highSpeed: false,
+  disturbances: false,
+};
+
+const routeAvoidLabels: Record<RouteAvoidOption, string> = {
+  accidentHistory: "Vägar med olyckshistorik",
+  highSpeed: "Höga hastigheter (90+)",
+  disturbances: "Störningar (kö/vägarbeten)",
+};
+
+const routeAvoidDescriptions: Record<RouteAvoidOption, string> = {
+  accidentHistory:
+    "Jämför tillgängliga ruttalternativ och prioriterar vägar med lägre historisk olycksrisk när det finns ett rimligt alternativ.",
+  highSpeed:
+    "Jämför tillgängliga ruttalternativ och prioriterar mindre höghastighetsväg när det finns ett rimligt alternativ.",
+  disturbances:
+    "Jämför tillgängliga ruttalternativ och prioriterar rutter längre från aktuella köer och vägarbeten när det finns ett rimligt alternativ.",
+};
+
 function sinceFromWindow(w: TimeWindow): string | null {
   if (w === "all") return null;
   const days = TIME_WINDOW_DAYS[w];
@@ -67,6 +90,87 @@ function liveUpdatedText(latestLastSeen: string | null, now: number): string {
   if (minutes === null) return "Uppdaterat nyligen";
   if (minutes < 1) return "Uppdaterat nyss";
   return `Uppdaterat ${minutes} min. sedan`;
+}
+
+function activeAvoidCount(avoids: RouteAvoidState): number {
+  return Object.values(avoids).filter(Boolean).length;
+}
+
+function routeScoreValue(route: RouteLine, option: RouteAvoidOption): number | null {
+  const score = route.avoidScores?.[option] ?? null;
+  return typeof score === "number" && Number.isFinite(score) ? score : null;
+}
+
+function selectRouteCandidates(
+  candidates: RouteLine[],
+  avoids: RouteAvoidState,
+): { routes: RouteLine[]; selectedIndex: number; active: boolean; hasComparableScores: boolean } {
+  if (!candidates.length) {
+    return { routes: [], selectedIndex: -1, active: false, hasComparableScores: false };
+  }
+
+  const activeOptions = (Object.entries(avoids) as [RouteAvoidOption, boolean][])
+    .filter(([, enabled]) => enabled)
+    .map(([option]) => option);
+
+  if (!activeOptions.length) {
+    return { routes: candidates, selectedIndex: 0, active: false, hasComparableScores: false };
+  }
+
+  const baseline = candidates[0];
+  if (!baseline) {
+    return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores: false };
+  }
+
+  let hasComparableScores = false;
+  const scored = candidates.map((route, index) => {
+    let avoidPenalty = 0;
+    let available = 0;
+
+    for (const option of activeOptions) {
+      const value = routeScoreValue(route, option);
+      if (value === null) continue;
+      available += 1;
+      avoidPenalty += value;
+    }
+
+    if (available > 0) hasComparableScores = true;
+    const extraMinutes = Math.max(0, (route.durationSeconds - baseline.durationSeconds) / 60);
+    const extraKm = Math.max(0, (route.distanceMeters - baseline.distanceMeters) / 1000);
+    return {
+      index,
+      route,
+      comparable: available > 0,
+      score: available > 0
+        ? avoidPenalty / available + extraMinutes * 0.08 + extraKm * 0.03
+        : Number.POSITIVE_INFINITY,
+    };
+  });
+
+  if (!hasComparableScores) {
+    return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores: false };
+  }
+
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    if (a.route.durationSeconds !== b.route.durationSeconds) {
+      return a.route.durationSeconds - b.route.durationSeconds;
+    }
+    return a.index - b.index;
+  });
+
+  const selected = scored[0];
+  if (!selected || !selected.comparable) {
+    return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores };
+  }
+
+  const rest = candidates.filter((_, index) => index !== selected.index);
+  return {
+    routes: [selected.route, ...rest],
+    selectedIndex: selected.index,
+    active: true,
+    hasComparableScores,
+  };
 }
 
 export default function Map() {
@@ -98,10 +202,16 @@ export default function Map() {
   const [geocodingStopId, setGeocodingStopId] = useState<string | null>(null);
   const [geocodeResultsByStop, setGeocodeResultsByStop] = useState<Record<string, GeocodeResult[]>>({});
   const [routeLoading, setRouteLoading] = useState(false);
+  const [routeCompareLoading, setRouteCompareLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [routeNoticeText, setRouteNoticeText] = useState<string | null>(null);
+  const [routeAvoids, setRouteAvoids] = useState<RouteAvoidState>(initialRouteAvoids);
+  const [expandedRouteAvoid, setExpandedRouteAvoid] = useState<RouteAvoidOption | null>(null);
+  const [routeCandidates, setRouteCandidates] = useState<RouteLine[]>([]);
   const [routeLines, setRouteLines] = useState<RouteLine[]>([]);
   const dragRouteStopIdRef = useRef<string | null>(null);
   const lastRouteKeyRef = useRef<string | null>(null);
+  const routeCompareTimerRef = useRef<number | null>(null);
   const layerCtrlRef = useRef<{
     risk?: LayerController;
     adt?: LayerController;
@@ -262,6 +372,18 @@ export default function Map() {
   }, []);
 
   useEffect(() => {
+    if (!routeNoticeText) return;
+    const id = window.setTimeout(() => setRouteNoticeText(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [routeNoticeText]);
+
+  useEffect(() => () => {
+    if (routeCompareTimerRef.current !== null) {
+      window.clearTimeout(routeCompareTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
     const activeStop = routeStops.find((stop) => stop.id === activeRouteStopId);
     if (!activeStop || activeStop.coordinates || activeStop.source === "gps") {
       setGeocodingStopId(null);
@@ -327,10 +449,41 @@ export default function Map() {
 
   const handleZoomIn = () => mapRef.current?.zoomIn();
   const handleZoomOut = () => mapRef.current?.zoomOut();
+  const applyRouteSelection = useCallback((
+    candidates: RouteLine[],
+    avoids: RouteAvoidState,
+    opts: { focus?: boolean; showNoBetter?: boolean } = {},
+  ) => {
+    const selection = selectRouteCandidates(candidates, avoids);
+    setRouteLines(selection.routes);
+    const shouldShowNotice = Boolean(opts.showNoBetter && selection.active && selection.selectedIndex === 0);
+    setRouteNoticeText(
+      shouldShowNotice
+        ? candidates.length < 2
+          ? "Hittade inga alternativa rutter att jämföra."
+          : "Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen."
+        : null,
+    );
+
+    const map = mapRef.current;
+    if (map && mapLoadedRef.current) {
+      setRouteLayerData(map, selection.routes);
+      if (opts.focus) focusRoute(map, selection.routes);
+    }
+  }, []);
   const clearRoute = () => {
+    if (routeCompareTimerRef.current !== null) {
+      window.clearTimeout(routeCompareTimerRef.current);
+      routeCompareTimerRef.current = null;
+    }
     lastRouteKeyRef.current = null;
+    setRouteCandidates([]);
     setRouteLines([]);
     setRouteError(null);
+    setRouteNoticeText(null);
+    setRouteCompareLoading(false);
+    setExpandedRouteAvoid(null);
+    setRouteAvoids(initialRouteAvoids);
     const map = mapRef.current;
     if (map && mapLoadedRef.current) setRouteLayerData(map, []);
   };
@@ -456,15 +609,12 @@ export default function Map() {
       const { routes } = (await res.json()) as { routes: RouteLine[] };
       if (!routes.length) throw new Error("Kunde inte hitta en rutt.");
 
-      setRouteLines(routes);
-      const map = mapRef.current;
-      if (map && mapLoadedRef.current) {
-        setRouteLayerData(map, routes);
-        focusRoute(map, routes);
-      }
+      setRouteCandidates(routes);
+      applyRouteSelection(routes, routeAvoids, { focus: true });
     } catch (err) {
       console.warn("route planning failed", err);
       lastRouteKeyRef.current = null;
+      setRouteCandidates([]);
       setRouteLines([]);
       const map = mapRef.current;
       if (map && mapLoadedRef.current) setRouteLayerData(map, []);
@@ -474,7 +624,7 @@ export default function Map() {
     } finally {
       setRouteLoading(false);
     }
-  }, [geocodeRouteStop]);
+  }, [applyRouteSelection, geocodeRouteStop, routeAvoids]);
   useEffect(() => {
     const readyForRoute = routeStops.length >= 2 && routeStops.every((stop) => stop.label.trim().length >= 2);
     if (!readyForRoute || loadingRouteStopId || geocodingStopId || routeLoading) return;
@@ -546,8 +696,28 @@ export default function Map() {
       },
     );
   };
-  const handlePlanRoute = async () => {
-    await planRouteForStops(routeStops);
+  const handleToggleRouteAvoid = (option: RouteAvoidOption) => {
+    setRouteAvoids((current) => {
+      const next = { ...current, [option]: !current[option] };
+      setRouteNoticeText(null);
+      if (routeCompareTimerRef.current !== null) {
+        window.clearTimeout(routeCompareTimerRef.current);
+      }
+
+      if (routeCandidates.length > 0 && activeAvoidCount(next) > 0) {
+        setRouteCompareLoading(true);
+        routeCompareTimerRef.current = window.setTimeout(() => {
+          routeCompareTimerRef.current = null;
+          setRouteCompareLoading(false);
+          applyRouteSelection(routeCandidates, next, { showNoBetter: true });
+        }, 520);
+      } else {
+        setRouteCompareLoading(false);
+        applyRouteSelection(routeCandidates, next);
+      }
+
+      return next;
+    });
   };
   const handleLiveBoxToggle = () => {
     setLiveOpen((v) => !v);
@@ -615,8 +785,13 @@ export default function Map() {
           geocodingStopId={geocodingStopId}
           geocodeResultsByStop={geocodeResultsByStop}
           routeLoading={routeLoading}
+          routeCompareLoading={routeCompareLoading}
           routeError={routeError}
+          routeNoticeText={routeNoticeText}
+          routeAvoids={routeAvoids}
+          expandedRouteAvoid={expandedRouteAvoid}
           routes={routeLines}
+          baselineRoute={routeCandidates[0] ?? null}
           onFocusStop={setActiveRouteStopId}
           onDeactivate={() => setActiveRouteStopId(null)}
           onChangeStop={setRouteStopLabel}
@@ -624,7 +799,10 @@ export default function Map() {
           onSelectGeocode={selectGeocodeResult}
           onUsePosition={handleUsePositionForRouteStop}
           onAddStop={addRouteStop}
-          onPlanRoute={handlePlanRoute}
+          onToggleAvoid={handleToggleRouteAvoid}
+          onToggleAvoidInfo={(option) =>
+            setExpandedRouteAvoid((current) => (current === option ? null : option))
+          }
           onDragStartStop={(id) => { dragRouteStopIdRef.current = id; }}
           onDropStop={(id) => {
             const sourceId = dragRouteStopIdRef.current;
@@ -838,8 +1016,13 @@ function RoutePlannerBox({
   geocodingStopId,
   geocodeResultsByStop,
   routeLoading,
+  routeCompareLoading,
   routeError,
+  routeNoticeText,
+  routeAvoids,
+  expandedRouteAvoid,
   routes,
+  baselineRoute,
   onFocusStop,
   onDeactivate,
   onChangeStop,
@@ -847,7 +1030,8 @@ function RoutePlannerBox({
   onSelectGeocode,
   onUsePosition,
   onAddStop,
-  onPlanRoute,
+  onToggleAvoid,
+  onToggleAvoidInfo,
   onDragStartStop,
   onDropStop,
 }: {
@@ -857,8 +1041,13 @@ function RoutePlannerBox({
   geocodingStopId: string | null;
   geocodeResultsByStop: Record<string, GeocodeResult[]>;
   routeLoading: boolean;
+  routeCompareLoading: boolean;
   routeError: string | null;
+  routeNoticeText: string | null;
+  routeAvoids: RouteAvoidState;
+  expandedRouteAvoid: RouteAvoidOption | null;
   routes: RouteLine[];
+  baselineRoute: RouteLine | null;
   onFocusStop: (id: string) => void;
   onDeactivate: () => void;
   onChangeStop: (id: string, label: string) => void;
@@ -866,13 +1055,20 @@ function RoutePlannerBox({
   onSelectGeocode: (id: string, result: GeocodeResult) => void;
   onUsePosition: (id: string) => void;
   onAddStop: () => void;
-  onPlanRoute: () => void;
+  onToggleAvoid: (option: RouteAvoidOption) => void;
+  onToggleAvoidInfo: (option: RouteAvoidOption) => void;
   onDragStartStop: (id: string) => void;
   onDropStop: (id: string) => void;
 }) {
   const activeStop = stops.find((stop) => stop.id === activeStopId) ?? null;
-  const canPlanRoute = stops.length >= 2 && stops.every((stop) => stop.coordinates !== null);
   const primaryRoute = routes[0] ?? null;
+  const showRouteDetails = routeLoading || routeCompareLoading || primaryRoute !== null;
+  const routeDiffSeconds = primaryRoute && baselineRoute
+    ? primaryRoute.durationSeconds - baselineRoute.durationSeconds
+    : 0;
+  const routeDiffMeters = primaryRoute && baselineRoute
+    ? primaryRoute.distanceMeters - baselineRoute.distanceMeters
+    : 0;
 
   return (
     <div
@@ -971,25 +1167,101 @@ function RoutePlannerBox({
           <PlusIcon className={styles.routeActionIcon} />
           <span>Lägg till ett stopp</span>
         </button>
-        <button
-          type="button"
-          className={styles.routeOptionsBtn}
-          disabled={!canPlanRoute || routeLoading}
-          aria-disabled={!canPlanRoute || routeLoading}
-          onClick={onPlanRoute}
-        >
-          {routeLoading ? "Räknar" : "Alternativ"}
-        </button>
       </div>
-      {(routeError || primaryRoute) && (
+      {showRouteDetails && (
+        <div className={styles.routeDetails}>
+          {routeLoading || routeCompareLoading ? (
+            <div className={styles.routeCompareStatus} aria-live="polite">
+              <span className={styles.routeCompareSpinner} aria-hidden="true" />
+              <span>Jämför alternativ...</span>
+            </div>
+          ) : primaryRoute ? (
+            <div className={styles.routeSummary} aria-live="polite">
+              <div className={styles.routeSummaryMain}>
+                <span className={styles.routeSummaryLabel}>Tid till destination</span>
+                <span className={styles.routeSummaryValue}>
+                  {formatRouteDuration(primaryRoute.durationSeconds)}
+                  {routeDiffSeconds > 30 && (
+                    <span className={styles.routeSummaryDiff}>
+                      {" "}
+                      ({formatRouteDurationDiff(routeDiffSeconds)})
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className={styles.routeSummaryDistance}>
+                <span className={styles.routeSummaryLabel}>Distans</span>
+                <span className={styles.routeSummaryDistanceValue}>
+                  {formatRouteDistance(primaryRoute.distanceMeters)}
+                  {routeDiffMeters > 50 && (
+                    <span className={styles.routeSummaryDiff}>
+                      {" "}
+                      ({formatRouteDistanceDiff(routeDiffMeters)})
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          ) : null}
+          {routeNoticeText && (
+            <div className={styles.routeNotice} aria-live="polite">
+              <WarningIcon className={styles.routeNoticeIcon} />
+              <span>{routeNoticeText}</span>
+            </div>
+          )}
+          <div className={styles.routeAvoidSection}>
+            <div className={styles.routeAvoidHeading}>Undvik om möjligt</div>
+            <div className={styles.routeAvoidList}>
+              {(Object.keys(routeAvoidLabels) as RouteAvoidOption[]).map((option) => (
+                <div
+                  key={option}
+                  className={`${styles.routeAvoidItem} ${
+                    expandedRouteAvoid === option ? styles.routeAvoidItemOpen : ""
+                  } ${routeAvoids[option] ? styles.routeAvoidItemOn : ""}`}
+                >
+                  <div className={styles.routeAvoidHeader}>
+                    <button
+                      type="button"
+                      className={styles.routeAvoidInfoBtn}
+                      onClick={() => onToggleAvoidInfo(option)}
+                      aria-expanded={expandedRouteAvoid === option}
+                    >
+                      <InfoIcon className={styles.routeAvoidInfoIcon} />
+                      <span>{routeAvoidLabels[option]}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.routeAvoidToggleHit}
+                      onClick={() => onToggleAvoid(option)}
+                      aria-label={`${routeAvoids[option] ? "Slå av" : "Slå på"} ${routeAvoidLabels[option].toLowerCase()}`}
+                      aria-pressed={routeAvoids[option]}
+                    >
+                      <span className={styles.routeAvoidToggle}>
+                        <span className={styles.routeAvoidToggleKnob} />
+                      </span>
+                    </button>
+                  </div>
+                  <div
+                    className={`${styles.expander} ${
+                      expandedRouteAvoid === option ? styles.expanderOpen : ""
+                    }`}
+                    aria-hidden={expandedRouteAvoid !== option}
+                  >
+                    <div className={styles.expanderInner}>
+                      <p className={styles.routeAvoidBody}>
+                        {routeAvoidDescriptions[option]}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {routeError && (
         <div className={styles.routeStatus} aria-live="polite">
-          {routeError
-            ? routeError
-            : primaryRoute
-              ? `${formatRouteDistance(primaryRoute.distanceMeters)} · ${formatRouteDuration(primaryRoute.durationSeconds)}${
-                  routes.length > 1 ? ` · ${routes.length} alternativ` : ""
-                }`
-              : null}
+          {routeError}
         </div>
       )}
     </div>
@@ -1007,6 +1279,16 @@ function formatRouteDuration(seconds: number): string {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+function formatRouteDurationDiff(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `+${minutes} min`;
+}
+
+function formatRouteDistanceDiff(meters: number): string {
+  if (meters < 1000) return `+${Math.round(meters / 10) * 10} m`;
+  return `+${(meters / 1000).toFixed(meters < 10_000 ? 1 : 0).replace(".", ",")} km`;
 }
 
 function LayerBox({
@@ -1208,6 +1490,28 @@ function InfoIcon({ className }: { className?: string } = {}) {
         strokeWidth="1"
         fill="none"
       />
+    </svg>
+  );
+}
+
+function WarningIcon({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      className={`${styles.warningIcon} ${className ?? ""}`}
+      width="14"
+      height="14"
+      viewBox="0 0 17 17"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M8.5 2L15.5 14.5H1.5L8.5 2Z"
+        stroke="currentColor"
+        strokeWidth="1"
+        fill="none"
+      />
+      <path d="M8.5 6.2V9.6M8.5 11.5V12.5" stroke="currentColor" strokeWidth="1" />
     </svg>
   );
 }

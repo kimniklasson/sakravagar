@@ -1,10 +1,10 @@
-# Current state — 2026-04-30
+# Current state — 2026-05-01
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
 ## Produktläge
 
-Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar historiska olyckor, aktuella olyckor och vägbaserade risk-/trygghetslager. Routing är fortfarande framtida fas.
+Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar historiska olyckor, aktuella olyckor och vägbaserade risk-/trygghetslager. Routing finns nu som första planerarprototyp, men riktig "undvik"-routing med egna vägvikter är fortfarande framtida fas.
 
 Aktiva lager i UI:t:
 
@@ -27,8 +27,13 @@ Ruttplanerarstatus:
 - Textinput debouncar mot `/api/geocode`, visar upp till 5 svenska träffar och sätter stop-koordinat när användaren väljer en träff. Om användaren bara skriver färdigt använder auto-routing bästa geocoding-träffen för stopp som saknar koordinat.
 - Geocoding-resultat visas som korta etiketter (`väg/plats, ort`) i UI:t. Backend rankar träffar efter hur väl den visade etiketten matchar queryn, och behåller föregående träffar under laddning så listan inte blinkar tom vid svaga mellanqueries som `Hästsk`.
 - `Lägg till ett stopp` lägger in nytt stopp före destinationen. Draghandles har enkel HTML drag/drop-reorder av stop-arrayen.
-- Rensa-knapp finns på fält med text. `Alternativ` är korrekt stavat och kan fortfarande trigga routing manuellt, men normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
-- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Första alternativet är fortfarande OSRM:s primära/snabbaste, inte riskrankat.
+- Rensa-knapp finns på fält med text. Normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
+- När en rutt finns expanderar boxen med tid till destination, distans och "Undvik om möjligt"-filter. Alla filter är off default.
+- Undvik-filter finns för `Vägar med olyckshistorik`, `Höga hastigheter (90+)` och `Störningar (kö/vägarbeten)`. Info-ikonen till vänster expanderar kort förklaring per filter; toggeln till höger ändrar ruttvalet.
+- Toggle visar loading-copy `Jämför alternativ...`, räknar om bland de ruttalternativ OSRM returnerat och visar tid-/distansdiff mot snabbaste rutten, t.ex. `(+6 min)` och `(+4,2 km)`.
+- Failstate visas i 5 sekunder. Om OSRM gav flera alternativ men inget bättre matchar filtren visas `Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen.` Om OSRM bara gav en rutt visas `Hittade inga alternativa rutter att jämföra.`
+- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland OSRM:s returnerade alternativ; de skapar ännu inte nya rutter.
+- `/api/route` returnerar `avoidScores` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten.
 - Layout desktop: info/live/tidsfönster ligger i vänsterstacken, ruttplaneraren ligger separat uppe till höger, och zoom/location ligger centrerat längst ner. `fitBounds` för rutter/live tar hänsyn till både vänster- och högerkontroller.
 - Nya assets ligger i `web/public/icons/search.svg`, `draghandles.svg`, `close-circle.svg`. Plus/location återanvänder inline-ikonerna i `Map.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
@@ -36,8 +41,10 @@ Ruttplanerarstatus:
 Kvar för ruttplaneraren:
 
 - Byt från publika Nominatim/OSRM-defaults till dedikerad provider, self-host eller avtalad instans före skarp publik trafik.
-- Riskranka OSRM-alternativen så UI:t kan välja "tryggast av jämförda alternativ" snarare än bara OSRM:s första alternativ.
-- Lägg riktig alternativpanel: visa snabbast/tryggast, distans/tid, riskpoäng och varför rutten bedöms tryggare.
+- Största kvarvarande produkt-/teknikfrågan: riktig omruttning. Dagens filter jämför bara OSRM:s befintliga alternativ. För t.ex. Floda → Göteborg returnerar publika OSRM ofta bara E20-rutten, trots att användaren vet att lugnare vägar finns. Då kan vi bara visa "inga alternativa rutter att jämföra".
+- Utred routingmotor/provider med egna vägvikter eller profiler så `Höga hastigheter (90+)` faktiskt kan undvika/missgynna 90+ vägar och hitta mindre vägar när det är rimligt.
+- När riktig omruttning finns: låt olyckshistorik, störningar och eventuellt trafikflöde påverka routingkostnad i stället för att bara ranka färdiga alternativ.
+- Finlira routeplanner-UI enligt Kims senaste designfeedback.
 - Senare: tydligare swap-knapp för bara Från/Till, och riktig alternativpanel när flera rutter finns.
 
 ## Arkitektur
@@ -141,6 +148,6 @@ Om port 3000 är upptagen väljer Next en annan port.
 
 ## Nästa fokus
 
-- Fortsätt små UX-fixar i kartan före större redesign.
-- När Kim levererar nya screenshots/interaktionsspec: bygg mot befintliga lager och tokens i stället för att byta datamodell.
+- Finlira routeplanner-UI visuellt, men prioritera teknisk väg för riktig "lugnare rutt" framför mer kosmetik om tiden är kort.
+- Utred OSRM/GraphHopper/Valhalla eller annan lösning för custom routingprofil där höghastighetsvägar kan få högre kostnad.
 - När olyckshistoriken mognat: kalibrera riskskalan om från preliminära värden till mer stabila brytpunkter.

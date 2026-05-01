@@ -1,6 +1,6 @@
 # Trafiksäkerhets-app — projektanteckningar
 
-Senast uppdaterad: 2026-04-30
+Senast uppdaterad: 2026-05-01
 
 ## Idén
 
@@ -8,9 +8,9 @@ Webbapp som visar historisk olycksdata på svenska vägar för att hjälpa nerv�
 
 ## Nuvarande inriktning (efter validering)
 
-**MVP = kartbaserad risk/trygghetsvy, inte routing.**
+**MVP = kartbaserad risk/trygghetsvy + första ruttplanerarprototyp.**
 
-Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk normaliserad mot trafikflöde. Routing är potentiell fas 2 när historiken är större och värdet är validerat.
+Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk normaliserad mot trafikflöde. Ruttplaneraren finns som prototyp med geocoding, OSRM-rutter och "Undvik om möjligt"-filter, men dagens filter rankar bara de alternativ OSRM returnerar. Riktig lugnare/tryggare omruttning kräver routingmotor eller provider med egna vägvikter.
 
 ## Validering — vad vi verifierat
 
@@ -61,9 +61,9 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 
 ## Nuvarande byggfokus
 
-1. Fortsätt små UX-fixar i kartan medan datalagren stabiliseras.
+1. Finlira ruttplanerarens UI efter Kims senaste designförslag.
 2. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
-3. När Kim levererar ny samlad design/interaktionsspec: bygg vidare på befintliga lager, tokens och MapLibre-struktur.
+3. Utred riktig "undvik höga hastigheter"-routing. Exempelproblemet Floda → Göteborg visar att publika OSRM ofta bara ger E20 som alternativ, fast lokalkända lugnare vägar finns.
 
 ## Potentiella framtida datalager
 
