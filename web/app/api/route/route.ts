@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 
 const OSRM_BASE_URL = process.env.OSRM_BASE_URL ?? "https://router.project-osrm.org";
 const OSRM_PROFILE = process.env.OSRM_PROFILE ?? "driving";
+const GRAPHHOPPER_BASE_URL = process.env.GRAPHHOPPER_BASE_URL;
+const GRAPHHOPPER_TOKEN = process.env.GRAPHHOPPER_TOKEN;
 const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -39,6 +41,17 @@ type OsrmResponse = {
   routes?: OsrmRoute[];
 };
 
+type GraphHopperPath = {
+  distance: number;
+  time: number;
+  points: GeoJSON.LineString;
+};
+
+type GraphHopperResponse = {
+  message?: string;
+  paths?: GraphHopperPath[];
+};
+
 type RouteRequest = {
   coordinates?: unknown;
   alternatives?: unknown;
@@ -69,6 +82,15 @@ type Bbox = {
   minLat: number;
   maxLng: number;
   maxLat: number;
+};
+
+const calmRouteCustomModel = {
+  priority: [
+    { if: "road_class == MOTORWAY", multiply_by: "0.15" },
+    { if: "road_class == TRUNK", multiply_by: "0.35" },
+    { if: "max_speed >= 90", multiply_by: "0.35" },
+    { if: "max_speed >= 80", multiply_by: "0.7" },
+  ],
 };
 
 function isCoordinate(value: unknown): value is [number, number] {
@@ -125,6 +147,31 @@ function routeBbox(routes: OsrmRoute[], padding = 0.025): Bbox | null {
 
 function bboxArea(bbox: Bbox): number {
   return (bbox.maxLng - bbox.minLng) * (bbox.maxLat - bbox.minLat);
+}
+
+function routeGeometryKey(route: OsrmRoute): string {
+  const coords = route.geometry.coordinates;
+  const first = coords[0];
+  const last = coords.at(-1);
+  return [
+    Math.round(route.distance / 25),
+    Math.round(route.duration / 15),
+    first ? `${first[0]?.toFixed(4)},${first[1]?.toFixed(4)}` : "",
+    last ? `${last[0]?.toFixed(4)},${last[1]?.toFixed(4)}` : "",
+    coords.length,
+  ].join("|");
+}
+
+function dedupeRoutes(routes: OsrmRoute[]): OsrmRoute[] {
+  const seen = new Set<string>();
+  const deduped: OsrmRoute[] = [];
+  for (const route of routes) {
+    const key = routeGeometryKey(route);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(route);
+  }
+  return deduped;
 }
 
 function project([lng, lat]: GeoJSON.Position, originLat: number): [number, number] {
@@ -320,6 +367,113 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteLine["a
   }
 }
 
+async function fetchOsrmRoutes(coordinates: [number, number][], alternatives: number): Promise<OsrmRoute[]> {
+  const coordinateParam = coordinates
+    .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
+    .join(";");
+
+  const url = new URL(`/route/v1/${OSRM_PROFILE}/${coordinateParam}`, OSRM_BASE_URL);
+  url.search = new URLSearchParams({
+    alternatives: alternatives > 0 ? String(alternatives) : "false",
+    overview: "full",
+    geometries: "geojson",
+    steps: "false",
+  }).toString();
+
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    console.error("route provider failed", await res.text());
+    throw new Error("route provider failed");
+  }
+
+  const osrm = (await res.json()) as OsrmResponse;
+  if (osrm.code !== "Ok" || !osrm.routes?.length) {
+    throw new Error(osrm.message ?? "route not found");
+  }
+
+  return osrm.routes;
+}
+
+async function fetchGraphHopperRoute(
+  coordinates: [number, number][],
+  customModel?: typeof calmRouteCustomModel,
+): Promise<OsrmRoute[]> {
+  if (!GRAPHHOPPER_BASE_URL) throw new Error("GraphHopper base URL missing");
+
+  const url = new URL("/route", GRAPHHOPPER_BASE_URL);
+  const body: Record<string, unknown> = {
+    points: coordinates,
+    profile: "car",
+    locale: "sv",
+    points_encoded: false,
+    instructions: false,
+    calc_points: true,
+  };
+
+  if (customModel) {
+    body["ch.disable"] = true;
+    body.custom_model = customModel;
+  }
+
+  const headers: HeadersInit = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  if (GRAPHHOPPER_TOKEN) headers["X-Routing-Token"] = GRAPHHOPPER_TOKEN;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    console.error("graphhopper route provider failed", await res.text());
+    throw new Error("route provider failed");
+  }
+
+  const graphhopper = (await res.json()) as GraphHopperResponse;
+  if (!graphhopper.paths?.length) {
+    throw new Error(graphhopper.message ?? "route not found");
+  }
+
+  return graphhopper.paths.map((path) => ({
+    distance: path.distance,
+    duration: path.time / 1000,
+    geometry: path.points,
+  }));
+}
+
+async function fetchProviderRoutes(
+  coordinates: [number, number][],
+  alternatives: number,
+): Promise<OsrmRoute[]> {
+  if (!GRAPHHOPPER_BASE_URL) {
+    return fetchOsrmRoutes(coordinates, alternatives);
+  }
+
+  const [fastestResult, calmResult] = await Promise.allSettled([
+    fetchGraphHopperRoute(coordinates),
+    fetchGraphHopperRoute(coordinates, calmRouteCustomModel),
+  ]);
+  const routes = [
+    ...(fastestResult.status === "fulfilled" ? fastestResult.value : []),
+    ...(calmResult.status === "fulfilled" ? calmResult.value : []),
+  ];
+
+  if (!routes.length) {
+    const reason = fastestResult.status === "rejected"
+      ? fastestResult.reason
+      : calmResult.status === "rejected"
+        ? calmResult.reason
+        : null;
+    throw reason instanceof Error ? reason : new Error("route provider failed");
+  }
+
+  return dedupeRoutes(routes).slice(0, Math.max(1, alternatives + 1));
+}
+
 export async function POST(req: Request) {
   let body: RouteRequest;
   try {
@@ -344,37 +498,11 @@ export async function POST(req: Request) {
     typeof body.alternatives === "number"
       ? Math.max(0, Math.min(3, Math.floor(body.alternatives)))
       : 2;
-  const coordinateParam = coordinates
-    .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
-    .join(";");
-
-  const url = new URL(`/route/v1/${OSRM_PROFILE}/${coordinateParam}`, OSRM_BASE_URL);
-  url.search = new URLSearchParams({
-    alternatives: alternatives > 0 ? String(alternatives) : "false",
-    overview: "full",
-    geometries: "geojson",
-    steps: "false",
-  }).toString();
 
   try {
-    const res = await fetch(url, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) {
-      console.error("route provider failed", await res.text());
-      return jsonResponse({ error: "route provider failed" }, { status: 502 });
-    }
-
-    const osrm = (await res.json()) as OsrmResponse;
-    if (osrm.code !== "Ok" || !osrm.routes?.length) {
-      return jsonResponse(
-        { error: osrm.message ?? "route not found" },
-        { status: osrm.code === "NoRoute" ? 404 : 502 },
-      );
-    }
-
-    const scores = await scoreRouteAlternatives(osrm.routes);
-    const routes: RouteLine[] = osrm.routes.map((route, index) => ({
+    const providerRoutes = await fetchProviderRoutes(coordinates, alternatives);
+    const scores = await scoreRouteAlternatives(providerRoutes);
+    const routes: RouteLine[] = providerRoutes.map((route, index) => ({
       id: `route-${index + 1}`,
       distanceMeters: route.distance,
       durationSeconds: route.duration,

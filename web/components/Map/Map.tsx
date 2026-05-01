@@ -39,6 +39,19 @@ type RouteStop = {
   source: RouteStopSource;
 };
 
+function routeGeolocationErrorMessage(error: GeolocationPositionError): string {
+  switch (error.code) {
+    case error.PERMISSION_DENIED:
+      return "Platsåtkomst nekades. Tillåt platsdelning i webbläsaren och försök igen.";
+    case error.POSITION_UNAVAILABLE:
+      return "Kunde inte hämta din plats just nu.";
+    case error.TIMEOUT:
+      return "Det tog för lång tid att hämta din plats. Försök igen.";
+    default:
+      return "Kunde inte hämta din plats.";
+  }
+}
+
 const TIME_WINDOW_DAYS: Record<Exclude<TimeWindow, "all">, number> = {
   "7d": 7,
   "30d": 30,
@@ -656,6 +669,7 @@ export default function Map() {
             : stop,
         ),
       );
+      setRouteError(null);
     } catch (err) {
       console.warn("route reverse geocoding failed", err);
       setRouteStops((stops) =>
@@ -665,16 +679,23 @@ export default function Map() {
             : stop,
         ),
       );
+      setRouteError("Hittade din plats, men kunde inte slå upp adressen.");
     } finally {
       setLoadingRouteStopId(null);
     }
   };
   const handleUsePositionForRouteStop = (id: string) => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setRouteError("Din webbläsare stödjer inte platsdelning.");
+      return;
+    }
     if (typeof window !== "undefined" && !window.isSecureContext) {
       window.alert("Platsfunktionen kräver HTTPS. Den fungerar på live-sajten, men inte via lokal http-IP.");
       return;
     }
+    setRouteError(null);
+    setRouteNoticeText(null);
+    setGeocodeResultsByStop((byStop) => ({ ...byStop, [id]: [] }));
     setActiveRouteStopId(id);
     setLoadingRouteStopId(id);
     navigator.geolocation.getCurrentPosition(
@@ -692,8 +713,10 @@ export default function Map() {
       },
       (err) => {
         console.warn("route geolocation failed", err);
+        setRouteError(routeGeolocationErrorMessage(err));
         setLoadingRouteStopId(null);
       },
+      { enableHighAccuracy: false, maximumAge: 60_000, timeout: 12_000 },
     );
   };
   const handleToggleRouteAvoid = (option: RouteAvoidOption) => {
@@ -1063,6 +1086,9 @@ function RoutePlannerBox({
   const activeStop = stops.find((stop) => stop.id === activeStopId) ?? null;
   const primaryRoute = routes[0] ?? null;
   const showRouteDetails = routeLoading || routeCompareLoading || primaryRoute !== null;
+  const activeStopLoading = activeStop
+    ? loadingStopId === activeStop.id || geocodingStopId === activeStop.id
+    : false;
   const routeDiffSeconds = primaryRoute && baselineRoute
     ? primaryRoute.durationSeconds - baselineRoute.durationSeconds
     : 0;
@@ -1155,11 +1181,14 @@ function RoutePlannerBox({
         <button
           type="button"
           className={styles.routePositionBtn}
+          disabled={activeStopLoading}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onUsePosition(activeStop.id)}
         >
           <LocationIcon className={styles.routePositionIcon} />
-          <span className={styles.routePositionLabel}>Din plats</span>
+          <span className={styles.routePositionLabel}>
+            {activeStopLoading ? "Hämtar plats..." : "Din plats"}
+          </span>
         </button>
       )}
       <div className={styles.routeActions}>
