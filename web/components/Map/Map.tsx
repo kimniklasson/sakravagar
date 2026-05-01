@@ -114,6 +114,18 @@ function routeScoreValue(route: RouteLine, option: RouteAvoidOption): number | n
   return typeof score === "number" && Number.isFinite(score) ? score : null;
 }
 
+function routeAvoidImprovement(
+  baseline: RouteLine,
+  route: RouteLine,
+  option: RouteAvoidOption,
+): number | null {
+  const baselineValue = routeScoreValue(baseline, option);
+  const routeValue = routeScoreValue(route, option);
+  if (baselineValue === null || routeValue === null) return null;
+  const denominator = Math.max(1, Math.abs(baselineValue));
+  return (baselineValue - routeValue) / denominator;
+}
+
 function selectRouteCandidates(
   candidates: RouteLine[],
   avoids: RouteAvoidState,
@@ -137,17 +149,18 @@ function selectRouteCandidates(
 
   let hasComparableScores = false;
   const scored = candidates.map((route, index) => {
-    let avoidPenalty = 0;
+    let improvement = 0;
     let available = 0;
 
     for (const option of activeOptions) {
-      const value = routeScoreValue(route, option);
+      const value = routeAvoidImprovement(baseline, route, option);
       if (value === null) continue;
       available += 1;
-      avoidPenalty += value;
+      improvement += value;
     }
 
     if (available > 0) hasComparableScores = true;
+    const averageImprovement = available > 0 ? improvement / available : 0;
     const extraMinutes = Math.max(0, (route.durationSeconds - baseline.durationSeconds) / 60);
     const extraKm = Math.max(0, (route.distanceMeters - baseline.distanceMeters) / 1000);
     return {
@@ -155,7 +168,7 @@ function selectRouteCandidates(
       route,
       comparable: available > 0,
       score: available > 0
-        ? avoidPenalty / available + extraMinutes * 0.08 + extraKm * 0.03
+        ? extraMinutes * 0.05 + extraKm * 0.02 - averageImprovement * 3
         : Number.POSITIVE_INFINITY,
     };
   });
