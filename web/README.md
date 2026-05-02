@@ -79,7 +79,7 @@ Aktiva "Undvik om möjligt"-filter:
 - `Höga hastigheter (90+)`
 - `Störningar (kö/vägarbeten)`
 
-GraphHopper påverkar i dag främst höga hastigheter via custom model. Olyckshistorik och störningar poängsätts efteråt och är nästa stora routingsteg att flytta närmare GraphHopper-kostnaden.
+GraphHopper påverkar höga hastigheter via custom model. Olyckshistorik och störningar skickas också in som dynamiska penalty zones när deras filter är aktiva, och poängsätts efteråt för ranking/exponering i UI:t.
 
 ## Byta visualiseringstyp
 

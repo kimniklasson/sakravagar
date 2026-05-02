@@ -127,13 +127,33 @@ function routeScoreValue(route: RouteLine, option: RouteAvoidOption): number | n
   return typeof score === "number" && Number.isFinite(score) ? score : null;
 }
 
+function routeExtraMinutes(route: RouteLine, baseline: RouteLine): number {
+  return Math.max(0, (route.durationSeconds - baseline.durationSeconds) / 60);
+}
+
+function isRouteWithinBudget(route: RouteLine, baseline: RouteLine, timeBudget: RouteTimeBudget): boolean {
+  return timeBudget === "unlimited" || routeExtraMinutes(route, baseline) <= timeBudget;
+}
+
 function selectRouteCandidates(
   candidates: RouteLine[],
   avoids: RouteAvoidState,
   timeBudget: RouteTimeBudget,
-): { routes: RouteLine[]; selectedIndex: number; active: boolean; hasComparableScores: boolean } {
+): {
+  routes: RouteLine[];
+  selectedIndex: number;
+  active: boolean;
+  hasComparableScores: boolean;
+  hiddenByBudget: number;
+} {
   if (!candidates.length) {
-    return { routes: [], selectedIndex: -1, active: false, hasComparableScores: false };
+    return {
+      routes: [],
+      selectedIndex: -1,
+      active: false,
+      hasComparableScores: false,
+      hiddenByBudget: 0,
+    };
   }
 
   const activeOptions = (Object.entries(avoids) as [RouteAvoidOption, boolean][])
@@ -141,12 +161,24 @@ function selectRouteCandidates(
     .map(([option]) => option);
 
   if (!activeOptions.length) {
-    return { routes: candidates, selectedIndex: 0, active: false, hasComparableScores: false };
+    return {
+      routes: candidates,
+      selectedIndex: 0,
+      active: false,
+      hasComparableScores: false,
+      hiddenByBudget: 0,
+    };
   }
 
   const baseline = candidates[0];
   if (!baseline) {
-    return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores: false };
+    return {
+      routes: candidates,
+      selectedIndex: 0,
+      active: true,
+      hasComparableScores: false,
+      hiddenByBudget: 0,
+    };
   }
 
   const optionMax = new globalThis.Map<RouteAvoidOption, number>();
@@ -172,8 +204,7 @@ function selectRouteCandidates(
 
     if (available > 0) hasComparableScores = true;
     const averageAvoidCost = available > 0 ? avoidCost / available : Number.POSITIVE_INFINITY;
-    const extraMinutes = Math.max(0, (route.durationSeconds - baseline.durationSeconds) / 60);
-    const withinBudget = timeBudget === "unlimited" || extraMinutes <= timeBudget;
+    const withinBudget = isRouteWithinBudget(route, baseline, timeBudget);
     return {
       index,
       route,
@@ -183,14 +214,23 @@ function selectRouteCandidates(
     };
   });
 
+  const budgeted = scored.filter((item) => item.index === 0 || item.withinBudget);
+  const hiddenByBudget = scored.length - budgeted.length;
+
   if (!hasComparableScores) {
-    return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores: false };
+    return {
+      routes: budgeted.map((item) => item.route),
+      selectedIndex: 0,
+      active: true,
+      hasComparableScores: false,
+      hiddenByBudget,
+    };
   }
 
-  scored.sort((a, b) => {
+  budgeted.sort((a, b) => {
     if (a.score !== b.score) return a.score - b.score;
-    const aExtra = Math.max(0, (a.route.durationSeconds - baseline.durationSeconds) / 60);
-    const bExtra = Math.max(0, (b.route.durationSeconds - baseline.durationSeconds) / 60);
+    const aExtra = routeExtraMinutes(a.route, baseline);
+    const bExtra = routeExtraMinutes(b.route, baseline);
     if (aExtra !== bExtra) return aExtra - bExtra;
     if (a.route.durationSeconds !== b.route.durationSeconds) {
       return a.route.durationSeconds - b.route.durationSeconds;
@@ -198,17 +238,26 @@ function selectRouteCandidates(
     return a.index - b.index;
   });
 
-  const selected = scored[0];
+  const selected = budgeted[0];
   if (!selected || !selected.comparable || !selected.withinBudget) {
-    return { routes: candidates, selectedIndex: 0, active: true, hasComparableScores };
+    return {
+      routes: budgeted.map((item) => item.route),
+      selectedIndex: 0,
+      active: true,
+      hasComparableScores,
+      hiddenByBudget,
+    };
   }
 
-  const rest = candidates.filter((_, index) => index !== selected.index);
+  const rest = budgeted
+    .filter((item) => item.index !== selected.index)
+    .map((item) => item.route);
   return {
     routes: [selected.route, ...rest],
     selectedIndex: selected.index,
     active: true,
     hasComparableScores,
+    hiddenByBudget,
   };
 }
 
@@ -510,13 +559,17 @@ export default function Map() {
   ) => {
     const selection = selectRouteCandidates(candidates, avoids, timeBudget);
     setRouteLines(selection.routes);
-    const shouldShowNotice = Boolean(opts.showNoBetter && selection.active && selection.selectedIndex === 0);
+    const shouldShowNoBetter = Boolean(opts.showNoBetter && selection.active && selection.selectedIndex === 0);
+    const hiddenByBudgetText = selection.hiddenByBudget > 0 && timeBudget !== "unlimited"
+      ? `${selection.hiddenByBudget} alternativ doldes eftersom de tar mer än ${timeBudget} min extra.`
+      : null;
     setRouteNoticeText(
-      shouldShowNotice
-        ? candidates.length < 2
+      hiddenByBudgetText ??
+      (shouldShowNoBetter
+        ? selection.routes.length < 2
           ? "Hittade inga alternativa rutter att jämföra."
           : "Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen."
-        : null,
+        : null),
     );
 
     const map = mapRef.current;
@@ -814,6 +867,18 @@ export default function Map() {
     setRouteTimeBudgetIndex(nextIndex);
     if (routeCandidates.length > 0 && activeAvoidCount(routeAvoids) > 0) {
       applyRouteSelection(routeCandidates, routeAvoids, nextBudget, { showNoBetter: true });
+      if (routeCompareTimerRef.current !== null) {
+        window.clearTimeout(routeCompareTimerRef.current);
+      }
+      setRouteCompareLoading(true);
+      routeCompareTimerRef.current = window.setTimeout(() => {
+        routeCompareTimerRef.current = null;
+        void planRouteForStops(routeStops, {
+          compare: true,
+          avoids: routeAvoids,
+          timeBudget: nextBudget,
+        });
+      }, 520);
     }
   };
   const handleLiveBoxToggle = () => {

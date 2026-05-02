@@ -114,9 +114,13 @@ Returnerar:
 GraphHopper-kandidater:
 
 1. Snabbaste rutten.
-2. Calm-kandidat med custom model för bland annat motorväg, trunk och höga hastigheter.
+2. Alternativa snabbaste rutter när filter är aktiva.
+3. Filterstyrda custom model-kandidater:
+   - `highSpeed` sänker prioritet för motorväg/trunk och höga hastigheter.
+   - `accidentHistory` skapar penalty zones runt risksegment i baseline-korridoren.
+   - `disturbances` skapar penalty zones runt aktiva störningspunkter i baseline-korridoren.
 
-Olyckshistorik och störningar påverkar i dag efterhandsrankning. Nästa routingsteg är att flytta dem närmare GraphHopper-kostnaden via custom areas/penalty zones.
+Olyckshistorik och störningar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. De poängsätts även efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
 
 ## Segment
 

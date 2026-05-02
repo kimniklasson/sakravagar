@@ -10,7 +10,7 @@ Webbapp som visar historisk olycksdata på svenska vägar för att hjälpa nerv�
 
 **MVP = kartbaserad risk/trygghetsvy + ruttplanerare med första self-hostade trygghetsrouting.**
 
-Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk normaliserad mot trafikflöde. Ruttplaneraren har geocoding, self-hostad GraphHopper-routing och "Undvik om möjligt"-filter. Höga hastigheter påverkar nu kandidatgenereringen via GraphHopper custom model; olyckshistorik och störningar poängsätts fortfarande efteråt och behöver flyttas närmare routingkostnaden i nästa steg.
+Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk normaliserad mot trafikflöde. Ruttplaneraren har geocoding, self-hostad GraphHopper-routing och "Undvik om möjligt"-filter. Höga hastigheter påverkar kandidatgenereringen via GraphHopper custom model, och olyckshistorik/störningar skickas nu in som dynamiska penalty zones när de filtren är aktiva.
 
 ## Validering — vad vi verifierat
 
@@ -64,7 +64,7 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 
 1. Kalibrera ruttplanerarens filter på verkliga sträckor.
 2. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
-3. Flytta olyckshistorik/störningar från efterhandsrankning till GraphHopper custom areas/penalty zones.
+3. Kalibrera GraphHopper penalty zones för olyckshistorik/störningar mot verkliga ruttfall.
 4. Finlira ruttplanerarens UI efter Kims senaste designförslag.
 
 ## Potentiella framtida datalager

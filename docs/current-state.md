@@ -33,13 +33,13 @@ Ruttplanerarstatus:
 - När en rutt finns expanderar boxen med tid till destination, distans och "Undvik om möjligt"-filter. Alla filter är off default.
 - Undvik-filter finns för `Vägar med olyckshistorik`, `Höga hastigheter (90+)` och `Störningar (kö/vägarbeten)`. Info-ikonen till vänster expanderar kort förklaring per filter; toggeln till höger ändrar ruttvalet.
 - Toggle visar loading-copy `Jämför alternativ...` och gör ett nytt `/api/route`-anrop med aktiva preferenser när minst ett filter är på. Initial rutt utan filter hämtar bara snabbaste vägen.
-- När ett filter är aktivt visas tidsbudget-slider: `0 / 10 / 20 / 30 / 45 / 60 / ∞`. UI:t väljer tryggaste kandidat inom vald extra restid i stället för en dold tid-vs-trygghet-formel.
+- När ett filter är aktivt visas tidsbudget-slider: `0 / 10 / 20 / 30 / 45 / 60 / ∞`. Tidsbudgeten är ett hårt filter för visade alternativ: rutter över vald extra restid döljs/returneras inte som förslag. Sliderändring triggar ny jämförelse mot `/api/route`; `∞` öppnar för längre undvik-rutter.
 - Vald rutt visar kvarvarande exponering för aktiva filter, t.ex. kilometer 90+ kvar, antal störningar nära rutten eller kvarvarande olycksriskpoäng.
 - Failstate visas i 5 sekunder. Om flera kandidater finns men inget bättre matchar aktiva filter visas `Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen.` Om bara en kandidat finns visas `Hittade inga alternativa rutter att jämföra.`
 - Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland GraphHopper-/OSRM-kandidaterna. Vita alternativrutter har en bred osynlig hit-line och kan klickas på kartan för att bli vald primärrutt.
 - `/api/route` accepterar `avoid` och `maxExtraMinutes`, och returnerar `avoidScores` + `exposure` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten.
-- GraphHopper-kandidater: utan aktiva filter hämtas snabbaste GraphHopper-rutten. Med aktiva filter hämtas snabbaste baseline + GraphHopper `alternative_route`. Om `highSpeed` är aktiv hämtas även en "calm" custom model-kandidat och calm alternatives med lägre prioritet för `MOTORWAY`, `TRUNK`, `max_speed >= 90` och `max_speed >= 80`. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas.
-- Filterranking i UI:t är nu constraint-baserad: välj lägst genomsnittlig avoid-score bland kandidater inom tidsbudgeten. Vid lika trygghet väljs mindre extra tid och därefter kortare total tid.
+- GraphHopper-kandidater: utan aktiva filter hämtas snabbaste GraphHopper-rutten. Med aktiva filter hämtas snabbaste baseline + GraphHopper `alternative_route`. Om `highSpeed` är aktiv används en "calm" custom model med lägre prioritet för `MOTORWAY`, `TRUNK`, `PRIMARY`, `max_speed >= 90` och `max_speed >= 80`; highSpeed får även en diversifierad custom-kandidat via aktiva störningszoner för att hitta fler låg-/noll-högfartskorridorer, men UI:t rankar den bara på toggles som användaren faktiskt valt. Om `accidentHistory` eller `disturbances` är aktiva byggs dynamiska custom areas/penalty zones från risksegment och aktiva störningspunkter i baseline-korridoren, och dessa läggs in i GraphHoppers `priority`-modell. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas.
+- Filterranking i UI:t är constraint-baserad: välj lägst genomsnittlig avoid-score bland kandidater inom tidsbudgeten. Vid lika trygghet väljs mindre extra tid och därefter kortare total tid. Alternativ över tidsbudgeten filtreras bort från kartan.
 - Layout desktop: info/live/tidsfönster ligger i vänsterstacken, ruttplaneraren ligger separat uppe till höger, och zoom/location ligger centrerat längst ner. `fitBounds` för rutter/live tar hänsyn till både vänster- och högerkontroller.
 - Nya assets ligger i `web/public/icons/search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`. Plus/location återanvänder inline-ikonerna i `Map.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
@@ -47,8 +47,8 @@ Ruttplanerarstatus:
 Kvar för ruttplaneraren:
 
 - Nominatim är fortfarande publik default för geocoding; byt till dedikerad provider/self-host/avtalad instans före större publik trafik.
-- GraphHopper-calm-profilen är första fungerande riktiga omruttningen för höghastighet/motorväg, men olyckshistorik och störningar påverkar fortfarande efterhandsrankning snarare än GraphHoppers vägkostnad.
-- Nästa routingsteg: generera custom areas/penalty zones från störningar och risksegment så `accidentHistory` och `disturbances` kan påverka GraphHopper-kostnad, inte bara UI-rankning.
+- GraphHopper custom models påverkar nu vägkostnaden för höghastighet, olyckshistorik och aktiva störningar. Olyckshistorik/störningar rankas fortfarande efteråt också, så UI:t kan välja bästa kandidat inom tidsbudget.
+- Nästa routingsteg: kalibrera penalty zone-storlek, maxantal och multipliers mot verkliga ruttfall så omvägarna blir tydliga utan att kännas överdrivna.
 - Kalibrera factor-scores och tidsbudget-default på verkliga exempel.
 - Finlira routeplanner-UI enligt Kims senaste designfeedback.
 - Senare: tydligare swap-knapp för bara Från/Till, och riktig alternativpanel när flera rutter finns.
@@ -191,5 +191,5 @@ pnpm web
 ## Nästa fokus
 
 - Testa och kalibrera routeplanner-filter på fler verkliga sträckor. Kända case: Floda -> Rönnäng ska byta till lugnare kandidat när `Höga hastigheter (90+)` slås på.
-- Flytta `accidentHistory` och `disturbances` närmare GraphHopper-kostnaden via custom areas/penalty zones i stället för bara efterhandsrankning.
+- Kalibrera `accidentHistory` och `disturbances` penalty zones i GraphHopper och följ upp med manuella smoke tests på kända sträckor.
 - När olyckshistoriken mognat: kalibrera riskskalan om från preliminära värden till mer stabila brytpunkter.

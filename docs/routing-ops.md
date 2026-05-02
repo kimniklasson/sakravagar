@@ -78,7 +78,7 @@ Testa sedan rutter via UI:t eller `/api/route`. Kända smoke test-sträckor:
 `/api/route` hämtar normalt:
 
 1. Snabbaste GraphHopper-rutten.
-2. En calm-kandidat med custom model som nedprioriterar bland annat `MOTORWAY`, `TRUNK`, `max_speed >= 90` och `max_speed >= 80`.
+2. En calm-kandidat med custom model som nedprioriterar bland annat `MOTORWAY`, `TRUNK`, `PRIMARY`, `max_speed >= 90` och `max_speed >= 80`.
 
 Custom model kräver:
 

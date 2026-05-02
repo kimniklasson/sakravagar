@@ -63,6 +63,26 @@ type GraphHopperResponse = {
   paths?: GraphHopperPath[];
 };
 
+type GraphHopperRule = {
+  if: string;
+  multiply_by: string;
+};
+
+type GraphHopperAreaFeature = {
+  type: "Feature";
+  id: string;
+  properties: Record<string, never>;
+  geometry: GeoJSON.Polygon;
+};
+
+type GraphHopperCustomModel = {
+  priority?: GraphHopperRule[];
+  areas?: {
+    type: "FeatureCollection";
+    features: GraphHopperAreaFeature[];
+  };
+};
+
 type RouteRequest = {
   coordinates?: unknown;
   alternatives?: unknown;
@@ -97,14 +117,22 @@ type Bbox = {
   maxLat: number;
 };
 
-const calmRouteCustomModel = {
+const calmRouteCustomModel: GraphHopperCustomModel = {
   priority: [
-    { if: "road_class == MOTORWAY", multiply_by: "0.15" },
-    { if: "road_class == TRUNK", multiply_by: "0.35" },
-    { if: "max_speed >= 90", multiply_by: "0.35" },
-    { if: "max_speed >= 80", multiply_by: "0.7" },
+    { if: "road_class == MOTORWAY", multiply_by: "0.08" },
+    { if: "road_class == TRUNK", multiply_by: "0.18" },
+    { if: "road_class == PRIMARY", multiply_by: "0.45" },
+    { if: "max_speed >= 90", multiply_by: "0.12" },
+    { if: "max_speed >= 80", multiply_by: "0.55" },
   ],
 };
+
+const RISK_PENALTY_MAX_AREAS = 48;
+const DISTURBANCE_PENALTY_MAX_AREAS = 32;
+const RISK_PENALTY_PADDING_METERS = 140;
+const DISTURBANCE_PENALTY_RADIUS_METERS = 450;
+const PENALTY_ZONE_BBOX_PADDING = 0.08;
+const PENALTY_ZONE_MAX_BBOX_AREA = 80;
 
 const routeAvoidOptions = ["accidentHistory", "highSpeed", "disturbances"] as const;
 
@@ -180,8 +208,127 @@ function routeBbox(routes: OsrmRoute[], padding = 0.025): Bbox | null {
   };
 }
 
+function routeExtraMinutes(route: OsrmRoute, baseline: OsrmRoute): number {
+  return Math.max(0, (route.duration - baseline.duration) / 60);
+}
+
+function isRouteWithinMaxExtra(
+  route: OsrmRoute,
+  baseline: OsrmRoute,
+  maxExtraMinutes: number | null,
+): boolean {
+  return maxExtraMinutes === null || routeExtraMinutes(route, baseline) <= maxExtraMinutes;
+}
+
+function graphHopperMaxWeightFactor(
+  baseline: OsrmRoute,
+  maxExtraMinutes: number | null,
+): number {
+  if (maxExtraMinutes === null) return 2.4;
+  const baselineMinutes = Math.max(10, baseline.duration / 60);
+  return clamp(1 + (maxExtraMinutes / baselineMinutes) * 1.35, 1.15, 2.1);
+}
+
 function bboxArea(bbox: Bbox): number {
   return (bbox.maxLng - bbox.minLng) * (bbox.maxLat - bbox.minLat);
+}
+
+function degreesLat(meters: number): number {
+  return meters / 110_540;
+}
+
+function degreesLng(meters: number, lat: number): number {
+  const latFactor = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  return meters / (111_320 * latFactor);
+}
+
+function boxPolygon(minLng: number, minLat: number, maxLng: number, maxLat: number): GeoJSON.Polygon {
+  return {
+    type: "Polygon",
+    coordinates: [[
+      [minLng, minLat],
+      [maxLng, minLat],
+      [maxLng, maxLat],
+      [minLng, maxLat],
+      [minLng, minLat],
+    ]],
+  };
+}
+
+function pointPenaltyArea(
+  id: string,
+  lng: number,
+  lat: number,
+  radiusMeters: number,
+): GraphHopperAreaFeature | null {
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  const lngPad = degreesLng(radiusMeters, lat);
+  const latPad = degreesLat(radiusMeters);
+  return {
+    type: "Feature",
+    id,
+    properties: {},
+    geometry: boxPolygon(lng - lngPad, lat - latPad, lng + lngPad, lat + latPad),
+  };
+}
+
+function linePenaltyArea(
+  id: string,
+  line: GeoJSON.Position[],
+  paddingMeters: number,
+): GraphHopperAreaFeature | null {
+  const coords: Array<[number, number]> = [];
+  for (const coord of line) {
+    const [lng, lat] = coord;
+    if (typeof lng !== "number" || typeof lat !== "number") continue;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+    coords.push([lng, lat]);
+  }
+  if (!coords.length) return null;
+
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  let latSum = 0;
+
+  for (const [lng, lat] of coords) {
+    minLng = Math.min(minLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLng = Math.max(maxLng, lng);
+    maxLat = Math.max(maxLat, lat);
+    latSum += lat;
+  }
+
+  const centerLat = latSum / coords.length;
+  const lngPad = degreesLng(paddingMeters, centerLat);
+  const latPad = degreesLat(paddingMeters);
+  return {
+    type: "Feature",
+    id,
+    properties: {},
+    geometry: boxPolygon(minLng - lngPad, minLat - latPad, maxLng + lngPad, maxLat + latPad),
+  };
+}
+
+function mergeCustomModels(
+  ...models: Array<GraphHopperCustomModel | null | undefined>
+): GraphHopperCustomModel | undefined {
+  const priority = models.flatMap((model) => model?.priority ?? []);
+  const features = models.flatMap((model) => model?.areas?.features ?? []);
+  if (!priority.length && !features.length) return undefined;
+
+  return {
+    ...(priority.length ? { priority } : {}),
+    ...(features.length
+      ? {
+          areas: {
+            type: "FeatureCollection" as const,
+            features,
+          },
+        }
+      : {}),
+  };
 }
 
 function routeGeometryKey(route: OsrmRoute): string {
@@ -355,6 +502,135 @@ function scoreDisturbances(route: OsrmRoute, rows: DisturbanceRow[]): RouteMetri
   };
 }
 
+async function fetchPenaltyZoneRows(
+  routes: OsrmRoute[],
+  avoid: RouteAvoidState,
+): Promise<{ riskRows: RiskRow[]; disturbanceRows: DisturbanceRow[] }> {
+  const empty = { riskRows: [], disturbanceRows: [] };
+  if (!supabaseUrl || !supabaseAnon) return empty;
+  if (!avoid.accidentHistory && !avoid.disturbances) return empty;
+
+  const bbox = routeBbox(routes, PENALTY_ZONE_BBOX_PADDING);
+  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return empty;
+  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return empty;
+
+  const client = createClient(supabaseUrl, supabaseAnon, { auth: { persistSession: false } });
+  const params = {
+    min_lng: bbox.minLng,
+    min_lat: bbox.minLat,
+    max_lng: bbox.maxLng,
+    max_lat: bbox.maxLat,
+  };
+
+  try {
+    const activeSince = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+    const [riskResult, disturbancesResult] = await Promise.all([
+      avoid.accidentHistory
+        ? client.rpc("risk_in_bbox", params)
+        : Promise.resolve({ data: [], error: null }),
+      avoid.disturbances
+        ? client
+            .from("disturbances_public")
+            .select("id, lng, lat, message_type")
+            .gte("last_seen", activeSince)
+            .gte("lng", bbox.minLng)
+            .lte("lng", bbox.maxLng)
+            .gte("lat", bbox.minLat)
+            .lte("lat", bbox.maxLat)
+            .limit(120)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    return {
+      riskRows: riskResult.error ? [] : (riskResult.data ?? []) as RiskRow[],
+      disturbanceRows: disturbancesResult.error
+        ? []
+        : (disturbancesResult.data ?? []) as DisturbanceRow[],
+    };
+  } catch (err) {
+    console.warn("route penalty zone lookup failed", err);
+    return empty;
+  }
+}
+
+function riskPenaltyMultiplier(row: RiskRow): string {
+  const risk = Math.max(0, row.risk_per_milj_fordon);
+  if (risk >= 20) return "0.3";
+  if (risk >= 10) return "0.4";
+  return "0.55";
+}
+
+function disturbancePenaltyMultiplier(messageType: string | null): string {
+  const weight = disturbanceWeight(messageType);
+  if (weight >= 1.3) return "0.25";
+  if (weight >= 1) return "0.4";
+  return "0.6";
+}
+
+function buildPenaltyZoneCustomModel(
+  rows: { riskRows: RiskRow[]; disturbanceRows: DisturbanceRow[] },
+  avoid: RouteAvoidState,
+): GraphHopperCustomModel | undefined {
+  const features: GraphHopperAreaFeature[] = [];
+  const priority: GraphHopperRule[] = [];
+
+  if (avoid.accidentHistory) {
+    for (const row of rows.riskRows.slice(0, RISK_PENALTY_MAX_AREAS)) {
+      const feature = linePenaltyArea(
+        `risk_${row.fid}`,
+        row.geometry.coordinates,
+        RISK_PENALTY_PADDING_METERS,
+      );
+      if (!feature) continue;
+      features.push(feature);
+      priority.push({
+        if: `in_${feature.id}`,
+        multiply_by: riskPenaltyMultiplier(row),
+      });
+    }
+  }
+
+  if (avoid.disturbances) {
+    const disturbanceRows = [...rows.disturbanceRows]
+      .sort((a, b) => disturbanceWeight(b.message_type) - disturbanceWeight(a.message_type))
+      .slice(0, DISTURBANCE_PENALTY_MAX_AREAS);
+
+    for (const [index, row] of disturbanceRows.entries()) {
+      const feature = pointPenaltyArea(
+        `disturbance_${index + 1}`,
+        row.lng,
+        row.lat,
+        DISTURBANCE_PENALTY_RADIUS_METERS,
+      );
+      if (!feature) continue;
+      features.push(feature);
+      priority.push({
+        if: `in_${feature.id}`,
+        multiply_by: disturbancePenaltyMultiplier(row.message_type),
+      });
+    }
+  }
+
+  return mergeCustomModels({
+    priority,
+    areas: features.length
+      ? {
+          type: "FeatureCollection",
+          features,
+        }
+      : undefined,
+  });
+}
+
+async function buildRoutePreferenceCustomModel(
+  baselineRoutes: OsrmRoute[],
+  avoid: RouteAvoidState,
+): Promise<GraphHopperCustomModel | undefined> {
+  const penaltyRows = await fetchPenaltyZoneRows(baselineRoutes, avoid);
+  const penaltyModel = buildPenaltyZoneCustomModel(penaltyRows, avoid);
+  return mergeCustomModels(avoid.highSpeed ? calmRouteCustomModel : undefined, penaltyModel);
+}
+
 async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<RouteLine, "avoidScores" | "exposure">>> {
   const empty = routes.map(() => ({
     avoidScores: {
@@ -470,8 +746,9 @@ async function fetchGraphHopperRoute(
   coordinates: [number, number][],
   opts: {
     source: string;
-    customModel?: typeof calmRouteCustomModel;
+    customModel?: GraphHopperCustomModel;
     alternativeRoutes?: number;
+    maxWeightFactor?: number;
   },
 ): Promise<OsrmRoute[]> {
   if (!GRAPHHOPPER_BASE_URL) throw new Error("GraphHopper base URL missing");
@@ -494,7 +771,7 @@ async function fetchGraphHopperRoute(
   if (opts.alternativeRoutes && opts.alternativeRoutes > 1) {
     body.algorithm = "alternative_route";
     body["alternative_route.max_paths"] = Math.max(2, Math.min(4, opts.alternativeRoutes));
-    body["alternative_route.max_weight_factor"] = 1.45;
+    body["alternative_route.max_weight_factor"] = opts.maxWeightFactor ?? 1.45;
     body["alternative_route.max_share_factor"] = 0.65;
   }
 
@@ -531,48 +808,98 @@ async function fetchProviderRoutes(
   coordinates: [number, number][],
   alternatives: number,
   avoid: RouteAvoidState,
+  maxExtraMinutes: number | null,
 ): Promise<OsrmRoute[]> {
   const activeOptions = activeAvoidOptions(avoid);
   if (!GRAPHHOPPER_BASE_URL) {
     return fetchOsrmRoutes(coordinates, activeOptions.length > 0 ? alternatives : 0);
   }
 
-  const requests: Array<Promise<OsrmRoute[]>> = [
-    fetchGraphHopperRoute(coordinates, { source: "fastest" }),
-  ];
+  const fastestRoutes = await fetchGraphHopperRoute(coordinates, { source: "fastest" });
+  const baseline = fastestRoutes[0];
+  if (!baseline) return fastestRoutes;
+  const maxWeightFactor = graphHopperMaxWeightFactor(baseline, maxExtraMinutes);
+  const genericAlternativeRequests: Array<Promise<OsrmRoute[]>> = [];
 
   if (activeOptions.length > 0) {
-    requests.push(
+    genericAlternativeRequests.push(
       fetchGraphHopperRoute(coordinates, {
         source: "fastest-alternatives",
         alternativeRoutes: alternatives + 1,
+        maxWeightFactor,
       }),
     );
   }
 
-  if (avoid.highSpeed) {
-    requests.push(
+  const preferenceModel = activeOptions.length > 0
+    ? await buildRoutePreferenceCustomModel(fastestRoutes, avoid)
+    : undefined;
+  const preferenceRequests: Array<Promise<OsrmRoute[]>> = [];
+
+  if (preferenceModel) {
+    const source = [
+      avoid.highSpeed ? "high-speed" : null,
+      avoid.accidentHistory ? "accident-history" : null,
+      avoid.disturbances ? "disturbances" : null,
+    ].filter(Boolean).join("-");
+
+    preferenceRequests.push(
       fetchGraphHopperRoute(coordinates, {
-        source: "avoid-high-speed",
-        customModel: calmRouteCustomModel,
+        source: `avoid-${source}`,
+        customModel: preferenceModel,
       }),
       fetchGraphHopperRoute(coordinates, {
-        source: "avoid-high-speed-alternatives",
-        customModel: calmRouteCustomModel,
+        source: `avoid-${source}-alternatives`,
+        customModel: preferenceModel,
         alternativeRoutes: alternatives + 1,
+        maxWeightFactor,
       }),
     );
   }
 
-  const results = await Promise.allSettled(requests);
-  const routes = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  if (avoid.highSpeed && !avoid.disturbances) {
+    const diverseModel = await buildRoutePreferenceCustomModel(fastestRoutes, {
+      ...avoid,
+      disturbances: true,
+    });
+    if (diverseModel) {
+      preferenceRequests.push(
+        fetchGraphHopperRoute(coordinates, {
+          source: "avoid-high-speed-diverse",
+          customModel: diverseModel,
+        }),
+        fetchGraphHopperRoute(coordinates, {
+          source: "avoid-high-speed-diverse-alternatives",
+          customModel: diverseModel,
+          alternativeRoutes: alternatives + 1,
+          maxWeightFactor,
+        }),
+      );
+    }
+  }
+
+  const [preferenceResults, genericAlternativeResults] = await Promise.all([
+    Promise.allSettled(preferenceRequests),
+    Promise.allSettled(genericAlternativeRequests),
+  ]);
+  const routes = [
+    ...fastestRoutes,
+    ...preferenceResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
+    ...genericAlternativeResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
+  ];
 
   if (!routes.length) {
-    const reason = results.find((result) => result.status === "rejected")?.reason;
+    const reason = [...preferenceResults, ...genericAlternativeResults]
+      .find((result) => result.status === "rejected")?.reason;
     throw reason instanceof Error ? reason : new Error("route provider failed");
   }
 
-  return dedupeRoutes(routes).slice(0, activeOptions.length > 0 ? Math.max(2, alternatives + 1) : 1);
+  const budgetedRoutes = dedupeRoutes(routes).filter((route, index) => {
+    if (index === 0) return true;
+    return isRouteWithinMaxExtra(route, baseline, maxExtraMinutes);
+  });
+  const limit = activeOptions.length > 0 ? Math.max(4, alternatives + 3) : 1;
+  return budgetedRoutes.slice(0, limit);
 }
 
 export async function POST(req: Request) {
@@ -606,7 +933,7 @@ export async function POST(req: Request) {
       : null;
 
   try {
-    const providerRoutes = await fetchProviderRoutes(coordinates, alternatives, avoid);
+    const providerRoutes = await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
     const scores = await scoreRouteAlternatives(providerRoutes);
     const routes: RouteLine[] = providerRoutes.map((route, index) => ({
       id: `route-${index + 1}`,
