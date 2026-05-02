@@ -88,6 +88,14 @@ type RouteRequest = {
   alternatives?: unknown;
   avoid?: unknown;
   maxExtraMinutes?: unknown;
+  preview?: unknown;
+};
+
+type RouteProvider = "graphhopper" | "osrm";
+
+type RouteFetchResult = {
+  provider: RouteProvider;
+  routes: OsrmRoute[];
 };
 
 type RiskRow = {
@@ -119,11 +127,12 @@ type Bbox = {
 
 const calmRouteCustomModel: GraphHopperCustomModel = {
   priority: [
-    { if: "road_class == MOTORWAY", multiply_by: "0.08" },
-    { if: "road_class == TRUNK", multiply_by: "0.18" },
-    { if: "road_class == PRIMARY", multiply_by: "0.45" },
-    { if: "max_speed >= 90", multiply_by: "0.12" },
-    { if: "max_speed >= 80", multiply_by: "0.55" },
+    { if: "road_class == MOTORWAY", multiply_by: "0.03" },
+    { if: "road_class == TRUNK", multiply_by: "0.08" },
+    { if: "road_class == PRIMARY", multiply_by: "0.25" },
+    { if: "max_speed >= 100", multiply_by: "0.02" },
+    { if: "max_speed >= 90", multiply_by: "0.04" },
+    { if: "max_speed >= 80", multiply_by: "0.45" },
   ],
 };
 
@@ -224,9 +233,9 @@ function graphHopperMaxWeightFactor(
   baseline: OsrmRoute,
   maxExtraMinutes: number | null,
 ): number {
-  if (maxExtraMinutes === null) return 2.4;
+  if (maxExtraMinutes === null) return 4.0;
   const baselineMinutes = Math.max(10, baseline.duration / 60);
-  return clamp(1 + (maxExtraMinutes / baselineMinutes) * 1.35, 1.15, 2.1);
+  return clamp(1 + (maxExtraMinutes / baselineMinutes) * 1.6, 1.15, 2.8);
 }
 
 function bboxArea(bbox: Bbox): number {
@@ -770,9 +779,9 @@ async function fetchGraphHopperRoute(
 
   if (opts.alternativeRoutes && opts.alternativeRoutes > 1) {
     body.algorithm = "alternative_route";
-    body["alternative_route.max_paths"] = Math.max(2, Math.min(4, opts.alternativeRoutes));
+    body["alternative_route.max_paths"] = Math.max(2, Math.min(8, opts.alternativeRoutes));
     body["alternative_route.max_weight_factor"] = opts.maxWeightFactor ?? 1.45;
-    body["alternative_route.max_share_factor"] = 0.65;
+    body["alternative_route.max_share_factor"] = opts.maxWeightFactor && opts.maxWeightFactor > 2.5 ? 0.82 : 0.65;
   }
 
   const headers: HeadersInit = {
@@ -809,23 +818,27 @@ async function fetchProviderRoutes(
   alternatives: number,
   avoid: RouteAvoidState,
   maxExtraMinutes: number | null,
-): Promise<OsrmRoute[]> {
+): Promise<RouteFetchResult> {
   const activeOptions = activeAvoidOptions(avoid);
   if (!GRAPHHOPPER_BASE_URL) {
-    return fetchOsrmRoutes(coordinates, activeOptions.length > 0 ? alternatives : 0);
+    return {
+      provider: "osrm",
+      routes: await fetchOsrmRoutes(coordinates, activeOptions.length > 0 ? alternatives : 0),
+    };
   }
 
   const fastestRoutes = await fetchGraphHopperRoute(coordinates, { source: "fastest" });
   const baseline = fastestRoutes[0];
-  if (!baseline) return fastestRoutes;
+  if (!baseline) return { provider: "graphhopper", routes: fastestRoutes };
   const maxWeightFactor = graphHopperMaxWeightFactor(baseline, maxExtraMinutes);
+  const pathCount = maxExtraMinutes === null ? alternatives + 5 : alternatives + 1;
   const genericAlternativeRequests: Array<Promise<OsrmRoute[]>> = [];
 
   if (activeOptions.length > 0) {
     genericAlternativeRequests.push(
       fetchGraphHopperRoute(coordinates, {
         source: "fastest-alternatives",
-        alternativeRoutes: alternatives + 1,
+        alternativeRoutes: pathCount,
         maxWeightFactor,
       }),
     );
@@ -851,7 +864,7 @@ async function fetchProviderRoutes(
       fetchGraphHopperRoute(coordinates, {
         source: `avoid-${source}-alternatives`,
         customModel: preferenceModel,
-        alternativeRoutes: alternatives + 1,
+        alternativeRoutes: pathCount,
         maxWeightFactor,
       }),
     );
@@ -871,7 +884,7 @@ async function fetchProviderRoutes(
         fetchGraphHopperRoute(coordinates, {
           source: "avoid-high-speed-diverse-alternatives",
           customModel: diverseModel,
-          alternativeRoutes: alternatives + 1,
+          alternativeRoutes: pathCount,
           maxWeightFactor,
         }),
       );
@@ -898,8 +911,12 @@ async function fetchProviderRoutes(
     if (index === 0) return true;
     return isRouteWithinMaxExtra(route, baseline, maxExtraMinutes);
   });
-  const limit = activeOptions.length > 0 ? Math.max(4, alternatives + 3) : 1;
-  return budgetedRoutes.slice(0, limit);
+  const limit = activeOptions.length > 0
+    ? maxExtraMinutes === null
+      ? Math.max(10, alternatives + 7)
+      : Math.max(4, alternatives + 3)
+    : 1;
+  return { provider: "graphhopper", routes: budgetedRoutes.slice(0, limit) };
 }
 
 export async function POST(req: Request) {
@@ -927,17 +944,23 @@ export async function POST(req: Request) {
       ? Math.max(0, Math.min(3, Math.floor(body.alternatives)))
       : 2;
   const avoid = parseAvoidState(body.avoid);
+  const preview = body.preview === true;
   const maxExtraMinutes =
     typeof body.maxExtraMinutes === "number" && Number.isFinite(body.maxExtraMinutes)
       ? Math.max(0, body.maxExtraMinutes)
       : null;
 
   try {
-    const providerRoutes = await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
-    const scores = await scoreRouteAlternatives(providerRoutes);
+    const routeResult = preview
+      ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
+      : alternatives === 0
+        ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
+        : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
+    const providerRoutes = routeResult.routes;
+    const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes);
     const routes: RouteLine[] = providerRoutes.map((route, index) => ({
       id: `route-${index + 1}`,
-      source: route.source ?? `candidate-${index + 1}`,
+      source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
       distanceMeters: route.distance,
       durationSeconds: route.duration,
       geometry: route.geometry,
@@ -954,7 +977,7 @@ export async function POST(req: Request) {
       },
     }));
 
-    return jsonResponse({ routes, avoid, maxExtraMinutes }, { cacheSeconds: 300 });
+    return jsonResponse({ routes, avoid, maxExtraMinutes, provider: routeResult.provider }, { cacheSeconds: 300 });
   } catch (err) {
     console.error("routing failed", err);
     return jsonResponse({ error: "routing failed" }, { status: 502 });

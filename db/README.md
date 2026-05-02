@@ -51,7 +51,7 @@ Om vi senare vill extrahera ett fält vi inte tänkt på slipper vi scrapa om ga
 
 ## Framtida migrations
 
-Numrera i ordning: `0024_*.sql`, `0025_*.sql` osv. En ADR-post i `docs/decisions.md` om valet är icke-trivialt.
+Numrera i ordning: `0025_*.sql`, `0026_*.sql` osv. En ADR-post i `docs/decisions.md` om valet är icke-trivialt.
 
 ## Viktiga migrations
 
@@ -63,6 +63,7 @@ Numrera i ordning: `0024_*.sql`, `0025_*.sql` osv. En ADR-post i `docs/decisions
 - `0019_large_roads_filter.sql` — hastighets-/stora-vägar-filter.
 - `0020_live_traffic_flow.sql` till `0022_stabilize_flow_segments.sql` — TrafficFlow.
 - `0023_security_limits_dedup.sql` — publika grants, limits och dedupad risk-MV.
+- `0024_security_invoker_public_views.sql` — security-invoker på publika vyer skapade efter `0003`.
 
 ## Dataregler
 

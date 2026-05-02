@@ -28,6 +28,12 @@ type RiskSegment = {
 
 export type LayerController = { setVisible: (v: boolean) => void };
 export type RouteClickHandler = (routeId: string) => void;
+export type RouteDragCommit = {
+  routeId: string;
+  lngLat: [number, number];
+  segmentIndex: number;
+};
+export type RouteDragHandler = (commit: RouteDragCommit) => void;
 type HeatmapStop = { density: number; color: string; alpha: number };
 type Bbox = { west: number; south: number; east: number; north: number };
 
@@ -90,6 +96,7 @@ const ROUTE_ALT_CASING_LAYER_ID = "route-alt-casing";
 const ROUTE_ALT_HIT_LAYER_ID = "route-alt-hit";
 const ROUTE_PRIMARY_LAYER_ID = "route-primary-line";
 const ROUTE_PRIMARY_CASING_LAYER_ID = "route-primary-casing";
+const ROUTE_PRIMARY_HIT_LAYER_ID = "route-primary-hit";
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase för de tyngre analyslagren (för många
@@ -447,7 +454,95 @@ export async function focusLiveEvents(map: MapLibreMap): Promise<{ liveCount: nu
   return { liveCount: liveEvents.length };
 }
 
-export function addRouteLayer(map: MapLibreMap, onRouteClick?: RouteClickHandler): LayerController {
+function pointSegmentDistanceSquared(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) {
+    return (point.x - start.x) ** 2 + (point.y - start.y) ** 2;
+  }
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+  const x = start.x + t * dx;
+  const y = start.y + t * dy;
+  return (point.x - x) ** 2 + (point.y - y) ** 2;
+}
+
+function closestPointOnSegment(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): { x: number; y: number } {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) return start;
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+  return {
+    x: start.x + t * dx,
+    y: start.y + t * dy,
+  };
+}
+
+function closestRoutePoint(
+  map: MapLibreMap,
+  coordinates: [number, number][],
+  point: { x: number; y: number },
+): { lngLat: [number, number]; segmentIndex: number } | null {
+  if (coordinates.length < 2) return null;
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestPoint: { x: number; y: number } | null = null;
+
+  for (let i = 0; i < coordinates.length - 1; i += 1) {
+    const startCoord = coordinates[i];
+    const endCoord = coordinates[i + 1];
+    if (!startCoord || !endCoord) continue;
+    const start = map.project(startCoord);
+    const end = map.project(endCoord);
+    const distance = pointSegmentDistanceSquared(point, start, end);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+      bestPoint = closestPointOnSegment(point, start, end);
+    }
+  }
+
+  if (!bestPoint) return null;
+  const lngLat = map.unproject([bestPoint.x, bestPoint.y]);
+  return { lngLat: [lngLat.lng, lngLat.lat], segmentIndex: bestIndex };
+}
+
+function createRouteDotMarker(): maplibregl.Marker {
+  const element = document.createElement("div");
+  element.style.width = "18px";
+  element.style.height = "18px";
+  element.style.borderRadius = "50%";
+  element.style.border = "3px solid #111111";
+  element.style.background = "#72F2D0";
+  element.style.boxShadow = "0 2px 12px rgba(0, 0, 0, 0.35)";
+  element.style.pointerEvents = "none";
+  return new maplibregl.Marker({ element, anchor: "center" });
+}
+
+function routeFeatureCoordinates(feature: maplibregl.MapGeoJSONFeature | undefined): [number, number][] {
+  if (!feature || feature.geometry.type !== "LineString") return [];
+  return feature.geometry.coordinates.filter(
+    (coord): coord is [number, number] =>
+      Array.isArray(coord) &&
+      coord.length >= 2 &&
+      typeof coord[0] === "number" &&
+      typeof coord[1] === "number",
+  );
+}
+
+export function addRouteLayer(
+  map: MapLibreMap,
+  onRouteClick?: RouteClickHandler,
+  onPrimaryRouteDrag?: RouteDragHandler,
+  onPrimaryRoutePreview?: RouteDragHandler,
+): LayerController {
   if (map.getSource(ROUTE_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
@@ -534,6 +629,20 @@ export function addRouteLayer(map: MapLibreMap, onRouteClick?: RouteClickHandler
     },
     beforeId,
   );
+  map.addLayer(
+    {
+      id: ROUTE_PRIMARY_HIT_LAYER_ID,
+      type: "line",
+      source: ROUTE_SOURCE_ID,
+      filter: ["==", ["get", "selected"], true],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "rgba(255, 255, 255, 0)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 16, 12, 24, 16, 34],
+      },
+    },
+    beforeId,
+  );
 
   if (onRouteClick) {
     map.on("click", ROUTE_ALT_HIT_LAYER_ID, (event) => {
@@ -548,6 +657,117 @@ export function addRouteLayer(map: MapLibreMap, onRouteClick?: RouteClickHandler
     });
   }
 
+  if (onPrimaryRouteDrag) {
+    let hoverPopup: maplibregl.Popup | null = null;
+    let routeDotMarker: maplibregl.Marker | null = null;
+    let dragging: { routeId: string; coordinates: [number, number][] } | null = null;
+    let hasDragged = false;
+
+    const closeHoverPopup = () => {
+      hoverPopup?.remove();
+      hoverPopup = null;
+    };
+
+    const ensureRouteDotMarker = (lngLat: maplibregl.LngLatLike) => {
+      if (!routeDotMarker) {
+        routeDotMarker = createRouteDotMarker().setLngLat(lngLat).addTo(map);
+      } else {
+        routeDotMarker.setLngLat(lngLat);
+      }
+    };
+
+    const removeRouteDotMarker = () => {
+      routeDotMarker?.remove();
+      routeDotMarker = null;
+    };
+
+    const cleanupDrag = () => {
+      map.off("mousemove", handleRouteDragMove);
+      removeRouteDotMarker();
+      dragging = null;
+      hasDragged = false;
+      map.dragPan.enable();
+      map.getCanvas().style.cursor = "";
+    };
+
+    const handleRouteDragMove = (event: maplibregl.MapMouseEvent) => {
+      hasDragged = true;
+      ensureRouteDotMarker(event.lngLat);
+      if (!dragging || !onPrimaryRoutePreview) return;
+      onPrimaryRoutePreview({
+        routeId: dragging.routeId,
+        lngLat: [event.lngLat.lng, event.lngLat.lat],
+        segmentIndex: 0,
+      });
+    };
+
+    const handleRouteDragEnd = (event: maplibregl.MapMouseEvent) => {
+      const drag = dragging;
+      const dragged = hasDragged;
+      const target = drag ? closestRoutePoint(map, drag.coordinates, event.point) : null;
+      cleanupDrag();
+      if (!drag || !dragged) return;
+      onPrimaryRouteDrag({
+        routeId: drag.routeId,
+        lngLat: [event.lngLat.lng, event.lngLat.lat],
+        segmentIndex: target?.segmentIndex ?? 0,
+      });
+    };
+
+    map.on("mouseenter", ROUTE_PRIMARY_HIT_LAYER_ID, (event) => {
+      map.getCanvas().style.cursor = "pointer";
+      const routeId = event.features?.[0]?.properties?.id;
+      if (typeof routeId !== "string" || dragging) return;
+      const coordinates = routeFeatureCoordinates(event.features?.[0]);
+      const target = closestRoutePoint(map, coordinates, event.point);
+      if (target) ensureRouteDotMarker(target.lngLat);
+      closeHoverPopup();
+      hoverPopup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 14,
+      })
+        .setLngLat(event.lngLat)
+        .setHTML(
+          '<div style="padding:6px 8px;border-radius:4px;background:#fff;color:#111;font:600 12px Arial,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.22);white-space:nowrap">Dra för att ändra rutt</div>',
+        )
+        .addTo(map);
+    });
+
+    map.on("mousemove", ROUTE_PRIMARY_HIT_LAYER_ID, (event) => {
+      if (dragging) return;
+      const coordinates = routeFeatureCoordinates(event.features?.[0]);
+      const target = closestRoutePoint(map, coordinates, event.point);
+      if (target) ensureRouteDotMarker(target.lngLat);
+      hoverPopup?.setLngLat(event.lngLat);
+    });
+
+    map.on("mouseleave", ROUTE_PRIMARY_HIT_LAYER_ID, () => {
+      if (!dragging) {
+        map.getCanvas().style.cursor = "";
+        closeHoverPopup();
+        removeRouteDotMarker();
+      }
+    });
+
+    map.on("mousedown", ROUTE_PRIMARY_HIT_LAYER_ID, (event) => {
+      const feature = event.features?.[0];
+      const routeId = feature?.properties?.id;
+      const coordinates = routeFeatureCoordinates(feature);
+      if (typeof routeId !== "string" || coordinates.length < 2) return;
+
+      event.preventDefault();
+      closeHoverPopup();
+      dragging = { routeId, coordinates };
+      hasDragged = false;
+      map.dragPan.disable();
+      map.getCanvas().style.cursor = "pointer";
+      ensureRouteDotMarker(event.lngLat);
+      map.on("mousemove", handleRouteDragMove);
+      map.once("mouseup", handleRouteDragEnd);
+    });
+  }
+
   return {
     setVisible: (v) => {
       for (const id of [
@@ -556,6 +776,7 @@ export function addRouteLayer(map: MapLibreMap, onRouteClick?: RouteClickHandler
         ROUTE_ALT_HIT_LAYER_ID,
         ROUTE_PRIMARY_CASING_LAYER_ID,
         ROUTE_PRIMARY_LAYER_ID,
+        ROUTE_PRIMARY_HIT_LAYER_ID,
       ]) {
         if (map.getLayer(id)) {
           map.setLayoutProperty(id, "visibility", v ? "visible" : "none");
