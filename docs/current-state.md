@@ -1,8 +1,8 @@
-# Current state — 2026-05-01
+# Current state — 2026-05-03
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
-Senaste större arbetslogg: `docs/session-2026-05-01.md`.
+Senaste större arbetslogg: `docs/session-2026-05-03.md`.
 
 ## Produktläge
 
@@ -19,11 +19,12 @@ Aktiva lager i UI:t:
 
 Senaste UI-beteende: den röda liveboxen visar globalt antal pågående olyckor. Klick på boxen fokuserar kartan på aktiva olyckor: 1 olycka flyger till zoom 10, 2+ kör `fitBounds` så alla syns.
 
-Ruttplaneraren finns under liveboxen och har fungerande geocoding/routing-koppling. Adressfält söker via egen `/api/geocode`-proxy mot Nominatim, GPS reverse-geocodas till läsbar plats när provider svarar, och rutten räknas automatiskt via egen `/api/route`. `/api/route` använder GraphHopper när `GRAPHHOPPER_BASE_URL` finns och faller tillbaka till OSRM annars.
+Ruttplaneraren finns direkt under infoboxen i vänsterstacken och har fungerande geocoding/routing-koppling. Adressfält söker via egen `/api/geocode`-proxy mot Nominatim, GPS reverse-geocodas till läsbar plats när provider svarar, och rutten räknas automatiskt via egen `/api/route`. `/api/route` använder GraphHopper när `GRAPHHOPPER_BASE_URL` finns och faller tillbaka till OSRM annars.
 
 Ruttplanerarstatus:
 
 - `Från`/`Till`-fält finns i `RoutePlannerBox` i `web/components/Map/Map.tsx`.
+- Inputfälten använder `myposition.svg` och `mydestination.svg`, large text och dotted linje mellan ikonerna.
 - `Din plats` visas bara när `Från adress` faktiskt har fokus och är tomt. Den ligger som absolut overlay under första fältet, startar ungefär vid textkolumnen och animerar in.
 - GPS-flowet använder `navigator.geolocation`, visar CSS-loader och `Hämtar plats...` under hämtning, sätter koordinat direkt och uppdaterar label via reverse geocoding om möjligt. Om plats nekas/timeoutar eller reverse geocoding misslyckas visas begripligt felmeddelande i ruttpanelen.
 - Textinput debouncar mot `/api/geocode`, visar upp till 5 svenska träffar och sätter stop-koordinat när användaren väljer en träff. Om användaren bara skriver färdigt använder auto-routing bästa geocoding-träffen för stopp som saknar koordinat.
@@ -31,18 +32,20 @@ Ruttplanerarstatus:
 - Primär ruttritning kan dras direkt på kartan. Hover visar `Dra för att ändra rutt` och en liten punkt på ruttlinjen. Under drag körs en throttlad preview via `/api/route` med `preview: true`, vilket hämtar en GraphHopper/OSRM-rutt utan Supabase-score. Vid släpp ersätts eventuell tidigare dold via-punkt med den nya och `/api/route` räknar om rutt + risk/exposure.
 - Draghandles har enkel HTML drag/drop-reorder av stop-arrayen. Rensa-knappen tömmer Från/Till och tar bort mellanliggande dolda via-punkter.
 - Normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
-- När en rutt finns expanderar boxen med tid till destination, distans och "Undvik om möjligt"-filter. Alla filter är off default.
-- Undvik-filter finns för `Vägar med olyckshistorik`, `Höga hastigheter (90+)` och `Störningar (kö/vägarbeten)`. Info-ikonen till vänster expanderar kort förklaring per filter; toggeln till höger ändrar ruttvalet.
-- Toggle visar loading-copy `Jämför alternativ...` och gör ett nytt `/api/route`-anrop med aktiva preferenser när minst ett filter är på. Initial rutt utan filter hämtar bara snabbaste vägen.
-- När ett filter är aktivt visas tidsbudget-slider: `0 / 10 / 20 / 30 / 45 / 60 / ∞`. Tidsbudgeten är ett hårt filter för visade alternativ: rutter över vald extra restid döljs/returneras inte som förslag. Sliderändring triggar ny jämförelse mot `/api/route`; `∞` öppnar för längre undvik-rutter.
-- Vald rutt visar kvarvarande exponering för aktiva filter, t.ex. kilometer 90+ kvar, antal störningar nära rutten eller kvarvarande olycksriskpoäng.
+- `Undvik om möjligt` visas som pills för `Olycksrisk`, `Störningar` och `Höga hastigheter`. Pills kan väljas innan Från/Till fylls i och ligger kvar genom input/geocode.
+- Aktiv filterladdning visas som liten spinner i aktiva pills. Det finns ingen separat stor `Jämför alternativ...`-box.
+- Tidsbudget-slidern är borttagen ur UI:t. Utan aktiva filter visas bara snabbaste rutten. Med aktiva filter öppnas kandidatläget och användaren får se alla relevanta alternativ vi kan hitta.
+- Ruttalternativ visas som scrollande kort under ruttpanelen. Varje kort visar titel, kort motivering, tid och distans.
+- Alternativlistan sorteras på tid och byter inte ordning när användaren väljer ett kort. Vald rutt är separat state från listordningen.
+- Hover/focus på ett alternativ markerar motsvarande linje på kartan utan att ändra listordningen.
+- Bottenfade i alternativlistan visas bara när listan faktiskt har overflow.
 - Failstate visas i 5 sekunder. Om flera kandidater finns men inget bättre matchar aktiva filter visas `Tyvärr hittades ingen bättre rutt. Snabbaste rutten är fortfarande bästa matchningen.` Om bara en kandidat finns visas `Hittade inga alternativa rutter att jämföra.`
-- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. Filtren väljer primär rutt bland GraphHopper-/OSRM-kandidaterna. Vita alternativrutter har en bred osynlig hit-line och kan klickas på kartan för att bli vald primärrutt. Primärrutten har också en bred osynlig hit-line för manuell drag-omdragning.
+- Ruttlinjer ligger i `addRouteLayer`/`setRouteLayerData` i `web/components/Map/layers.ts`: primär rutt är turkos, alternativa rutter är diskreta vita linjer. `setRouteLayerData` tar ett valfritt `selectedRouteId`, så UI:t kan hålla listan tidssorterad samtidigt som kartan markerar valt/hoverat alternativ. Vita alternativrutter har en bred osynlig hit-line och kan klickas på kartan för att bli vald primärrutt. Primärrutten har också en bred osynlig hit-line för manuell drag-omdragning.
 - `/api/route` accepterar `avoid`, `maxExtraMinutes` och `preview`. Normalt returneras `avoidScores` + `exposure` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten. `preview: true` används bara under kartdragning och hoppar över scoring för att hålla previewn billig.
 - GraphHopper-kandidater: utan aktiva filter hämtas snabbaste GraphHopper-rutten. Med aktiva filter hämtas snabbaste baseline + GraphHopper `alternative_route`. Om `highSpeed` är aktiv används en hård "calm" custom model med lägre prioritet för `MOTORWAY`, `TRUNK`, `PRIMARY`, `max_speed >= 100`, `max_speed >= 90` och `max_speed >= 80`; highSpeed får även en diversifierad custom-kandidat via aktiva störningszoner för att hitta fler låg-/noll-högfartskorridorer, men UI:t rankar den bara på toggles som användaren faktiskt valt. Vid tidsbudget `∞` öppnas GraphHopper-sökningen upp med högre `max_weight_factor`, fler `alternative_route`-paths och större kandidatlimit. Om `accidentHistory` eller `disturbances` är aktiva byggs dynamiska custom areas/penalty zones från risksegment och aktiva störningspunkter i baseline-korridoren, och dessa läggs in i GraphHoppers `priority`-modell. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas; då visas notice i UI:t när undvik-filter är aktiva eftersom OSRM bara kan jämföra ett fåtal standardalternativ.
-- Filterranking i UI:t är constraint-baserad: välj lägst genomsnittlig avoid-score bland kandidater inom tidsbudgeten. Vid lika trygghet väljs mindre extra tid och därefter kortare total tid. Alternativ över tidsbudgeten filtreras bort från kartan.
-- Layout desktop: info/live/tidsfönster ligger i vänsterstacken, ruttplaneraren ligger separat uppe till höger, och zoom/location ligger centrerat längst ner. `fitBounds` för rutter/live tar hänsyn till både vänster- och högerkontroller.
-- Nya assets ligger i `web/public/icons/search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`. Location/zoom återanvänder inline-ikonerna i `Map.tsx`.
+- Filterranking i UI:t väljer fortfarande rekommenderad/markerad rutt efter lägst genomsnittlig avoid-score, men den visuella listan sorteras på tid för stabilitet och lärbarhet.
+- Layout desktop: info och ruttplanerare ligger i vänsterstacken, lagerkontrollerna ligger uppe till höger, och zoom/location ligger nere till höger. MapLibre-attribution visas permanent nere till vänster. När ruttplaneraren är aktiv döljs live-/tidsboxarna för att ge routeflödet mer plats.
+- Nya assets ligger i `web/public/icons/myposition.svg`, `mydestination.svg`, `search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`. Location/zoom återanvänder inline-ikonerna i `Map.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
 
 Kvar för ruttplaneraren:
@@ -51,8 +54,8 @@ Kvar för ruttplaneraren:
 - GraphHopper custom models påverkar nu vägkostnaden för höghastighet, olyckshistorik och aktiva störningar. Olyckshistorik/störningar rankas fortfarande efteråt också, så UI:t kan välja bästa kandidat inom tidsbudget.
 - Nästa routingsteg: kalibrera penalty zone-storlek, maxantal och multipliers mot verkliga ruttfall så omvägarna blir tydliga utan att kännas överdrivna.
 - Kalibrera factor-scores och tidsbudget-default på verkliga exempel.
-- Finlira routeplanner-UI enligt Kims senaste designfeedback.
-- Senare: tydligare swap-knapp för bara Från/Till, och riktig alternativpanel när flera rutter finns.
+- Finlira routeplanner-UI efter lokal testning av nya alternativkort.
+- Senare: tydligare swap-knapp för bara Från/Till.
 
 ## Arkitektur
 
@@ -107,7 +110,7 @@ Trafikverket-flöden som scrapas:
 Huvudfiler:
 
 - `web/components/Map/Map.tsx` — React-state och UI-boxar. Initierar MapLibre, lagercontrollers, timers, livebox-fokus, zoom/location och mobilattribution.
-- `web/components/Map/layers.ts` — MapLibre-källor/lager, bbox-loaders, live-eventhämtning, popuphandler och renderordning.
+- `web/components/Map/layers.ts` — MapLibre-källor/lager, bbox-loaders, live-eventhämtning, popuphandler, ruttmarkering och renderordning.
 - `web/components/Map/Map.module.css` — overlay-layout, boxar, toggles, ikoner, responsiv placering.
 - `web/styles/globals.css` — globala typografiklasser, MapLibre popup-styling och attribution-overrides.
 - `web/styles/tokens.css` — brandfärger, Univers-font och typografitokens.

@@ -786,17 +786,21 @@ export function addRouteLayer(
   };
 }
 
-export function setRouteLayerData(map: MapLibreMap, routes: RouteLine[]): void {
+export function setRouteLayerData(
+  map: MapLibreMap,
+  routes: RouteLine[],
+  selectedRouteId = routes[0]?.id ?? null,
+): void {
   if (!map.getSource(ROUTE_SOURCE_ID)) addRouteLayer(map);
   const source = map.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
   if (!source) return;
 
-  const features: GeoJSON.Feature<GeoJSON.LineString>[] = routes.map((route, index) => ({
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = routes.map((route) => ({
     type: "Feature",
     geometry: route.geometry,
     properties: {
       id: route.id,
-      selected: index === 0,
+      selected: route.id === selectedRouteId,
       distance_meters: route.distanceMeters,
       duration_seconds: route.durationSeconds,
       safety_score: route.safetyScore,
