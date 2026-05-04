@@ -10,12 +10,20 @@ Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafi
 
 Aktiva lager i UI:t visas som en kompakt ikonrad uppe till höger:
 
-- **Hjälp** — dummyknapp tills informationspanelen designas.
+- **Hjälp** — öppnar en beige hjälp-/datapanel från höger. Panelen förklarar datalager, legender, datakällor, polling/refresh och visar när datan senast uppdaterades.
 - **Olyckor och risk** — gemensam toggle för vägsegment-risk, historiska olyckor och pågående olyckor. Default av för att inte tvinga fram stressande olycksvisualiseringar.
 - **Trafikflöde (snitt)** — ÅDT från NVDB/Lastkajen, blå skala, underlagsdata. Default på.
 - **Liveflöde (storstad)** — Trafikverkets TrafficFlow-mätplatser snappade till närmaste vägsegment. Täckningen är bäst i Stockholm/Göteborg. Default på.
 - **Trafikstörningar** — aktuella vägarbeten och kö-/trafikstörningar från Trafikverket, separat från olyckshistoriken. Default på.
 - **Hastigheter** — NVDB-hastighetsgränser 90 km/h eller högre. Default på.
+
+Hjälppanelen:
+
+- Desktop: glider in från höger; lager-/zoomkontroller flyttas åt vänster när panelen är öppen.
+- Mobil: visas som helskärm med bara stängknappen kvar ovanpå.
+- `Olyckor och risk` är öppen default, men användaren kan stänga alla accordions. Max en accordion är öppen åt gången.
+- Panelen har legender för risk/olyckor, ÅDT-flöde, liveflöde och trafikstörningar. Hastighetssektionen har ingen legend, bara text.
+- Scrollbar är dold för att undvika breddhopp i panelens innehåll.
 
 Liveolyckor visas som en liten badge på `Olyckor och risk` endast när lagret är på. Klick på badgen fokuserar kartan på aktiva olyckor: 1 olycka flyger till zoom 10, 2+ kör `fitBounds` så alla syns. Själva togglen zoomar aldrig, den är bara av/på.
 
@@ -55,6 +63,7 @@ Kvar för ruttplaneraren:
 - Nästa routingsteg: kalibrera penalty zone-storlek, maxantal och multipliers mot verkliga ruttfall så omvägarna blir tydliga utan att kännas överdrivna.
 - Kalibrera factor-scores och tidsbudget-default på verkliga exempel.
 - Finlira routeplanner-UI efter lokal testning av nya alternativkort.
+- Nästa hastighetssteg: byt visuella hastighetslinjer mot sparse badges ovanpå kartan/rutter. Börja med "enklare väg": återanvänd hastighetslagret som datakälla, rendera bara badges och mät först om import/API bör utökas från `>=90 km/h` till `>=70 km/h`.
 - Senare: tydligare swap-knapp för bara Från/Till.
 
 ## Arkitektur
