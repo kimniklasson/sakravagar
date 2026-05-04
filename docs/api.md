@@ -53,7 +53,7 @@ Query:
 
 - `bbox` krävs.
 
-Returnerar ÅDT-data via `adt_in_bbox`. Används för blått flödeslager och risknormalisering.
+Returnerar ÅDT-data via `adt_in_bbox`. Används för blått, icke-klickbart flödeslager och risknormalisering.
 
 ## TrafficFlow
 
@@ -109,7 +109,7 @@ Returnerar:
 - ruttkandidater
 - primär geometri
 - tid/distans
-- `avoidScores` för `accidentHistory`, `highSpeed` och `disturbances`
+- `avoidScores` för `accidentHistory`, `highSpeed`, `disturbances`, `bridges` och `tunnels`
 
 GraphHopper-kandidater:
 
@@ -117,10 +117,11 @@ GraphHopper-kandidater:
 2. Alternativa snabbaste rutter när filter är aktiva.
 3. Filterstyrda custom model-kandidater:
    - `highSpeed` sänker prioritet för motorväg/trunk och höga hastigheter.
+   - `bridges`/`tunnels` sänker prioritet för GraphHoppers `road_environment`-värden `BRIDGE` och `TUNNEL`.
    - `accidentHistory` skapar penalty zones runt risksegment i baseline-korridoren.
    - `disturbances` skapar penalty zones runt aktiva störningspunkter i baseline-korridoren.
 
-Olyckshistorik och störningar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. De poängsätts även efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
+Olyckshistorik, störningar, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Bro-/tunnelexponering räknas från GraphHopper `road_environment` path details, medan övriga filter även poängsätts efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
 
 ## Segment
 

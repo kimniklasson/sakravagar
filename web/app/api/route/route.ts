@@ -27,11 +27,15 @@ export type RouteLine = {
     accidentHistory: number | null;
     highSpeed: number | null;
     disturbances: number | null;
+    bridges: number | null;
+    tunnels: number | null;
   };
   exposure: {
     accidentHistory: number | null;
     highSpeedMeters: number | null;
     disturbances: number | null;
+    bridgeMeters: number | null;
+    tunnelMeters: number | null;
   };
 };
 
@@ -44,6 +48,7 @@ type OsrmRoute = {
   distance: number;
   duration: number;
   geometry: GeoJSON.LineString;
+  roadEnvironmentDetails?: GraphHopperPathDetail[];
 };
 
 type OsrmResponse = {
@@ -56,12 +61,17 @@ type GraphHopperPath = {
   distance: number;
   time: number;
   points: GeoJSON.LineString;
+  details?: {
+    road_environment?: GraphHopperPathDetail[];
+  };
 };
 
 type GraphHopperResponse = {
   message?: string;
   paths?: GraphHopperPath[];
 };
+
+type GraphHopperPathDetail = [number, number, string | null];
 
 type GraphHopperRule = {
   if: string;
@@ -136,6 +146,18 @@ const calmRouteCustomModel: GraphHopperCustomModel = {
   ],
 };
 
+const avoidBridgeCustomModel: GraphHopperCustomModel = {
+  priority: [
+    { if: "road_environment == BRIDGE", multiply_by: "0.12" },
+  ],
+};
+
+const avoidTunnelCustomModel: GraphHopperCustomModel = {
+  priority: [
+    { if: "road_environment == TUNNEL", multiply_by: "0.03" },
+  ],
+};
+
 const RISK_PENALTY_MAX_AREAS = 48;
 const DISTURBANCE_PENALTY_MAX_AREAS = 32;
 const RISK_PENALTY_PADDING_METERS = 140;
@@ -143,12 +165,14 @@ const DISTURBANCE_PENALTY_RADIUS_METERS = 450;
 const PENALTY_ZONE_BBOX_PADDING = 0.08;
 const PENALTY_ZONE_MAX_BBOX_AREA = 80;
 
-const routeAvoidOptions = ["accidentHistory", "highSpeed", "disturbances"] as const;
+const routeAvoidOptions = ["accidentHistory", "highSpeed", "disturbances", "bridges", "tunnels"] as const;
 
 const noAvoids: RouteAvoidState = {
   accidentHistory: false,
   highSpeed: false,
   disturbances: false,
+  bridges: false,
+  tunnels: false,
 };
 
 function isCoordinate(value: unknown): value is [number, number] {
@@ -173,6 +197,8 @@ function parseAvoidState(value: unknown): RouteAvoidState {
     accidentHistory: input.accidentHistory === true,
     highSpeed: input.highSpeed === true,
     disturbances: input.disturbances === true,
+    bridges: input.bridges === true,
+    tunnels: input.tunnels === true,
   };
 }
 
@@ -402,6 +428,16 @@ function distancePointToLineMeters(
   return best;
 }
 
+function distanceBetweenCoordinatesMeters(
+  start: GeoJSON.Position,
+  end: GeoJSON.Position,
+  originLat: number,
+): number {
+  const [ax, ay] = project(start, originLat);
+  const [bx, by] = project(end, originLat);
+  return Math.hypot(bx - ax, by - ay);
+}
+
 function sampleLine(line: GeoJSON.Position[]): GeoJSON.Position[] {
   if (line.length <= 24) return line;
   const step = Math.max(1, Math.floor(line.length / 24));
@@ -508,6 +544,35 @@ function scoreDisturbances(route: OsrmRoute, rows: DisturbanceRow[]): RouteMetri
   return {
     score: score / Math.max(1, route.distance / 10_000),
     exposure: count,
+  };
+}
+
+function roadEnvironmentExposure(route: OsrmRoute, environment: "BRIDGE" | "TUNNEL"): RouteMetric {
+  const details = route.roadEnvironmentDetails;
+  if (!details) return { score: null, exposure: null };
+
+  const coords = route.geometry.coordinates;
+  if (coords.length < 2) return { score: 0, exposure: 0 };
+
+  const originLat = routeOriginLat(route);
+  let meters = 0;
+
+  for (const [fromIndex, toIndex, value] of details) {
+    if (typeof value !== "string" || value.toUpperCase() !== environment) continue;
+    const from = Math.max(0, Math.min(coords.length - 1, Math.floor(fromIndex)));
+    const to = Math.max(from, Math.min(coords.length - 1, Math.floor(toIndex)));
+
+    for (let index = from + 1; index <= to; index += 1) {
+      const start = coords[index - 1];
+      const end = coords[index];
+      if (!start || !end) continue;
+      meters += distanceBetweenCoordinatesMeters(start, end, originLat);
+    }
+  }
+
+  return {
+    score: meters / Math.max(1, route.distance / 1000),
+    exposure: meters,
   };
 }
 
@@ -637,26 +702,60 @@ async function buildRoutePreferenceCustomModel(
 ): Promise<GraphHopperCustomModel | undefined> {
   const penaltyRows = await fetchPenaltyZoneRows(baselineRoutes, avoid);
   const penaltyModel = buildPenaltyZoneCustomModel(penaltyRows, avoid);
-  return mergeCustomModels(avoid.highSpeed ? calmRouteCustomModel : undefined, penaltyModel);
+  return mergeCustomModels(
+    avoid.highSpeed ? calmRouteCustomModel : undefined,
+    avoid.bridges ? avoidBridgeCustomModel : undefined,
+    avoid.tunnels ? avoidTunnelCustomModel : undefined,
+    penaltyModel,
+  );
 }
 
 async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<RouteLine, "avoidScores" | "exposure">>> {
-  const empty = routes.map(() => ({
+  const baseScores = routes.map((route) => {
+    const bridges = roadEnvironmentExposure(route, "BRIDGE");
+    const tunnels = roadEnvironmentExposure(route, "TUNNEL");
+    return {
+      avoidScores: {
+        accidentHistory: null,
+        highSpeed: null,
+        disturbances: null,
+        bridges: bridges.score,
+        tunnels: tunnels.score,
+      },
+      exposure: {
+        accidentHistory: null,
+        highSpeedMeters: null,
+        disturbances: null,
+        bridgeMeters: bridges.exposure,
+        tunnelMeters: tunnels.exposure,
+      },
+    };
+  });
+
+  if (!supabaseUrl || !supabaseAnon) return baseScores;
+
+  const bbox = routeBbox(routes);
+  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return baseScores;
+
+  const fallbackScores = routes.map((route, index) => {
+    const base = baseScores[index];
+    return base ?? {
     avoidScores: {
       accidentHistory: null,
       highSpeed: null,
       disturbances: null,
+      bridges: null,
+      tunnels: null,
     },
     exposure: {
       accidentHistory: null,
       highSpeedMeters: null,
       disturbances: null,
+      bridgeMeters: null,
+      tunnelMeters: null,
     },
-  }));
-  if (!supabaseUrl || !supabaseAnon) return empty;
-
-  const bbox = routeBbox(routes);
-  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return empty;
+    };
+  });
 
   const client = createClient(supabaseUrl, supabaseAnon, { auth: { persistSession: false } });
   const params = {
@@ -700,22 +799,28 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
       const accidentHistory = scoreRisk(route, riskRows);
       const highSpeed = scoreHighSpeed(route, largeRoadRows);
       const disturbances = scoreDisturbances(route, disturbanceRows);
+      const bridges = roadEnvironmentExposure(route, "BRIDGE");
+      const tunnels = roadEnvironmentExposure(route, "TUNNEL");
       return {
         avoidScores: {
           accidentHistory: accidentHistory.score,
           highSpeed: highSpeed.score,
           disturbances: disturbances.score,
+          bridges: bridges.score,
+          tunnels: tunnels.score,
         },
         exposure: {
           accidentHistory: accidentHistory.exposure,
           highSpeedMeters: highSpeed.exposure,
           disturbances: disturbances.exposure,
+          bridgeMeters: bridges.exposure,
+          tunnelMeters: tunnels.exposure,
         },
       };
     });
   } catch (err) {
     console.warn("route scoring failed", err);
-    return empty;
+    return fallbackScores;
   }
 }
 
@@ -770,6 +875,7 @@ async function fetchGraphHopperRoute(
     points_encoded: false,
     instructions: false,
     calc_points: true,
+    details: ["road_environment"],
   };
 
   if (opts.customModel) {
@@ -810,6 +916,7 @@ async function fetchGraphHopperRoute(
     distance: path.distance,
     duration: path.time / 1000,
     geometry: path.points,
+    roadEnvironmentDetails: path.details?.road_environment,
   }));
 }
 
@@ -854,6 +961,8 @@ async function fetchProviderRoutes(
       avoid.highSpeed ? "high-speed" : null,
       avoid.accidentHistory ? "accident-history" : null,
       avoid.disturbances ? "disturbances" : null,
+      avoid.bridges ? "bridges" : null,
+      avoid.tunnels ? "tunnels" : null,
     ].filter(Boolean).join("-");
 
     preferenceRequests.push(
@@ -969,11 +1078,15 @@ export async function POST(req: Request) {
         accidentHistory: null,
         highSpeed: null,
         disturbances: null,
+        bridges: null,
+        tunnels: null,
       },
       exposure: scores[index]?.exposure ?? {
         accidentHistory: null,
         highSpeedMeters: null,
         disturbances: null,
+        bridgeMeters: null,
+        tunnelMeters: null,
       },
     }));
 

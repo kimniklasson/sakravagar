@@ -63,7 +63,6 @@ const SWEDEN_EVENTS_BBOX: Bbox = {
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
-const ADT_HIT_LAYER_ID = "adt-lines-hit";
 const RISK_SOURCE_ID = "risk";
 const RISK_LAYER_ID = "risk-lines";
 const RISK_HIT_LAYER_ID = "risk-lines-hit";
@@ -645,7 +644,7 @@ export function addRouteLayer(
       filter: ["==", ["get", "selected"], true],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#72F2D0",
+        "line-color": "#ffffff",
         "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3, 12, 6, 16, 9],
       },
     },
@@ -1561,26 +1560,6 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     },
     beforeId,
   );
-  map.addLayer(
-    {
-      id: ADT_HIT_LAYER_ID,
-      type: "line",
-      source: ADT_SOURCE_ID,
-      minzoom: NVDB_MIN_ZOOM,
-      paint: {
-        "line-color": "#ffffff",
-        "line-opacity": 0,
-        "line-width": [
-          "interpolate", ["linear"], ["zoom"],
-          9, 18,
-          12, 24,
-          16, 32,
-        ],
-      },
-    },
-    beforeId,
-  );
-
   const featureCache = new Map<number, GeoJSON.Feature<GeoJSON.LineString>>();
   const fetchedTiles = new Set<string>();
   const queuedTiles = new Set<string>();
@@ -1678,9 +1657,6 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     setVisible: (v) => {
       if (map.getLayer(ADT_LAYER_ID)) {
         map.setLayoutProperty(ADT_LAYER_ID, "visibility", v ? "visible" : "none");
-      }
-      if (map.getLayer(ADT_HIT_LAYER_ID)) {
-        map.setLayoutProperty(ADT_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
       }
       enabled = v;
       if (v) refreshTiles();
@@ -2009,7 +1985,7 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 
 // Click → popup för segment, olyckor och aktuella live-lager.
 //
-// Prioritetsordning vid klick: olyckor → störningar → trafikläge → risk → adt.
+// Prioritetsordning vid klick: olyckor → störningar → trafikläge → risk.
 // Eventcirklarna ligger överst i render-stacken så ett klick rakt på en
 // punkt vinner; klick lite vid sidan om faller igenom till segmentet.
 // Osynliga lager filtreras automatiskt bort eftersom queryRenderedFeatures
@@ -2024,7 +2000,7 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 // escapeHtml() eftersom de kommer från Trafikverkets API och kan innehålla
 // godtyckliga strängar.
 export function addPopupHandler(map: MapLibreMap): void {
-  const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID, ADT_HIT_LAYER_ID, ADT_LAYER_ID];
+  const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID];
   const disturbanceLayerIds = [DISTURBANCE_LAYER_ID, DISTURBANCE_HIT_LAYER_ID];
   const trafficFlowLayerIds = [TRAFFIC_FLOW_LAYER_ID, TRAFFIC_FLOW_HIT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ — klick går
@@ -2046,8 +2022,7 @@ export function addPopupHandler(map: MapLibreMap): void {
     const features = map.queryRenderedFeatures(e.point, { layers: allLayerIds });
     if (!features.length) return;
 
-    // Olyckor vinner alltid, därefter färska störningar, sedan segment i
-    // prioritetsordning Risk → ADT.
+    // Olyckor vinner alltid, därefter färska störningar, trafikläge och risksegment.
     const eventFeature = features.find((f) => eventLayerIds.includes(f.layer.id));
     if (eventFeature) {
       openEventPopup(map, e.lngLat, eventFeature.properties);

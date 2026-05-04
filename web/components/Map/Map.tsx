@@ -32,7 +32,7 @@ const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
 
 type RouteStopSource = "manual" | "gps";
-type RouteAvoidOption = "accidentHistory" | "highSpeed" | "disturbances";
+type RouteAvoidOption = "accidentHistory" | "highSpeed" | "disturbances" | "bridges" | "tunnels";
 type RouteAvoidState = Record<RouteAvoidOption, boolean>;
 type RouteTimeBudget = number | "unlimited";
 type RouteStop = {
@@ -80,12 +80,16 @@ const initialRouteAvoids: RouteAvoidState = {
   accidentHistory: false,
   highSpeed: false,
   disturbances: false,
+  bridges: false,
+  tunnels: false,
 };
 
 const routeAvoidLabels: Record<RouteAvoidOption, string> = {
   accidentHistory: "Olycksrisk",
   disturbances: "Störningar",
   highSpeed: "Höga hastigheter",
+  bridges: "Broar",
+  tunnels: "Tunnlar",
 };
 
 const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
@@ -113,7 +117,7 @@ const helpSections: HelpSection[] = [
     title: "Trafikflöde (snitt)",
     body: [
       "Det här lagret visar genomsnittlig trafikmängd, ÅDT, från NVDB via Lastkajen. ÅDT betyder ungefär hur många fordon som passerar ett vägavsnitt under ett genomsnittligt dygn.",
-      "Det är inte live-data, men hjälper oss förstå om en väg brukar vara lugnare eller mer trafikerad. Det används också när olycksrisken normaliseras mot hur många som faktiskt kör på vägen.",
+      "Det är inte live-data, utan en visuell uppskattning av om en väg brukar vara lugnare eller mer trafikerad. Lagret är inte klickbart och används också när olycksrisken normaliseras mot hur många som faktiskt kör på vägen.",
     ],
     legend: [
       { label: "Lägre genomsnittligt flöde", swatch: { kind: "line", color: "#C2DEFF" } },
@@ -356,6 +360,7 @@ export default function Map() {
   const dragRouteStopIdRef = useRef<string | null>(null);
   const lastRouteKeyRef = useRef<string | null>(null);
   const routeCompareTimerRef = useRef<number | null>(null);
+  const shouldRevealSelectedRouteRef = useRef(false);
   const layerCtrlRef = useRef<{
     risk?: LayerController;
     adt?: LayerController;
@@ -368,10 +373,15 @@ export default function Map() {
 
   const selectRouteById = useCallback((routeId: string) => {
     setRouteLines((current) => {
-      if (!current.some((route) => route.id === routeId)) return current;
+      const selectedRoute = current.find((route) => route.id === routeId);
+      if (!selectedRoute) return current;
       const map = mapRef.current;
-      if (map && mapLoadedRef.current) setRouteLayerData(map, current, routeId);
+      if (map && mapLoadedRef.current) {
+        setRouteLayerData(map, current, routeId);
+        focusRoute(map, [selectedRoute, ...current.filter((route) => route.id !== routeId)]);
+      }
       setRouteNoticeText(null);
+      shouldRevealSelectedRouteRef.current = true;
       setSelectedRouteId(routeId);
       return current;
     });
@@ -1108,6 +1118,7 @@ export default function Map() {
           routes={routeLines}
           baselineRoute={routeCandidates[0] ?? null}
           selectedRouteId={selectedRouteId}
+          revealSelectedRouteRef={shouldRevealSelectedRouteRef}
           routeWorking={routeLoading || routeCompareLoading}
           onSelectRoute={selectRouteById}
           onPreviewRoute={previewRouteById}
@@ -1209,6 +1220,8 @@ export default function Map() {
 
 function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
   if (option === "highSpeed") return route.exposure?.highSpeedMeters ?? null;
+  if (option === "bridges") return route.exposure?.bridgeMeters ?? null;
+  if (option === "tunnels") return route.exposure?.tunnelMeters ?? null;
   return route.exposure?.[option] ?? null;
 }
 
@@ -1278,6 +1291,30 @@ function routeAlternativeDescription(
     }
   }
 
+  if (avoids.bridges) {
+    const current = routeExposureValue(route, "bridges");
+    const base = routeExposureValue(baseline, "bridges");
+    if (current !== null && current <= 25) {
+      parts.push("nästan ingen bro längs rutten");
+    } else if (current !== null && base !== null && base - current > 25) {
+      parts.push(`${formatRouteDistance(base - current)} mindre bro än snabbaste`);
+    } else if (current !== null && current > 25) {
+      parts.push(`${formatRouteDistance(current)} bro kvar`);
+    }
+  }
+
+  if (avoids.tunnels) {
+    const current = routeExposureValue(route, "tunnels");
+    const base = routeExposureValue(baseline, "tunnels");
+    if (current !== null && current <= 25) {
+      parts.push("nästan ingen tunnel längs rutten");
+    } else if (current !== null && base !== null && base - current > 25) {
+      parts.push(`${formatRouteDistance(base - current)} mindre tunnel än snabbaste`);
+    } else if (current !== null && current > 25) {
+      parts.push(`${formatRouteDistance(current)} tunnel kvar`);
+    }
+  }
+
   const prefix = parts.length > 0
     ? parts.slice(0, 2).join(" och ")
     : "Ett annat sätt att balansera lugn och restid";
@@ -1299,6 +1336,10 @@ function routeAlternativeTitle(
   const baseHighSpeedMeters = routeExposureValue(baseline, "highSpeed");
   const accidentReduction = routeScoreReduction(route, baseline, "accidentHistory") ?? 0;
   const disturbanceReduction = routeScoreReduction(route, baseline, "disturbances") ?? 0;
+  const bridgeMeters = routeExposureValue(route, "bridges");
+  const baseBridgeMeters = routeExposureValue(baseline, "bridges");
+  const tunnelMeters = routeExposureValue(route, "tunnels");
+  const baseTunnelMeters = routeExposureValue(baseline, "tunnels");
 
   if (
     avoids.highSpeed &&
@@ -1317,6 +1358,32 @@ function routeAlternativeTitle(
 
   if (avoids.highSpeed && highSpeedMeters !== null && highSpeedMeters <= 100) {
     return "Lugnaste";
+  }
+
+  if (avoids.tunnels && tunnelMeters !== null && tunnelMeters <= 25) {
+    return "Utan tunnlar";
+  }
+
+  if (
+    avoids.tunnels &&
+    tunnelMeters !== null &&
+    baseTunnelMeters !== null &&
+    baseTunnelMeters - tunnelMeters > 25
+  ) {
+    return "Mindre tunnel";
+  }
+
+  if (avoids.bridges && bridgeMeters !== null && bridgeMeters <= 25) {
+    return "Utan broar";
+  }
+
+  if (
+    avoids.bridges &&
+    bridgeMeters !== null &&
+    baseBridgeMeters !== null &&
+    baseBridgeMeters - bridgeMeters > 25
+  ) {
+    return "Mindre bro";
   }
 
   if (avoids.disturbances && disturbanceReduction > 0.05) {
@@ -1355,6 +1422,7 @@ function RoutePlannerBox({
   routes,
   baselineRoute,
   selectedRouteId,
+  revealSelectedRouteRef,
   routeWorking,
   onSelectRoute,
   onPreviewRoute,
@@ -1379,6 +1447,7 @@ function RoutePlannerBox({
   routes: RouteLine[];
   baselineRoute: RouteLine | null;
   selectedRouteId: string | null;
+  revealSelectedRouteRef: React.MutableRefObject<boolean>;
   routeWorking: boolean;
   onSelectRoute: (routeId: string) => void;
   onPreviewRoute: (routeId: string | null) => void;
@@ -1422,6 +1491,17 @@ function RoutePlannerBox({
       window.removeEventListener("resize", update);
     };
   }, [routes]);
+
+  useLayoutEffect(() => {
+    if (!selectedRouteId || !revealSelectedRouteRef.current) return;
+    revealSelectedRouteRef.current = false;
+
+    const selected = routeAlternativesRef.current?.querySelector<HTMLElement>(
+      `[data-route-id="${CSS.escape(selectedRouteId)}"]`,
+    );
+    selected?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedRouteId, revealSelectedRouteRef]);
+
   const activeStopLoading = activeStop
     ? loadingStopId === activeStop.id || geocodingStopId === activeStop.id
     : false;
@@ -1654,6 +1734,7 @@ function RoutePlannerBox({
                 <button
                   key={route.id}
                   type="button"
+                  data-route-id={route.id}
                   className={`${styles.routeAlternativeCard} ${selected ? styles.routeAlternativeCardSelected : ""}`}
                   onClick={() => onSelectRoute(route.id)}
                   onMouseEnter={() => onPreviewRoute(route.id)}

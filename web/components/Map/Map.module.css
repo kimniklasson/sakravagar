@@ -933,14 +933,20 @@
   bottom: 16px;
   left: 16px;
   width: 6px;
-  border-radius: 999px;
+  border-radius: 2px;
   background: rgba(255, 255, 255, 0.3);
+  transition: background-color 150ms ease;
 }
 
 .routeAlternativeCard:hover,
 .routeAlternativeCard:focus-visible {
   background: rgba(85, 85, 85, 0.3);
   outline: none;
+}
+
+.routeAlternativeCard:hover::before,
+.routeAlternativeCard:focus-visible::before {
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .routeAlternativeCardSelected {
