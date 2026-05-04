@@ -395,6 +395,21 @@ export async function addEventsLayer(
   return { liveCount };
 }
 
+export function setEventsLayerVisible(map: MapLibreMap, visible: boolean): void {
+  const visibility = visible ? "visible" : "none";
+  for (const id of [
+    HEATMAP_LAYER_ID,
+    CIRCLE_LAYER_ID,
+    HIT_TARGET_LAYER_ID,
+    LIVE_HALO_LAYER_ID,
+    LIVE_CORE_LAYER_ID,
+  ]) {
+    if (map.getLayer(id)) {
+      map.setLayoutProperty(id, "visibility", visibility);
+    }
+  }
+}
+
 export async function fetchLiveEvents(): Promise<EventPoint[]> {
   const params = new URLSearchParams({
     bbox: bboxToParam(SWEDEN_EVENTS_BBOX),

@@ -18,7 +18,7 @@
 .layerControls,
 .rightControls {
   --overlay-inset: 40px;
-  --overlay-width: 320px;
+  --overlay-width: 360px;
   --icon-btn-size: 40px;
 }
 
@@ -841,9 +841,153 @@
   z-index: 1;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 2px;
-  width: var(--overlay-width);
+  width: var(--icon-btn-size);
   font-family: var(--font-univers);
+}
+
+.layerIconItem {
+  position: relative;
+  display: block;
+  width: var(--icon-btn-size);
+  height: var(--icon-btn-size);
+}
+
+.layerIconItem:first-child {
+  margin-bottom: 14px;
+}
+
+.layerIconBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn-size);
+  height: var(--icon-btn-size);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(85, 85, 85, 0.3);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.layerIconBtn::before {
+  content: attr(data-label);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 12px);
+  max-width: min(240px, calc(100vw - 120px));
+  padding: 9px 12px 8px;
+  border-radius: 4px;
+  background: rgba(17, 17, 17, 0.5);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: var(--color-white);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  letter-spacing: var(--type-small-tracking);
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(8px, -50%);
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.layerIconBtn:hover,
+.layerIconBtn:focus-visible {
+  color: var(--color-white);
+  outline: none;
+}
+
+.layerIconBtn:hover::before,
+.layerIconBtn:focus-visible::before {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.layerIconBtnOn {
+  background: var(--color-white);
+  color: var(--color-dark);
+}
+
+.layerIconBtnOn:hover,
+.layerIconBtnOn:focus-visible {
+  color: var(--color-dark);
+}
+
+.layerIconGlyph {
+  display: block;
+  width: 17px;
+  height: 17px;
+  background: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+
+.layerIconGlyph_help {
+  mask-image: url("/icons/help.svg");
+  -webkit-mask-image: url("/icons/help.svg");
+}
+
+.layerIconGlyph_accidents {
+  mask-image: url("/icons/accidents.svg");
+  -webkit-mask-image: url("/icons/accidents.svg");
+}
+
+.layerIconGlyph_flow {
+  mask-image: url("/icons/flow.svg");
+  -webkit-mask-image: url("/icons/flow.svg");
+}
+
+.layerIconGlyph_live {
+  mask-image: url("/icons/live.svg");
+  -webkit-mask-image: url("/icons/live.svg");
+}
+
+.layerIconGlyph_disturbances {
+  mask-image: url("/icons/disturbances.svg");
+  -webkit-mask-image: url("/icons/disturbances.svg");
+}
+
+.layerIconGlyph_speed {
+  mask-image: url("/icons/speed.svg");
+  -webkit-mask-image: url("/icons/speed.svg");
+}
+
+.layerIconBadge {
+  composes: type-small-x from global;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-red);
+  color: var(--color-white);
+  font-family: var(--font-univers);
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.layerIconBadge:hover,
+.layerIconBadge:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.1);
 }
 
 .layerBox {
@@ -1214,6 +1358,10 @@
     display: none;
   }
 
+  .layerIconBtn::before {
+    display: none;
+  }
+
   .layerScale span::after {
     display: none;
   }
@@ -1384,7 +1532,7 @@
     right: var(--overlay-inset);
     bottom: auto;
     left: auto;
-    width: min(320px, calc(100vw - (var(--overlay-inset) * 2)));
+    width: var(--icon-btn-size);
     z-index: 3;
   }
 

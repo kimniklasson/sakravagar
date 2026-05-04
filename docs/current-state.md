@@ -1,23 +1,23 @@
-# Current state — 2026-05-03
+# Current state — 2026-05-04
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
-Senaste större arbetslogg: `docs/session-2026-05-03.md`.
+Senaste större arbetslogg: `docs/session-2026-05-04.md`.
 
 ## Produktläge
 
 Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar historiska olyckor, aktuella olyckor och vägbaserade risk-/trygghetslager. Routing använder nu self-hostad GraphHopper som första riktiga steg mot "undvik om möjligt"-routing med egna vägvikter, men filtervikterna behöver fortsatt kalibreras.
 
-Aktiva lager i UI:t:
+Aktiva lager i UI:t visas som en kompakt ikonrad uppe till höger:
 
-- **Risk** — vägsegment färgas efter deduplicerade olyckor normaliserat mot ÅDT. Risk är gul→röd och är den enda varma riskskalan.
-- **Flöde** — ÅDT från NVDB/Lastkajen, blå skala, underlagsdata.
-- **Störning** — aktuella vägarbeten och kö-/trafikstörningar från Trafikverket, separat från olyckshistoriken.
-- **Liveflöde** — Trafikverkets TrafficFlow-mätplatser snappade till närmaste vägsegment. Täckningen är bäst i Stockholm/Göteborg.
-- **Hastighet** — NVDB-hastighetsgränser 90 km/h eller högre, default av.
-- **Olyckor** — historiska olyckor som neutral heatmap/punkter; pågående olyckor som pulserande vita punkter.
+- **Hjälp** — dummyknapp tills informationspanelen designas.
+- **Olyckor och risk** — gemensam toggle för vägsegment-risk, historiska olyckor och pågående olyckor. Default av för att inte tvinga fram stressande olycksvisualiseringar.
+- **Trafikflöde (snitt)** — ÅDT från NVDB/Lastkajen, blå skala, underlagsdata. Default på.
+- **Liveflöde (storstad)** — Trafikverkets TrafficFlow-mätplatser snappade till närmaste vägsegment. Täckningen är bäst i Stockholm/Göteborg. Default på.
+- **Trafikstörningar** — aktuella vägarbeten och kö-/trafikstörningar från Trafikverket, separat från olyckshistoriken. Default på.
+- **Hastigheter** — NVDB-hastighetsgränser 90 km/h eller högre. Default på.
 
-Senaste UI-beteende: den röda liveboxen visar globalt antal pågående olyckor. Klick på boxen fokuserar kartan på aktiva olyckor: 1 olycka flyger till zoom 10, 2+ kör `fitBounds` så alla syns.
+Liveolyckor visas som en liten badge på `Olyckor och risk` endast när lagret är på. Klick på badgen fokuserar kartan på aktiva olyckor: 1 olycka flyger till zoom 10, 2+ kör `fitBounds` så alla syns. Själva togglen zoomar aldrig, den är bara av/på.
 
 Ruttplaneraren finns direkt under infoboxen i vänsterstacken och har fungerande geocoding/routing-koppling. Adressfält söker via egen `/api/geocode`-proxy mot Nominatim, GPS reverse-geocodas till läsbar plats när provider svarar, och rutten räknas automatiskt via egen `/api/route`. `/api/route` använder GraphHopper när `GRAPHHOPPER_BASE_URL` finns och faller tillbaka till OSRM annars.
 
@@ -44,8 +44,8 @@ Ruttplanerarstatus:
 - `/api/route` accepterar `avoid`, `maxExtraMinutes` och `preview`. Normalt returneras `avoidScores` + `exposure` per rutt för `accidentHistory`, `highSpeed` och `disturbances`. Olyckshistorik använder `risk_in_bbox`, höghastighet använder `large_roads_in_bbox`, och störningar använder aktiva `disturbances_public`-punkter nära rutten. `preview: true` används bara under kartdragning och hoppar över scoring för att hålla previewn billig.
 - GraphHopper-kandidater: utan aktiva filter hämtas snabbaste GraphHopper-rutten. Med aktiva filter hämtas snabbaste baseline + GraphHopper `alternative_route`. Om `highSpeed` är aktiv används en hård "calm" custom model med lägre prioritet för `MOTORWAY`, `TRUNK`, `PRIMARY`, `max_speed >= 100`, `max_speed >= 90` och `max_speed >= 80`; highSpeed får även en diversifierad custom-kandidat via aktiva störningszoner för att hitta fler låg-/noll-högfartskorridorer, men UI:t rankar den bara på toggles som användaren faktiskt valt. Vid tidsbudget `∞` öppnas GraphHopper-sökningen upp med högre `max_weight_factor`, fler `alternative_route`-paths och större kandidatlimit. Om `accidentHistory` eller `disturbances` är aktiva byggs dynamiska custom areas/penalty zones från risksegment och aktiva störningspunkter i baseline-korridoren, och dessa läggs in i GraphHoppers `priority`-modell. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas; då visas notice i UI:t när undvik-filter är aktiva eftersom OSRM bara kan jämföra ett fåtal standardalternativ.
 - Filterranking i UI:t väljer fortfarande rekommenderad/markerad rutt efter lägst genomsnittlig avoid-score, men den visuella listan sorteras på tid för stabilitet och lärbarhet.
-- Layout desktop: info och ruttplanerare ligger i vänsterstacken, lagerkontrollerna ligger uppe till höger, och zoom/location ligger nere till höger. MapLibre-attribution visas permanent nere till vänster. När ruttplaneraren är aktiv döljs live-/tidsboxarna för att ge routeflödet mer plats.
-- Nya assets ligger i `web/public/icons/myposition.svg`, `mydestination.svg`, `search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`. Location/zoom återanvänder inline-ikonerna i `Map.tsx`.
+- Layout desktop: info och ruttplanerare ligger i vänsterstacken, standardbredd 360 px. Lagerkontrollerna är en kompakt ikonrad uppe till höger, och zoom/location ligger nere till höger. MapLibre-attribution visas permanent nere till vänster. Den gamla röda liveboxen och tidsfönsterboxen är borttagna.
+- Nya assets ligger i `web/public/icons/myposition.svg`, `mydestination.svg`, `search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`, `help.svg`, `accidents.svg`, `flow.svg`, `live.svg`, `disturbances.svg`, `speed.svg`. Location/zoom återanvänder inline-ikonerna i `Map.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
 
 Kvar för ruttplaneraren:
@@ -109,7 +109,7 @@ Trafikverket-flöden som scrapas:
 
 Huvudfiler:
 
-- `web/components/Map/Map.tsx` — React-state och UI-boxar. Initierar MapLibre, lagercontrollers, timers, livebox-fokus, zoom/location och mobilattribution.
+- `web/components/Map/Map.tsx` — React-state och UI-boxar. Initierar MapLibre, lagercontrollers, timers, lagerikonrad, livebadge-fokus, zoom/location och mobilattribution.
 - `web/components/Map/layers.ts` — MapLibre-källor/lager, bbox-loaders, live-eventhämtning, popuphandler, ruttmarkering och renderordning.
 - `web/components/Map/Map.module.css` — overlay-layout, boxar, toggles, ikoner, responsiv placering.
 - `web/styles/globals.css` — globala typografiklasser, MapLibre popup-styling och attribution-overrides.
