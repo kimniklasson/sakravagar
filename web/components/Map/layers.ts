@@ -67,9 +67,7 @@ const ADT_HIT_LAYER_ID = "adt-lines-hit";
 const RISK_SOURCE_ID = "risk";
 const RISK_LAYER_ID = "risk-lines";
 const RISK_HIT_LAYER_ID = "risk-lines-hit";
-const LARGE_ROADS_SOURCE_ID = "large-roads";
 const LARGE_ROADS_BADGE_SOURCE_ID = "large-roads-speed-badges";
-const LARGE_ROADS_LAYER_ID = "large-roads-lines";
 const LARGE_ROADS_BADGE_LAYER_ID = "large-roads-speed-badge-symbols";
 const DISTURBANCE_SOURCE_ID = "disturbances";
 const DISTURBANCE_LAYER_ID = "disturbances-points";
@@ -117,6 +115,7 @@ const LARGE_ROADS_SPEED_RUN_MIN_LENGTH_M = 500;
 const LARGE_ROADS_SPEED_CONNECT_DISTANCE_M = 120;
 const SPEED_BADGE_IMAGE_PREFIX = "speed-badge-";
 const SPEED_ROAD_COLORS = {
+  80: "#7A7A7A",
   90: "#999999",
   100: "#B8B8B8",
   110: "#D6D6D6",
@@ -150,7 +149,15 @@ function speedRoadColor(speedLimit: number | null | undefined): string {
   if (speedLimit >= 120) return SPEED_ROAD_COLORS[120];
   if (speedLimit >= 110) return SPEED_ROAD_COLORS[110];
   if (speedLimit >= 100) return SPEED_ROAD_COLORS[100];
+  if (speedLimit >= 90) return SPEED_ROAD_COLORS[90];
+  if (speedLimit >= 80) return SPEED_ROAD_COLORS[80];
   return SPEED_ROAD_COLORS[90];
+}
+
+function raiseLargeRoadBadges(map: MapLibreMap): void {
+  if (map.getLayer(LARGE_ROADS_BADGE_LAYER_ID)) {
+    map.moveLayer(LARGE_ROADS_BADGE_LAYER_ID);
+  }
 }
 
 function ensureDisturbanceMarkerImages(map: MapLibreMap): void {
@@ -659,6 +666,8 @@ export function addRouteLayer(
     beforeId,
   );
 
+  raiseLargeRoadBadges(map);
+
   if (onRouteClick) {
     map.on("click", ROUTE_ALT_HIT_LAYER_ID, (event) => {
       const routeId = event.features?.[0]?.properties?.id;
@@ -822,6 +831,7 @@ export function setRouteLayerData(
     },
   }));
   source.setData({ type: "FeatureCollection", features });
+  raiseLargeRoadBadges(map);
 }
 
 export function focusRoute(map: MapLibreMap, routes: RouteLine[]): void {
@@ -1678,65 +1688,19 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// Trygghetsfiltret "Hastighet".
-// Bbox-drivet NVDB-lager från Lastkajen: bara skyltad hastighet 90+.
+// Trygghetsfiltret "Höga hastigheter".
+// Bbox-drivet NVDB-lager från Lastkajen: bara skyltad hastighet 80+.
 // Vägtyp-rader utan hastighetsvärde filtreras bort i API:t eftersom de kan
 // representera större vägar som ändå är 80-vägar i verkligheten.
 export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
-  if (map.getSource(LARGE_ROADS_SOURCE_ID)) {
+  if (map.getSource(LARGE_ROADS_BADGE_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
 
-  map.addSource(LARGE_ROADS_SOURCE_ID, {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] },
-  });
   map.addSource(LARGE_ROADS_BADGE_SOURCE_ID, {
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
   });
-
-  const beforeId = map.getLayer(RISK_LAYER_ID)
-    ? RISK_LAYER_ID
-    : map.getLayer(HEATMAP_LAYER_ID)
-      ? HEATMAP_LAYER_ID
-      : undefined;
-
-  map.addLayer(
-    {
-      id: LARGE_ROADS_LAYER_ID,
-      type: "line",
-      source: LARGE_ROADS_SOURCE_ID,
-      minzoom: LARGE_ROADS_MIN_ZOOM,
-      layout: {
-        "line-cap": "round",
-        "line-join": "round",
-        visibility: "visible",
-        "line-sort-key": ["get", "rank"],
-      },
-      paint: {
-        "line-color": [
-          "step", ["to-number", ["get", "speed_limit"]],
-          SPEED_ROAD_COLORS[90],
-          100, SPEED_ROAD_COLORS[100],
-          110, SPEED_ROAD_COLORS[110],
-          120, SPEED_ROAD_COLORS[120],
-        ],
-        "line-width": [
-          "interpolate", ["linear"], ["zoom"],
-          LARGE_ROADS_MIN_ZOOM, 1.5,
-          12, 4,
-          16, 8,
-        ],
-        "line-opacity": [
-          "interpolate", ["linear"], ["zoom"],
-          LARGE_ROADS_MIN_ZOOM, 0.35,
-          LARGE_ROADS_MIN_ZOOM + 1, 0.75,
-        ],
-      },
-    },
-    beforeId,
-  );
   map.addLayer(
     {
       id: LARGE_ROADS_BADGE_LAYER_ID,
@@ -1763,7 +1727,6 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
         ],
       },
     },
-    beforeId,
   );
 
   const featureCache = new Map<string, LargeRoadFeature>();
@@ -1779,12 +1742,6 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
   const updateSource = () => {
     const entries = Array.from(featureCache.entries());
     visibleFeatureKeys = visibleLargeRoadKeys(entries);
-    const fc: GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString> = {
-      type: "FeatureCollection",
-      features: entries.flatMap(([key, feature]) => visibleFeatureKeys.has(key) ? [feature] : []),
-    };
-    const src = map.getSource(LARGE_ROADS_SOURCE_ID) as GeoJSONSource | undefined;
-    src?.setData(fc);
     updateBadgeSource();
   };
 
@@ -1816,51 +1773,49 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
   };
 
   const positionBadgeLayer = () => {
-    if (!map.getLayer(LARGE_ROADS_BADGE_LAYER_ID)) return;
-    const beforeBadgeLayer = map.getLayer(CIRCLE_LAYER_ID) ? CIRCLE_LAYER_ID : undefined;
-    map.moveLayer(LARGE_ROADS_BADGE_LAYER_ID, beforeBadgeLayer);
+    raiseLargeRoadBadges(map);
   };
 
   const fetchTile = async (tile: LargeRoadTile) => {
     const res = await fetch(`/api/large-roads?bbox=${bboxToParam(tile)}`);
-      if (!res.ok) {
-        console.error("failed to fetch large roads", await res.text());
-        return;
-      }
-      const { segments } = (await res.json()) as { segments: LargeRoadSegment[] };
-      for (const s of segments) {
-        const speedBadge = ensureSpeedBadgeImage(map, s.speed_limit);
-        const featureKey = `${s.class}:${s.fid}`;
-        featureCache.set(featureKey, {
-          type: "Feature",
-          geometry: s.geometry,
-          properties: {
-            fid: s.fid,
-            element_id: s.element_id,
-            class: s.class,
-            rank: s.rank,
-            speed_limit: s.speed_limit,
-            speed_badge: speedBadge,
-            road_type: s.road_type,
-            length_m: s.length_m,
-          },
-        });
-        const midpoint = speedBadge ? geometryMidpoint(s.geometry) : null;
-        if (midpoint) {
-          badgeCache.set(featureKey, {
-            feature: {
-              type: "Feature",
-              geometry: { type: "Point", coordinates: midpoint },
-              properties: {
-                fid: s.fid,
-                speed_limit: s.speed_limit,
-                speed_badge: speedBadge,
-              },
+    if (!res.ok) {
+      console.error("failed to fetch large roads", await res.text());
+      return;
+    }
+    const { segments } = (await res.json()) as { segments: LargeRoadSegment[] };
+    for (const s of segments) {
+      const speedBadge = ensureSpeedBadgeImage(map, s.speed_limit);
+      const featureKey = `${s.class}:${s.fid}`;
+      featureCache.set(featureKey, {
+        type: "Feature",
+        geometry: s.geometry,
+        properties: {
+          fid: s.fid,
+          element_id: s.element_id,
+          class: s.class,
+          rank: s.rank,
+          speed_limit: s.speed_limit,
+          speed_badge: speedBadge,
+          road_type: s.road_type,
+          length_m: s.length_m,
+        },
+      });
+      const midpoint = speedBadge ? geometryMidpoint(s.geometry) : null;
+      if (midpoint) {
+        badgeCache.set(featureKey, {
+          feature: {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: midpoint },
+            properties: {
+              fid: s.fid,
+              speed_limit: s.speed_limit,
+              speed_badge: speedBadge,
             },
-            geometry: s.geometry,
-          });
-        }
+          },
+          geometry: s.geometry,
+        });
       }
+    }
     fetchedTiles.add(tile.key);
     updateSource();
   };
@@ -1922,9 +1877,6 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
 
   return {
     setVisible: (v) => {
-      if (map.getLayer(LARGE_ROADS_LAYER_ID)) {
-        map.setLayoutProperty(LARGE_ROADS_LAYER_ID, "visibility", v ? "visible" : "none");
-      }
       if (map.getLayer(LARGE_ROADS_BADGE_LAYER_ID)) {
         map.setLayoutProperty(LARGE_ROADS_BADGE_LAYER_ID, "visibility", v ? "visible" : "none");
       }

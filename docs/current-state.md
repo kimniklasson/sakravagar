@@ -15,19 +15,21 @@ Aktiva lager i UI:t visas som en kompakt ikonrad uppe till höger:
 - **Trafikflöde (snitt)** — ÅDT från NVDB/Lastkajen, blå skala, underlagsdata. Default på.
 - **Liveflöde (storstad)** — Trafikverkets TrafficFlow-mätplatser snappade till närmaste vägsegment. Täckningen är bäst i Stockholm/Göteborg. Default på.
 - **Trafikstörningar** — aktuella vägarbeten och kö-/trafikstörningar från Trafikverket, separat från olyckshistoriken. Default på.
-- **Hastigheter** — NVDB-hastighetsgränser 90 km/h eller högre. Default på.
+- **Höga hastigheter** — NVDB-hastighetsgränser 80 km/h eller högre, som badges utan linjelager. Default på.
 
 Hjälppanelen:
 
 - Desktop: glider in från höger; lager-/zoomkontroller flyttas åt vänster när panelen är öppen.
 - Mobil: visas som helskärm med bara stängknappen kvar ovanpå.
 - `Olyckor och risk` är öppen default, men användaren kan stänga alla accordions. Max en accordion är öppen åt gången.
-- Panelen har legender för risk/olyckor, ÅDT-flöde, liveflöde och trafikstörningar. Hastighetssektionen har ingen legend, bara text.
+- Panelen har legender för risk/olyckor, ÅDT-flöde, liveflöde och trafikstörningar. Höga hastigheter förklaras i text utan egen legend.
 - Scrollbar är dold för att undvika breddhopp i panelens innehåll.
 
 Liveolyckor visas som en liten badge på `Olyckor och risk` endast när lagret är på. Klick på badgen fokuserar kartan på aktiva olyckor: 1 olycka flyger till zoom 10, 2+ kör `fitBounds` så alla syns. Själva togglen zoomar aldrig, den är bara av/på.
 
 Ruttplaneraren finns direkt under infoboxen i vänsterstacken och har fungerande geocoding/routing-koppling. Adressfält söker via egen `/api/geocode`-proxy mot Nominatim, GPS reverse-geocodas till läsbar plats när provider svarar, och rutten räknas automatiskt via egen `/api/route`. `/api/route` använder GraphHopper när `GRAPHHOPPER_BASE_URL` finns och faller tillbaka till OSRM annars.
+
+Vänster infobox expanderar lokalt nedåt med kort, syftesdriven tjänsteinfo. Den öppnar inte högerställda hjälppanelen; den panelen styrs av hjälpknappen i lagerikonraden och innehåller datakällor/metodförklaringar.
 
 Ruttplanerarstatus:
 
@@ -40,7 +42,7 @@ Ruttplanerarstatus:
 - Primär ruttritning kan dras direkt på kartan. Hover visar `Dra för att ändra rutt` och en liten punkt på ruttlinjen. Under drag körs en throttlad preview via `/api/route` med `preview: true`, vilket hämtar en GraphHopper/OSRM-rutt utan Supabase-score. Vid släpp ersätts eventuell tidigare dold via-punkt med den nya och `/api/route` räknar om rutt + risk/exposure.
 - Draghandles har enkel HTML drag/drop-reorder av stop-arrayen. Rensa-knappen tömmer Från/Till och tar bort mellanliggande dolda via-punkter.
 - Normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
-- `Undvik om möjligt` visas som pills för `Olycksrisk`, `Störningar` och `Höga hastigheter`. Pills kan väljas innan Från/Till fylls i och ligger kvar genom input/geocode.
+- `Undvik om möjligt` visas som pills för `Olycksrisk`, `Störningar` och `Höga hastigheter`. Pills kan väljas innan Från/Till fylls i och ligger kvar genom input/geocode. Undvik-score för höga hastigheter räknar fortsatt 90+ km/h-exponering.
 - Aktiv filterladdning visas som liten spinner i aktiva pills. Det finns ingen separat stor `Jämför alternativ...`-box.
 - Tidsbudget-slidern är borttagen ur UI:t. Utan aktiva filter visas bara snabbaste rutten. Med aktiva filter öppnas kandidatläget och användaren får se alla relevanta alternativ vi kan hitta.
 - Ruttalternativ visas som scrollande kort under ruttpanelen. Varje kort visar titel, kort motivering, tid och distans.
@@ -63,7 +65,6 @@ Kvar för ruttplaneraren:
 - Nästa routingsteg: kalibrera penalty zone-storlek, maxantal och multipliers mot verkliga ruttfall så omvägarna blir tydliga utan att kännas överdrivna.
 - Kalibrera factor-scores och tidsbudget-default på verkliga exempel.
 - Finlira routeplanner-UI efter lokal testning av nya alternativkort.
-- Nästa hastighetssteg: byt visuella hastighetslinjer mot sparse badges ovanpå kartan/rutter. Börja med "enklare väg": återanvänd hastighetslagret som datakälla, rendera bara badges och mät först om import/API bör utökas från `>=90 km/h` till `>=70 km/h`.
 - Senare: tydligare swap-knapp för bara Från/Till.
 
 ## Arkitektur
@@ -137,7 +138,7 @@ Renderprinciper:
 - `web/app/api/events/stats/route.ts` — datafönster/färskhet för UI-copy.
 - `web/app/api/risk/route.ts` — `risk_in_bbox`.
 - `web/app/api/adt/route.ts` — `adt_in_bbox`.
-- `web/app/api/large-roads/route.ts` — `large_roads_in_bbox`.
+- `web/app/api/large-roads/route.ts` — `large_roads_in_bbox`, filtrerat till höghastighetssegment 80+ för kartbadges.
 - `web/app/api/disturbances/route.ts` — aktiva vägarbeten/köer.
 - `web/app/api/traffic-flow/route.ts` — aktiva TrafficFlow-segment.
 - `web/app/api/geocode/route.ts` — Nominatim-proxy för search/reverse, Sverige-bounds, svensk `Accept-Language`, kortetiketter och lokal resultatrankning.
@@ -156,9 +157,10 @@ Alla tunga bbox-rutter ska ha både API-side area guard och SQL-side limit.
 - `0014_correct_dedup_strategy.sql` — korrekt `fid`-baserad risk efter felaktig `element_id`-premiss.
 - `0016_remove_tsk.sql` — TSK är borttaget ur UI/dataflödet.
 - `0018_live_disturbances.sql` — separat störningsspår.
-- `0019_large_roads_filter.sql` — hastighets-/stora-vägar-data från Lastkajen.
+- `0019_large_roads_filter.sql` — höghastighetsdata från Lastkajen.
 - `0020_live_traffic_flow.sql` till `0022_stabilize_flow_segments.sql` — TrafficFlow och stabila segmentlinjer.
 - `0023_security_limits_dedup.sql` — publika grants, server-limits och dedupad risk-MV.
+- `0025_high_speed_badges_80.sql` — kartlagret Höga hastigheter utökat från 90+ till 80+.
 
 ## Gotchas
 
@@ -169,6 +171,7 @@ Alla tunga bbox-rutter ska ha både API-side area guard och SQL-side limit.
 - Kör inte `next build` medan `next dev` är igång. Stoppa dev-servern först om `.next` beter sig konstigt.
 - Lokal geolocation kräver secure context; vanlig lokal HTTP visar alert, HTTPS-prod bör fungera.
 - Lastkajen DB-import ska använda Supabase session pooler på port 5432, inte transaction pooler 6543.
+- `Höga hastigheter` kräver att Lastkajen-importen har körts med `scripts/import-large-roads.sh` efter 80+-ändringen; bara migrationen räcker inte för att skapa 80-rader.
 - GraphHopper custom model fungerar inte i speed mode/CH; skicka `ch.disable: true` i POST-body för custom model-rutter. Snabbaste basrutten kan använda CH.
 - Om GraphHopper-cache ska byggas om efter config/OSM-byte: stoppa `graphhopper.service`, ta bort eller flytta `/opt/graphhopper/graph-cache`, starta service igen. Import kan ta några minuter och bör följas med `journalctl -u graphhopper -f`.
 - Lokalt devtest med GraphHopper kräver env vars. Kör exempelvis `TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt') GRAPHHOPPER_BASE_URL='https://routing.xn--skravgar-0zae.se' GRAPHHOPPER_TOKEN="$TOKEN" pnpm web`. Utan env faller `/api/route` tillbaka till OSRM och reproducerar inte production-routing.
@@ -203,6 +206,6 @@ pnpm web
 
 ## Nästa fokus
 
-- Testa och kalibrera routeplanner-filter på fler verkliga sträckor. Kända case: Floda -> Rönnäng ska byta till lugnare kandidat när `Höga hastigheter (90+)` slås på.
+- Testa och kalibrera routeplanner-filter på fler verkliga sträckor. Kända case: Floda -> Rönnäng ska byta till lugnare kandidat när `Höga hastigheter` slås på.
 - Kalibrera `accidentHistory` och `disturbances` penalty zones i GraphHopper och följ upp med manuella smoke tests på kända sträckor.
 - När olyckshistoriken mognat: kalibrera riskskalan om från preliminära värden till mer stabila brytpunkter.

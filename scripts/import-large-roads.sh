@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Importera bara de Lastkajen-lager/rader som behövs för filtret "Stora vägar".
+# Importera bara de Lastkajen-lager/rader som behövs för filtret "Höga hastigheter".
 #
 # Importen är medvetet smal:
-# - Hastighetsgräns: bara 90 km/h och uppåt
+# - Hastighetsgräns: bara 80 km/h och uppåt
 # - Vägtyp: motorväg, motortrafikled, 4-fältsväg och mötesfri vanlig väg
 #
 # Användning:
@@ -34,12 +34,12 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
-echo "=== Importerar Hastighetsgräns >= 90 → nvdb_large_roads_speed ==="
+echo "=== Importerar Hastighetsgräns >= 80 → nvdb_large_roads_speed ==="
 ogr2ogr \
   -f PostgreSQL \
   "PG:$DATABASE_URL" \
   "$GPKG" \
-  -sql "select id, ELEMENT_ID as element_id, cast(Hogsta_tillatna_hastighet as integer) as speed_limit, EXTENT_LENGTH as length_m, geom from NVDB_DK_O_48_Hastighetsgrans where cast(Hogsta_tillatna_hastighet as integer) >= 90" \
+  -sql "select id, ELEMENT_ID as element_id, cast(Hogsta_tillatna_hastighet as integer) as speed_limit, EXTENT_LENGTH as length_m, geom from NVDB_DK_O_48_Hastighetsgrans where cast(Hogsta_tillatna_hastighet as integer) >= 80" \
   -nln "nvdb_large_roads_speed" \
   -lco GEOMETRY_NAME=geom \
   -lco FID=fid \

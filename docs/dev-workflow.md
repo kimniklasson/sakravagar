@@ -51,7 +51,7 @@ Kör inte `next build` samtidigt som `next dev` är igång om `.next` börjar be
 
 ## Ruttplanerar-smoke tests
 
-- Floda -> Rönnäng: `Höga hastigheter (90+)` ska kunna välja en lugnare kandidat än snabbaste rutten.
+- Floda -> Rönnäng: `Höga hastigheter` ska kunna välja en lugnare kandidat än snabbaste rutten.
 - Floda -> Göteborg: GraphHopper ska ge både snabb och calm-kandidat när env finns.
 - GPS-knappen kräver secure context. Vanlig lokal HTTP kan ge browser-varning; production HTTPS ska fungera.
 

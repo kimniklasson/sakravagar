@@ -70,7 +70,7 @@ export async function GET(req: Request) {
   }
 
   const segments: LargeRoadSegment[] = rows
-    .filter((row) => row.class === "high_speed" && row.speed_limit !== null && row.speed_limit >= 90)
+    .filter((row) => row.class === "high_speed" && row.speed_limit !== null && row.speed_limit >= 80)
     .map((row) => ({
       fid: row.fid,
       element_id: row.element_id,

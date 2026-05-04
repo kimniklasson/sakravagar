@@ -70,7 +70,7 @@ pnpm web
 
 Testa sedan rutter via UI:t eller `/api/route`. Kända smoke test-sträckor:
 
-- Floda -> Rönnäng: `Höga hastigheter (90+)` bör kunna välja en lugnare kandidat än snabbaste rutten.
+- Floda -> Rönnäng: `Höga hastigheter` bör kunna välja en lugnare kandidat än snabbaste rutten.
 - Floda -> Göteborg: ska returnera snabb kandidat och calm-kandidat när GraphHopper-env finns.
 
 ## GraphHopper custom model

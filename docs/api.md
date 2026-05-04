@@ -83,7 +83,7 @@ Query:
 
 - `bbox` krävs.
 
-Returnerar hastighets-/stora-vägar-segment från `large_roads_in_bbox`, främst för `Höga hastigheter (90+)`.
+Returnerar high-speed-segment från `large_roads_in_bbox`. Kartlagret visar badges för 80 km/h och högre, medan routeplannerns high-speed-score fortsatt räknar 90+ km/h-exponering.
 
 ## Geocode
 

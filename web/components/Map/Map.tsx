@@ -42,9 +42,8 @@ type RouteStop = {
 };
 type HelpSectionId = "risk" | "adt" | "trafficFlow" | "disturbances" | "largeRoads";
 type HelpLegendSwatch = {
-  kind: "line" | "dot" | "pulse" | "square" | "badge";
+  kind: "line" | "dot" | "pulse" | "square";
   color?: string;
-  label?: string;
 };
 type HelpLegendItem = {
   label: string;
@@ -151,10 +150,10 @@ const helpSections: HelpSection[] = [
   {
     id: "largeRoads",
     icon: "speed",
-    title: "Hastigheter",
+    title: "Höga hastigheter",
     body: [
-      "Hastighetslagret visar just nu större vägar och vägavsnitt med hastighetsgräns 90 km/h eller högre. Det används bland annat när du vill undvika motorvägar eller snabbare vägar där det är möjligt.",
-      "Det betyder inte att vägen är farlig, bara att körmiljön kan kännas mer intensiv. Lägre hastigheter visas inte i det här lagret ännu.",
+      "Lagret visar skyltade hastigheter 80 km/h och högre som diskreta badges. Linjerna lämnas till rutter, risk och trafikflöde, så du kan läsa hastigheten ovanpå en föreslagen rutt utan att kartan blir rörig.",
+      "Det betyder inte att vägen är farlig, bara att körmiljön kan kännas mer intensiv. Lägre hastigheter visas inte i det här lagret.",
     ],
     legend: [],
   },
@@ -322,6 +321,7 @@ export default function Map() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLoadedRef = useRef(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [infoBoxOpen, setInfoBoxOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -1086,7 +1086,8 @@ export default function Map() {
       )}
       <div className={styles.controls}>
         <InfoBox
-          onOpenHelp={() => setInfoOpen(true)}
+          open={infoBoxOpen}
+          onToggle={() => setInfoBoxOpen((v) => !v)}
           updatedText={liveUpdatedText(eventStats?.latestLastSeen ?? null, now)}
         />
         <div
@@ -1195,7 +1196,7 @@ export default function Map() {
           onToggle={() => setDisturbancesOn((v) => !v)}
         />
         <LayerIconButton
-          label="Hastigheter"
+          label="Höga hastigheter"
           icon="speed"
           on={largeRoadsOn}
           onToggle={() => setLargeRoadsOn((v) => !v)}
@@ -1775,14 +1776,6 @@ function HelpPanel({
 }
 
 function HelpLegendSwatch({ swatch }: { swatch: HelpLegendSwatch }) {
-  if (swatch.kind === "badge") {
-    return (
-      <span className={styles.helpLegendBadge} style={{ borderColor: swatch.color }}>
-        {swatch.label}
-      </span>
-    );
-  }
-
   return (
     <span
       className={`${styles.helpLegendSwatch} ${styles[`helpLegendSwatch_${swatch.kind}`]}`}
@@ -1793,25 +1786,29 @@ function HelpLegendSwatch({ swatch }: { swatch: HelpLegendSwatch }) {
 }
 
 function InfoBox({
-  onOpenHelp,
+  open,
+  onToggle,
   updatedText,
 }: {
-  onOpenHelp: () => void;
+  open: boolean;
+  onToggle: () => void;
   updatedText: string;
 }) {
+  const handleBoxClick = open ? undefined : onToggle;
   return (
     <div
-      className={styles.infoBox}
-      onClick={onOpenHelp}
-      role="button"
-      tabIndex={0}
+      className={`${styles.infoBox} ${open ? styles.infoBoxOpen : ""}`}
+      onClick={handleBoxClick}
+      role={open ? "dialog" : "button"}
+      tabIndex={open ? undefined : 0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpenHelp();
+          onToggle();
         }
       }}
-      aria-label="Öppna hjälp om data och kartlager"
+      aria-expanded={open}
+      aria-label={open ? undefined : "Öppna kort information om tjänsten"}
     >
       <div className={styles.infoBoxHeader}>
         <img
@@ -1824,17 +1821,29 @@ function InfoBox({
           className={styles.infoBoxIconBtn}
           onClick={(e) => {
             e.stopPropagation();
-            onOpenHelp();
+            onToggle();
           }}
-          aria-label="Öppna hjälp"
+          aria-label={open ? "Stäng" : "Öppna"}
         >
-          <RoadOrXIcon expanded={false} />
+          <RoadOrXIcon expanded={open} />
         </button>
       </div>
       <p className={styles.infoBoxIntro}>
         För dig som känner oro i trafiken och vill planera din resa med mer kontroll, lugn och tillit.
       </p>
       <p className={styles.infoBoxUpdated}>{updatedText}</p>
+      <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
+        <div className={styles.expanderInner}>
+          <div className={styles.infoBoxBody}>
+            <p>
+              SäkraVägar finns för dig som vill känna mer kontroll innan du sätter dig bakom ratten. Genom att se rutter, trafikläge och vägarnas karaktär i lugn takt kan resan bli lättare att förstå innan den börjar.
+            </p>
+            <p>
+              Målet är inte att lova en helt riskfri väg, utan att ge ett tryggare beslutsstöd: välj det alternativ som känns rimligt för dig, även när det inte alltid är det snabbaste.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

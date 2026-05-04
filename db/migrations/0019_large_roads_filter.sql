@@ -1,7 +1,7 @@
--- Publik bbox-RPC för trygghetsfiltret "Stora vägar".
+-- Publik bbox-RPC för trygghetsfiltret "Höga hastigheter".
 --
 -- Förväntar sig att `scripts/import-large-roads.sh` har importerat:
--- - nvdb_large_roads_speed: Hastighetsgräns >= 90
+-- - nvdb_large_roads_speed: Hastighetsgräns >= 80
 -- - nvdb_large_roads_type: valda Vägtyp-klasser
 
 create index if not exists nvdb_large_roads_speed_geom_idx
@@ -29,7 +29,7 @@ select
   length_m,
   geom
 from nvdb_large_roads_speed
-where speed_limit >= 90
+where speed_limit >= 80
 
 union all
 

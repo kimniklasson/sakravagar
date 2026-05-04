@@ -60,10 +60,11 @@ Numrera i ordning: `0025_*.sql`, `0026_*.sql` osv. En ADR-post i `docs/decisions
 - `0011_segment_detail_v2.sql` — popupdetaljer och dedup.
 - `0014_correct_dedup_strategy.sql` — `fid`-baserad risk i stället för `element_id`.
 - `0018_live_disturbances.sql` — separat störningslager.
-- `0019_large_roads_filter.sql` — hastighets-/stora-vägar-filter.
+- `0019_large_roads_filter.sql` — höghastighetsfilter från Lastkajen.
 - `0020_live_traffic_flow.sql` till `0022_stabilize_flow_segments.sql` — TrafficFlow.
 - `0023_security_limits_dedup.sql` — publika grants, limits och dedupad risk-MV.
 - `0024_security_invoker_public_views.sql` — security-invoker på publika vyer skapade efter `0003`.
+- `0025_high_speed_badges_80.sql` — utökar kartlagret Höga hastigheter från 90+ till 80+ efter omimport.
 
 ## Dataregler
 

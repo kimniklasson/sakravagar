@@ -49,11 +49,11 @@ Lager som kommer in blir typiskt:
 
 ÅDT uppdateras årligen. Vägnätet ändras sällan. Ingen poäng att polla — vi kör `import-nvdb.sh` en gång per år när nya mätdata släppts.
 
-## `import-large-roads.sh` — importera trygghetsfiltret "Stora vägar"
+## `import-large-roads.sh` — importera trygghetsfiltret "Höga hastigheter"
 
 Importerar bara de rader som behövs från Lastkajen-paketet `sakravagar_filter_*.gpkg`:
 
-- `Hastighetsgräns` där hastighet är 90 km/h eller högre
+- `Hastighetsgräns` där hastighet är 80 km/h eller högre
 - `Vägtyp` där typen är `Motorväg`, `Motortrafikled`, `Motortrafikled mötesfri`, `4-fältsväg` eller `Vanlig väg mötesfri`
 
 Detta undviker att hela hastighetslagret på ~2,2 miljoner rader hamnar i Supabase.
@@ -66,7 +66,7 @@ set -a && . .env && set +a
 Efter import:
 
 ```sh
-/opt/homebrew/opt/libpq/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/0019_large_roads_filter.sql
+/opt/homebrew/opt/libpq/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/0025_high_speed_badges_80.sql
 ```
 
 Skapar:

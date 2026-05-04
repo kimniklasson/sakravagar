@@ -62,7 +62,7 @@ web/
 - `/api/adt` — ÅDT/flöde via `adt_in_bbox`.
 - `/api/traffic-flow` — aktiva TrafficFlow-mätningar snappade till segment.
 - `/api/disturbances` — aktiva vägarbeten/kö-/trafikstörningar.
-- `/api/large-roads` — vägsegment för hastighet/stora-vägar-filter.
+- `/api/large-roads` — höghastighetssegment för badge-lagret och ruttfiltrets scoring.
 - `/api/geocode` — Nominatim-proxy för svensk search/reverse.
 - `/api/route` — routingproxy. Använder GraphHopper om env finns, annars OSRM.
 - `/api/segment` — popupdetaljer för vägsegment.
@@ -76,7 +76,7 @@ Ruttplaneraren bor i `components/Map/Map.tsx`. Den geocodar `Från`/`Till`, rita
 Aktiva "Undvik om möjligt"-filter:
 
 - `Vägar med olyckshistorik`
-- `Höga hastigheter (90+)`
+- `Höga hastigheter`
 - `Störningar (kö/vägarbeten)`
 
 GraphHopper påverkar höga hastigheter via custom model. Olyckshistorik och störningar skickas också in som dynamiska penalty zones när deras filter är aktiva, och poängsätts efteråt för ranking/exponering i UI:t.
