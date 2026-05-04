@@ -470,7 +470,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-height: 0;
   color: var(--color-white);
 }
@@ -481,11 +481,6 @@
 
 .routePanel {
   position: relative;
-  border-radius: 8px;
-  background: rgba(85, 85, 85, 0.3);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  padding: 24px;
   flex-shrink: 0;
 }
 
@@ -496,25 +491,14 @@
   gap: 1px;
 }
 
-.routeStops::before {
-  content: "";
-  position: absolute;
-  top: 30px;
-  bottom: 30px;
-  left: 36px;
-  z-index: 0;
-  border-left: 1px dotted rgba(255, 255, 255, 0.45);
-  pointer-events: none;
-}
-
 .routeStopGroup {
   position: relative;
-  z-index: 1;
   display: flex;
   flex-direction: column;
 }
 
 .routeInputRow {
+  position: relative;
   display: flex;
   align-items: center;
   min-height: 40px;
@@ -525,15 +509,15 @@
 }
 
 .routeInputRowFirst {
-  border-radius: 4px 4px 0 0;
+  border-radius: 8px 8px 0 0;
 }
 
 .routeInputRowLast {
-  border-radius: 0 0 4px 4px;
+  border-radius: 0 0 8px 8px;
 }
 
 .routeInputRowFirst.routeInputRowLast {
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .routeSuggestions {
@@ -551,7 +535,7 @@
   display: block;
   width: 100%;
   min-height: 40px;
-  padding: 10px 16px 9px 50px;
+  padding: 10px 16px 9px;
   border: 0;
   background: rgba(34, 34, 34, 0.6);
   color: rgba(255, 255, 255, 0.6);
@@ -561,7 +545,8 @@
 }
 
 .routeSuggestion:hover,
-.routeSuggestion:focus-visible {
+.routeSuggestion:focus-visible,
+.routeSuggestionActive {
   background: #222222;
   color: var(--color-white);
   outline: none;
@@ -602,6 +587,8 @@
 }
 
 .routeCloseIcon {
+  width: 12px;
+  height: 12px;
   color: var(--color-white);
   mask-image: url("/icons/close-circle.svg");
   -webkit-mask-image: url("/icons/close-circle.svg");
@@ -652,40 +639,41 @@
   cursor: grabbing;
 }
 
-.routePositionBtn {
-  position: absolute;
-  top: 56px;
-  right: 64px;
-  left: 48px;
-  z-index: 2;
+.routePositionSuggestion {
+  composes: type-medium from global;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 12px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 1px;
+  padding: 10px 16px 9px;
   border: 0;
   border-radius: 4px;
-  background: rgba(17, 17, 17, 0.7);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  color: var(--color-white);
+  background: rgba(34, 34, 34, 0.6);
+  color: rgba(255, 255, 255, 0.72);
+  font-family: var(--font-univers);
+  text-align: left;
   cursor: pointer;
-  transform-origin: top left;
-  animation: routePositionIn 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.routePositionBtn:disabled {
+.routePositionSuggestion:hover,
+.routePositionSuggestion:focus-visible,
+.routePositionSuggestion.routeSuggestionActive {
+  background: #222222;
+  color: var(--color-white);
+  outline: none;
+}
+
+.routePositionSuggestion:disabled {
   cursor: wait;
   opacity: 0.82;
-}
-
-.routePositionLabel {
-  composes: type-small from global;
-  text-transform: uppercase;
 }
 
 .routePositionIcon {
   width: 12px;
   height: 12px;
+  flex-shrink: 0;
 }
 
 .routeActions {
@@ -811,7 +799,7 @@
 }
 
 .routeAvoidSection {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
 .routeAvoidHeading {
@@ -838,6 +826,8 @@
   border: 0;
   border-radius: 4px;
   background: rgba(17, 17, 17, 0.68);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   color: var(--color-white);
   font-family: var(--font-univers);
   text-transform: uppercase;
@@ -890,6 +880,7 @@
   min-height: 0;
   flex-direction: column;
   gap: 2px;
+  margin-top: 24px;
   border-radius: 8px;
   overflow-y: auto;
   scrollbar-width: none;
@@ -917,11 +908,12 @@
 }
 
 .routeAlternativeCard {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
   gap: 16px;
   width: 100%;
-  padding: 20px 24px;
+  padding: 16px 16px 16px 38px;
   border: 0;
   border-radius: 8px;
   background: rgba(85, 85, 85, 0.3);
@@ -934,19 +926,34 @@
   transition: background-color 150ms ease;
 }
 
+.routeAlternativeCard::before {
+  content: "";
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  left: 16px;
+  width: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .routeAlternativeCard:hover,
 .routeAlternativeCard:focus-visible {
-  background: rgba(85, 85, 85, 0.5);
+  background: rgba(85, 85, 85, 0.3);
   outline: none;
 }
 
 .routeAlternativeCardSelected {
-  background: #555555;
+  background: rgba(85, 85, 85, 0.3);
+}
+
+.routeAlternativeCardSelected::before {
+  background: var(--color-white);
 }
 
 .routeAlternativeCardSelected:hover,
 .routeAlternativeCardSelected:focus-visible {
-  background: #555555;
+  background: rgba(85, 85, 85, 0.3);
 }
 
 .routeAlternativeCopy,
@@ -1023,18 +1030,6 @@
 
   100% {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes routePositionIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 

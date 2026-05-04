@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
@@ -929,7 +930,7 @@ export default function Map() {
   }, [handlePrimaryRouteDrag, handlePrimaryRoutePreview]);
 
   useEffect(() => {
-    const readyForRoute = routeStops.length >= 2 && routeStops.every((stop) => stop.label.trim().length >= 2);
+    const readyForRoute = routeStops.length >= 2 && routeStops.every((stop) => stop.coordinates !== null);
     if (!readyForRoute || loadingRouteStopId || geocodingStopId || routeLoading || routeCompareLoading) return;
 
     const routeKey = routeStops
@@ -1397,6 +1398,7 @@ function RoutePlannerBox({
   const showPillSpinner = routeWorking && activeAvoidCount(routeAvoids) > 0;
   const routeAlternativesRef = useRef<HTMLDivElement | null>(null);
   const [routeAlternativesScrollable, setRouteAlternativesScrollable] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const element = routeAlternativesRef.current;
@@ -1423,6 +1425,57 @@ function RoutePlannerBox({
   const activeStopLoading = activeStop
     ? loadingStopId === activeStop.id || geocodingStopId === activeStop.id
     : false;
+  const activeSuggestions = activeStop ? geocodeResultsByStop[activeStop.id] ?? [] : [];
+  const activeShowsPositionSuggestion = Boolean(
+    activeStop && activeStop.id === stops[0]?.id && !activeStop.label,
+  );
+  const activeSuggestionCount = activeSuggestions.length + (activeShowsPositionSuggestion ? 1 : 0);
+
+  useEffect(() => {
+    setActiveSuggestionIndex(null);
+  }, [activeStopId, activeStop?.label, activeSuggestionCount]);
+
+  const selectSuggestionByIndex = (
+    stopId: string,
+    suggestions: GeocodeResult[],
+    showPositionSuggestion: boolean,
+    index: number,
+  ) => {
+    if (showPositionSuggestion && index === 0) {
+      onUsePosition(stopId);
+      return;
+    }
+
+    const resultIndex = showPositionSuggestion ? index - 1 : index;
+    const result = suggestions[resultIndex];
+    if (result) onSelectGeocode(stopId, result);
+  };
+
+  const handleSuggestionKeyDown = (
+    e: ReactKeyboardEvent<HTMLInputElement>,
+    stopId: string,
+    suggestions: GeocodeResult[],
+    showPositionSuggestion: boolean,
+  ) => {
+    const count = suggestions.length + (showPositionSuggestion ? 1 : 0);
+    if (count === 0) return;
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveSuggestionIndex((current) => {
+        if (current === null) return e.key === "ArrowDown" ? 0 : count - 1;
+        return e.key === "ArrowDown"
+          ? (current + 1) % count
+          : (current - 1 + count) % count;
+      });
+      return;
+    }
+
+    if (e.key === "Enter" && activeSuggestionIndex !== null) {
+      e.preventDefault();
+      selectSuggestionByIndex(stopId, suggestions, showPositionSuggestion, activeSuggestionIndex);
+    }
+  };
 
   return (
     <div
@@ -1441,6 +1494,9 @@ function RoutePlannerBox({
             const loading = loadingStopId === stop.id || geocodingStopId === stop.id;
             const placeholder = isFirst ? "Välj startpunkt..." : isLast ? "Välj destination..." : "Stopp";
             const suggestions = activeStopId === stop.id ? geocodeResultsByStop[stop.id] ?? [] : [];
+            const showPositionSuggestion =
+              isFirst && activeStop?.id === stop.id && !stop.label;
+            const suggestionListId = `route-${stop.id}-suggestions`;
             return (
               <div
                 key={stop.id}
@@ -1468,8 +1524,22 @@ function RoutePlannerBox({
                     value={stop.label}
                     onFocus={() => onFocusStop(stop.id)}
                     onChange={(e) => onChangeStop(stop.id, e.target.value)}
+                    onKeyDown={(e) =>
+                      handleSuggestionKeyDown(e, stop.id, suggestions, showPositionSuggestion)
+                    }
                     placeholder={placeholder}
                     aria-label={placeholder}
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-controls={
+                      suggestions.length > 0 || showPositionSuggestion ? suggestionListId : undefined
+                    }
+                    aria-expanded={suggestions.length > 0 || showPositionSuggestion}
+                    aria-activedescendant={
+                      activeStopId === stop.id && activeSuggestionIndex !== null
+                        ? `route-${stop.id}-suggestion-${activeSuggestionIndex}`
+                        : undefined
+                    }
                   />
                   {stop.label && (
                     <button
@@ -1492,39 +1562,52 @@ function RoutePlannerBox({
                     <span className={`${styles.routeIcon} ${styles.routeDragIcon}`} aria-hidden="true" />
                   </button>
                 </div>
+                {showPositionSuggestion && (
+                  <button
+                    id={`route-${stop.id}-suggestion-0`}
+                    type="button"
+                    className={`${styles.routePositionSuggestion} ${
+                      activeSuggestionIndex === 0 ? styles.routeSuggestionActive : ""
+                    }`}
+                    disabled={activeStopLoading}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setActiveSuggestionIndex(0)}
+                    onFocus={() => setActiveSuggestionIndex(0)}
+                    onClick={() => onUsePosition(stop.id)}
+                  >
+                    <LocationIcon className={styles.routePositionIcon} />
+                    <span>
+                      {activeStopLoading ? "Hämtar plats..." : "Din plats"}
+                    </span>
+                  </button>
+                )}
                 {suggestions.length > 0 && (
-                  <div className={styles.routeSuggestions}>
-                    {suggestions.map((result) => (
+                  <div id={suggestionListId} className={styles.routeSuggestions}>
+                    {suggestions.map((result, suggestionIndex) => {
+                      const optionIndex = showPositionSuggestion ? suggestionIndex + 1 : suggestionIndex;
+                      return (
                       <button
                         key={result.id}
+                        id={`route-${stop.id}-suggestion-${optionIndex}`}
                         type="button"
-                        className={styles.routeSuggestion}
+                        className={`${styles.routeSuggestion} ${
+                          activeSuggestionIndex === optionIndex ? styles.routeSuggestionActive : ""
+                        }`}
                         onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setActiveSuggestionIndex(optionIndex)}
+                        onFocus={() => setActiveSuggestionIndex(optionIndex)}
                         onClick={() => onSelectGeocode(stop.id, result)}
                       >
                         {result.shortLabel}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             );
           })}
           </div>
-        {activeStop && activeStop.id === stops[0]?.id && !activeStop.label && (
-          <button
-            type="button"
-            className={styles.routePositionBtn}
-            disabled={activeStopLoading}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onUsePosition(activeStop.id)}
-          >
-            <LocationIcon className={styles.routePositionIcon} />
-            <span className={styles.routePositionLabel}>
-              {activeStopLoading ? "Hämtar plats..." : "Din plats"}
-            </span>
-          </button>
-        )}
         <div className={styles.routeAvoidSection}>
           <div className={styles.routeAvoidHeading}>Undvik om möjligt</div>
           <div className={styles.routeAvoidList}>

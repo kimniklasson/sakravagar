@@ -34,18 +34,19 @@ Vänster infobox expanderar lokalt nedåt med kort, syftesdriven tjänsteinfo. D
 Ruttplanerarstatus:
 
 - `Från`/`Till`-fält finns i `RoutePlannerBox` i `web/components/Map/Map.tsx`.
-- Inputfälten använder `myposition.svg` och `mydestination.svg`, large text och dotted linje mellan ikonerna.
-- `Din plats` visas bara när `Från adress` faktiskt har fokus och är tomt. Den ligger som absolut overlay under första fältet, startar ungefär vid textkolumnen och animerar in.
+- Inputfälten använder `myposition.svg` och `mydestination.svg`, large text och 8 px hörnradie på fältblocket. Det finns ingen separat container runt inputfält och pills.
+- `Din plats` visas bara när `Från adress` faktiskt har fokus och är tomt. Den ligger som en vanlig resultatrad mellan start- och destinationsfältet.
 - GPS-flowet använder `navigator.geolocation`, visar CSS-loader och `Hämtar plats...` under hämtning, sätter koordinat direkt och uppdaterar label via reverse geocoding om möjligt. Om plats nekas/timeoutar eller reverse geocoding misslyckas visas begripligt felmeddelande i ruttpanelen.
-- Textinput debouncar mot `/api/geocode`, visar upp till 5 svenska träffar och sätter stop-koordinat när användaren väljer en träff. Om användaren bara skriver färdigt använder auto-routing bästa geocoding-träffen för stopp som saknar koordinat.
+- Textinput debouncar mot `/api/geocode`, visar upp till 5 svenska träffar och sätter stop-koordinat när användaren väljer en träff. Upp/ned-tangenter markerar resultatrader och Enter/retur väljer markerad rad.
+- Auto-routing startar bara när båda stopp redan har koordinater, alltså efter explicit geocoding-val eller GPS. Den ska inte autovälja första träffen medan användaren skriver.
 - Geocoding-resultat visas som korta etiketter (`väg/plats, ort`) i UI:t. Backend rankar träffar efter hur väl den visade etiketten matchar queryn, och behåller föregående träffar under laddning så listan inte blinkar tom vid svaga mellanqueries som `Hästsk`.
 - Primär ruttritning kan dras direkt på kartan. Hover visar `Dra för att ändra rutt` och en liten punkt på ruttlinjen. Under drag körs en throttlad preview via `/api/route` med `preview: true`, vilket hämtar en GraphHopper/OSRM-rutt utan Supabase-score. Vid släpp ersätts eventuell tidigare dold via-punkt med den nya och `/api/route` räknar om rutt + risk/exposure.
 - Draghandles har enkel HTML drag/drop-reorder av stop-arrayen. Rensa-knappen tömmer Från/Till och tar bort mellanliggande dolda via-punkter.
 - Normalflödet är att rutten ritas automatiskt när Från/Till har tolkats.
-- `Undvik om möjligt` visas som pills för `Olycksrisk`, `Störningar` och `Höga hastigheter`. Pills kan väljas innan Från/Till fylls i och ligger kvar genom input/geocode. Undvik-score för höga hastigheter räknar fortsatt 90+ km/h-exponering.
+- `Undvik om möjligt` visas som pills för `Olycksrisk`, `Störningar` och `Höga hastigheter`, direkt mot kartbakgrunden 16 px under inputfälten. Pills kan väljas innan Från/Till fylls i och ligger kvar genom input/geocode. Undvik-score för höga hastigheter räknar fortsatt 90+ km/h-exponering.
 - Aktiv filterladdning visas som liten spinner i aktiva pills. Det finns ingen separat stor `Jämför alternativ...`-box.
 - Tidsbudget-slidern är borttagen ur UI:t. Utan aktiva filter visas bara snabbaste rutten. Med aktiva filter öppnas kandidatläget och användaren får se alla relevanta alternativ vi kan hitta.
-- Ruttalternativ visas som scrollande kort under ruttpanelen. Varje kort visar titel, kort motivering, tid och distans.
+- Ruttalternativ visas som scrollande kort 24 px under pillsen. Varje kort visar titel, kort motivering, tid och distans, har 16 px padding och ett 6 px vänsterstreck. Vald rutt indikeras med vitt streck; övriga har 30% vitt streck. Kortens bakgrund är konsekvent `#555` vid 30% opacitet med 16 px blur även för valt alternativ.
 - Alternativlistan sorteras på tid och byter inte ordning när användaren väljer ett kort. Vald rutt är separat state från listordningen.
 - Hover/focus på ett alternativ markerar motsvarande linje på kartan utan att ändra listordningen.
 - Bottenfade i alternativlistan visas bara när listan faktiskt har overflow.
