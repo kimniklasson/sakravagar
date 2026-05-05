@@ -327,15 +327,16 @@ export default function Map() {
   const mapLoadedRef = useRef(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoBoxOpen, setInfoBoxOpen] = useState(false);
+  const [infoBoxCompact, setInfoBoxCompact] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("risk");
   const [accidentsRiskOn, setAccidentsRiskOn] = useState(false);
-  const [adtOn, setAdtOn] = useState(true);
-  const [disturbancesOn, setDisturbancesOn] = useState(true);
-  const [trafficFlowOn, setTrafficFlowOn] = useState(true);
-  const [largeRoadsOn, setLargeRoadsOn] = useState(true);
+  const [adtOn, setAdtOn] = useState(false);
+  const [disturbancesOn, setDisturbancesOn] = useState(false);
+  const [trafficFlowOn, setTrafficFlowOn] = useState(false);
+  const [largeRoadsOn, setLargeRoadsOn] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
   const [routeStops, setRouteStops] = useState<RouteStop[]>(initialRouteStops);
   const [activeRouteStopId, setActiveRouteStopId] = useState<string | null>(null);
@@ -550,6 +551,12 @@ export default function Map() {
     const id = window.setTimeout(() => setRouteNoticeText(null), 5000);
     return () => window.clearTimeout(id);
   }, [routeNoticeText]);
+
+  useEffect(() => {
+    if (routeLines.length === 0 || infoBoxCompact) return;
+    setInfoBoxCompact(true);
+    setInfoBoxOpen(false);
+  }, [infoBoxCompact, routeLines.length]);
 
   useEffect(() => () => {
     if (routeCompareTimerRef.current !== null) {
@@ -1087,6 +1094,12 @@ export default function Map() {
   return (
     <>
       <div ref={containerRef} className={styles.map} />
+      <div
+        className={`${styles.routeLoadingOverlay} ${
+          routeLoading || routeCompareLoading ? styles.routeLoadingOverlayActive : ""
+        }`}
+        aria-hidden="true"
+      />
       {infoOpen && (
         <button
           type="button"
@@ -1098,13 +1111,12 @@ export default function Map() {
       <div className={styles.controls}>
         <InfoBox
           open={infoBoxOpen}
+          compact={infoBoxCompact}
           onToggle={() => setInfoBoxOpen((v) => !v)}
           updatedText={liveUpdatedText(eventStats?.latestLastSeen ?? null, now)}
         />
         <div
-          className={`${styles.routeControls} ${
-            routeAlternativesVisible ? styles.routeControlsWithAlternatives : ""
-          }`}
+          className={styles.routeControls}
         >
           <RoutePlannerBox
             stops={routeStops}
@@ -1114,15 +1126,9 @@ export default function Map() {
             geocodeResultsByStop={geocodeResultsByStop}
             routeError={routeError}
             routeNoticeText={routeNoticeText}
-          routeAvoids={routeAvoids}
-          routes={routeLines}
-          baselineRoute={routeCandidates[0] ?? null}
-          selectedRouteId={selectedRouteId}
-          revealSelectedRouteRef={shouldRevealSelectedRouteRef}
-          routeWorking={routeLoading || routeCompareLoading}
-          onSelectRoute={selectRouteById}
-          onPreviewRoute={previewRouteById}
-          onFocusStop={setActiveRouteStopId}
+            routeAvoids={routeAvoids}
+            routeWorking={routeLoading || routeCompareLoading}
+            onFocusStop={setActiveRouteStopId}
             onDeactivate={() => setActiveRouteStopId(null)}
             onChangeStop={setRouteStopLabel}
             onClearStop={clearRouteStop}
@@ -1138,6 +1144,15 @@ export default function Map() {
           />
         </div>
       </div>
+      <RouteAlternativesTray
+        routes={routeLines}
+        baselineRoute={routeCandidates[0] ?? null}
+        routeAvoids={routeAvoids}
+        selectedRouteId={selectedRouteId}
+        revealSelectedRouteRef={shouldRevealSelectedRouteRef}
+        onSelectRoute={selectRouteById}
+        onPreviewRoute={previewRouteById}
+      />
       <HelpPanel
         open={infoOpen}
         activeSectionId={activeHelpSectionId}
@@ -1145,7 +1160,11 @@ export default function Map() {
         updatedText={liveUpdatedText(eventStats?.latestLastSeen ?? null, now)}
         periodDays={eventStats?.periodDays ?? null}
       />
-      <div className={`${styles.rightControls} ${infoOpen ? styles.rightControlsHelpOpen : ""}`}>
+      <div
+        className={`${styles.rightControls} ${infoOpen ? styles.rightControlsHelpOpen : ""} ${
+          routeAlternativesVisible ? styles.rightControlsWithRouteResults : ""
+        }`}
+      >
         <button
           type="button"
           className={`${styles.iconBtn} ${atUserLocation ? styles.iconBtnActive : ""}`}
@@ -1419,13 +1438,7 @@ function RoutePlannerBox({
   routeError,
   routeNoticeText,
   routeAvoids,
-  routes,
-  baselineRoute,
-  selectedRouteId,
-  revealSelectedRouteRef,
   routeWorking,
-  onSelectRoute,
-  onPreviewRoute,
   onFocusStop,
   onDeactivate,
   onChangeStop,
@@ -1444,13 +1457,7 @@ function RoutePlannerBox({
   routeError: string | null;
   routeNoticeText: string | null;
   routeAvoids: RouteAvoidState;
-  routes: RouteLine[];
-  baselineRoute: RouteLine | null;
-  selectedRouteId: string | null;
-  revealSelectedRouteRef: React.MutableRefObject<boolean>;
   routeWorking: boolean;
-  onSelectRoute: (routeId: string) => void;
-  onPreviewRoute: (routeId: string | null) => void;
   onFocusStop: (id: string) => void;
   onDeactivate: () => void;
   onChangeStop: (id: string, label: string) => void;
@@ -1463,44 +1470,8 @@ function RoutePlannerBox({
 }) {
   const visibleStops = stops.filter((_, index) => index === 0 || index === stops.length - 1);
   const activeStop = visibleStops.find((stop) => stop.id === activeStopId) ?? null;
-  const showRouteDetails = routes.length > 0;
   const showPillSpinner = routeWorking && activeAvoidCount(routeAvoids) > 0;
-  const routeAlternativesRef = useRef<HTMLDivElement | null>(null);
-  const [routeAlternativesScrollable, setRouteAlternativesScrollable] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    const element = routeAlternativesRef.current;
-    if (!element) {
-      setRouteAlternativesScrollable(false);
-      return;
-    }
-
-    const update = () => {
-      setRouteAlternativesScrollable(element.scrollHeight > element.clientHeight + 1);
-    };
-
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    for (const child of Array.from(element.children)) observer.observe(child);
-    window.addEventListener("resize", update);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [routes]);
-
-  useLayoutEffect(() => {
-    if (!selectedRouteId || !revealSelectedRouteRef.current) return;
-    revealSelectedRouteRef.current = false;
-
-    const selected = routeAlternativesRef.current?.querySelector<HTMLElement>(
-      `[data-route-id="${CSS.escape(selectedRouteId)}"]`,
-    );
-    selected?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [selectedRouteId, revealSelectedRouteRef]);
 
   const activeStopLoading = activeStop
     ? loadingStopId === activeStop.id || geocodingStopId === activeStop.id
@@ -1559,7 +1530,7 @@ function RoutePlannerBox({
 
   return (
     <div
-      className={`${styles.routeBox} ${showRouteDetails ? styles.routeBoxWithAlternatives : ""}`}
+      className={styles.routeBox}
       onBlur={(e) => {
         const next = e.relatedTarget;
         if (next instanceof Node && e.currentTarget.contains(next)) return;
@@ -1699,6 +1670,7 @@ function RoutePlannerBox({
                 onClick={() => onToggleAvoid(option)}
                 aria-pressed={routeAvoids[option]}
               >
+                <span className={styles.routeAvoidCheckbox} aria-hidden="true" />
                 <span>{routeAvoidLabels[option]}</span>
                 {showPillSpinner && routeAvoids[option] && (
                   <span className={styles.routeAvoidPillSpinner} aria-hidden="true" />
@@ -1719,47 +1691,156 @@ function RoutePlannerBox({
           </div>
         )}
       </div>
-      {showRouteDetails && (
-        <div
-          ref={routeAlternativesRef}
-          className={`${styles.routeAlternatives} ${
-            routeAlternativesScrollable ? styles.routeAlternativesScrollable : ""
-          }`}
-          aria-live="polite"
-        >
-          {routes.map((route, index) => {
-              const copy = routeAlternativeCopy(route, index, baselineRoute, routeAvoids);
-              const selected = route.id === selectedRouteId;
-              return (
-                <button
-                  key={route.id}
-                  type="button"
-                  data-route-id={route.id}
-                  className={`${styles.routeAlternativeCard} ${selected ? styles.routeAlternativeCardSelected : ""}`}
-                  onClick={() => onSelectRoute(route.id)}
-                  onMouseEnter={() => onPreviewRoute(route.id)}
-                  onMouseLeave={() => onPreviewRoute(null)}
-                  onFocus={() => onPreviewRoute(route.id)}
-                  onBlur={() => onPreviewRoute(null)}
-                  aria-pressed={selected}
-                >
-                  <span className={styles.routeAlternativeCopy}>
-                    <span className={styles.routeAlternativeTitle}>{copy.title}</span>
-                    <span className={styles.routeAlternativeDescription}>{copy.description}</span>
-                  </span>
-                  <span className={styles.routeAlternativeMetrics}>
-                    <span className={styles.routeAlternativeTime}>
-                      {formatRouteDuration(route.durationSeconds)}
-                    </span>
-                    <span className={styles.routeAlternativeDistance}>
-                      {formatRouteDistance(route.distanceMeters)}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-        </div>
-      )}
+    </div>
+  );
+}
+
+function RouteAlternativesTray({
+  routes,
+  baselineRoute,
+  routeAvoids,
+  selectedRouteId,
+  revealSelectedRouteRef,
+  onSelectRoute,
+  onPreviewRoute,
+}: {
+  routes: RouteLine[];
+  baselineRoute: RouteLine | null;
+  routeAvoids: RouteAvoidState;
+  selectedRouteId: string | null;
+  revealSelectedRouteRef: React.MutableRefObject<boolean>;
+  onSelectRoute: (routeId: string) => void;
+  onPreviewRoute: (routeId: string | null) => void;
+}) {
+  const routeAlternativesRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    scrollLeft: number;
+    captured: boolean;
+  } | null>(null);
+  const wasDraggingRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!selectedRouteId || !revealSelectedRouteRef.current) return;
+    revealSelectedRouteRef.current = false;
+
+    const selected = routeAlternativesRef.current?.querySelector<HTMLElement>(
+      `[data-route-id="${CSS.escape(selectedRouteId)}"]`,
+    );
+    selected?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [selectedRouteId, revealSelectedRouteRef]);
+
+  useLayoutEffect(() => {
+    const element = routeAlternativesRef.current;
+    if (!element) return;
+
+    const update = () => {
+      document.documentElement.style.setProperty("--route-results-height", `${element.offsetHeight}px`);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    for (const child of Array.from(element.children)) observer.observe(child);
+    window.addEventListener("resize", update);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      document.documentElement.style.removeProperty("--route-results-height");
+    };
+  }, [routes]);
+
+  if (routes.length === 0) return null;
+
+  return (
+    <div
+      ref={routeAlternativesRef}
+      className={styles.routeAlternatives}
+      aria-live="polite"
+      onWheel={(e) => {
+        const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (delta === 0) return;
+        e.currentTarget.scrollLeft += delta;
+        e.preventDefault();
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        dragRef.current = {
+          pointerId: e.pointerId,
+          startX: e.clientX,
+          scrollLeft: e.currentTarget.scrollLeft,
+          captured: false,
+        };
+        wasDraggingRef.current = false;
+      }}
+      onPointerMove={(e) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const deltaX = e.clientX - drag.startX;
+        if (Math.abs(deltaX) > 8) {
+          wasDraggingRef.current = true;
+          if (!drag.captured) {
+            e.currentTarget.setPointerCapture(drag.pointerId);
+            drag.captured = true;
+          }
+        }
+        e.currentTarget.scrollLeft = drag.scrollLeft - deltaX;
+      }}
+      onPointerUp={(e) => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        if (drag?.captured && e.currentTarget.hasPointerCapture(drag.pointerId)) {
+          e.currentTarget.releasePointerCapture(drag.pointerId);
+        }
+      }}
+      onPointerCancel={(e) => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        if (drag?.captured && e.currentTarget.hasPointerCapture(drag.pointerId)) {
+          e.currentTarget.releasePointerCapture(drag.pointerId);
+        }
+      }}
+    >
+      {routes.map((route, index) => {
+        const copy = routeAlternativeCopy(route, index, baselineRoute, routeAvoids);
+        const selected = route.id === selectedRouteId;
+        return (
+          <button
+            key={route.id}
+            type="button"
+            data-route-id={route.id}
+            className={`${styles.routeAlternativeCard} ${selected ? styles.routeAlternativeCardSelected : ""}`}
+            style={{ animationDelay: `${index * 70}ms` }}
+            onClick={(e) => {
+              if (wasDraggingRef.current) {
+                e.preventDefault();
+                wasDraggingRef.current = false;
+                return;
+              }
+              onSelectRoute(route.id);
+            }}
+            onMouseEnter={() => onPreviewRoute(route.id)}
+            onMouseLeave={() => onPreviewRoute(null)}
+            onFocus={() => onPreviewRoute(route.id)}
+            onBlur={() => onPreviewRoute(null)}
+            aria-pressed={selected}
+          >
+            <span className={styles.routeAlternativeRail} aria-hidden="true" />
+            <span className={styles.routeAlternativeTop}>
+              <span className={styles.routeAlternativeTitle}>{copy.title}</span>
+              <span className={styles.routeAlternativeDistance}>
+                {formatRouteDistance(route.distanceMeters)}
+              </span>
+            </span>
+            <span className={styles.routeAlternativeTime}>
+              {formatRouteDuration(route.durationSeconds)}
+            </span>
+            <span className={styles.routeAlternativeDescription}>{copy.description}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1951,17 +2032,22 @@ function HelpLegendSwatch({ swatch }: { swatch: HelpLegendSwatch }) {
 
 function InfoBox({
   open,
+  compact,
   onToggle,
   updatedText,
 }: {
   open: boolean;
+  compact: boolean;
   onToggle: () => void;
   updatedText: string;
 }) {
+  const compactClosed = compact && !open;
   const handleBoxClick = open ? undefined : onToggle;
   return (
     <div
-      className={`${styles.infoBox} ${open ? styles.infoBoxOpen : ""}`}
+      className={`${styles.infoBox} ${open ? styles.infoBoxOpen : ""} ${
+        compactClosed ? styles.infoBoxCompact : ""
+      }`}
       onClick={handleBoxClick}
       role={open ? "dialog" : "button"}
       tabIndex={open ? undefined : 0}
@@ -1992,10 +2078,19 @@ function InfoBox({
           <RoadOrXIcon expanded={open} />
         </button>
       </div>
-      <p className={styles.infoBoxIntro}>
-        För dig som känner oro i trafiken och vill planera din resa med mer kontroll, lugn och tillit.
-      </p>
-      <p className={styles.infoBoxUpdated}>{updatedText}</p>
+      <div
+        className={`${styles.infoBoxIntroExpander} ${
+          compactClosed ? "" : styles.infoBoxIntroExpanderOpen
+        }`}
+        aria-hidden={compactClosed}
+      >
+        <div className={styles.infoBoxIntroInner}>
+          <p className={styles.infoBoxIntro}>
+            För dig som känner oro i trafiken och vill planera din resa med mer kontroll, lugn och tillit.
+          </p>
+          <p className={styles.infoBoxUpdated}>{updatedText}</p>
+        </div>
+      </div>
       <div className={`${styles.expander} ${open ? styles.expanderOpen : ""}`} aria-hidden={!open}>
         <div className={styles.expanderInner}>
           <div className={styles.infoBoxBody}>
