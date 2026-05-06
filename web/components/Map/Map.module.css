@@ -885,6 +885,7 @@
 
 .routeAvoidPill {
   composes: type-small from global;
+  position: relative;
   display: inline-flex;
   align-items: flex-end;
   justify-content: center;
@@ -899,6 +900,43 @@
   text-transform: uppercase;
   cursor: pointer;
   transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+.routeAvoidTooltip {
+  composes: type-m-small from global;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 3;
+  max-width: 160px;
+  padding: 6px 8px 7px;
+  border-radius: 4px;
+  background: var(--color-white);
+  color: var(--color-dark);
+  text-align: center;
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.routeAvoidTooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--color-white);
+  transform: translate(-50%, -5px) rotate(45deg);
+}
+
+.routeAvoidPill:hover .routeAvoidTooltip,
+.routeAvoidPill:focus-visible .routeAvoidTooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .routeAvoidPill:hover,
@@ -932,7 +970,7 @@
 }
 
 .routeAvoidPillOn .routeAvoidCheckbox {
-  background: rgba(85, 85, 85, 0.3);
+  background: var(--color-white);
 }
 
 .routeAvoidPillOn .routeAvoidCheckbox::after {
@@ -1017,7 +1055,7 @@
   display: flex;
   flex: 0 0 300px;
   flex-direction: column;
-  padding: 46px 20px 20px;
+  padding: 16px;
   border: 0;
   border-radius: 8px;
   background: rgba(85, 85, 85, 0.3);
@@ -1033,43 +1071,18 @@
   transition: background-color 150ms ease, color 150ms ease;
 }
 
-.routeAlternativeRail {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  left: 20px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.3);
-  transition: background-color 150ms ease;
-}
-
 .routeAlternativeCard:hover,
 .routeAlternativeCard:focus-visible {
   outline: none;
 }
 
-.routeAlternativeCard:hover .routeAlternativeRail,
-.routeAlternativeCard:focus-visible .routeAlternativeRail {
-  background: rgba(255, 255, 255, 0.5);
-}
-
 .routeAlternativeCardSelected {
-  background: rgba(85, 85, 85, 0.3);
-}
-
-.routeAlternativeCardSelected .routeAlternativeRail {
-  background: var(--color-white);
+  background: rgba(17, 17, 17, 0.76);
 }
 
 .routeAlternativeCardSelected:hover,
 .routeAlternativeCardSelected:focus-visible {
-  background: rgba(85, 85, 85, 0.3);
-}
-
-.routeAlternativeCardSelected:hover .routeAlternativeRail,
-.routeAlternativeCardSelected:focus-visible .routeAlternativeRail {
-  background: var(--color-white);
+  background: rgba(17, 17, 17, 0.76);
 }
 
 .routeAlternativeTop {
@@ -1085,17 +1098,6 @@
   min-width: 0;
 }
 
-.routeAlternativeDescription {
-  composes: type-medium from global;
-  margin-top: 16px;
-  color: rgba(255, 255, 255, 0.62);
-  transition: color 150ms ease;
-}
-
-.routeAlternativeCardSelected .routeAlternativeDescription {
-  color: var(--color-white);
-}
-
 .routeAlternativeTime {
   composes: type-large from global;
   margin-top: 0;
@@ -1108,6 +1110,102 @@
   color: rgba(255, 255, 255, 0.62);
   text-align: right;
   white-space: nowrap;
+}
+
+.routeAlternativeMetrics {
+  composes: type-m-small from global;
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+  color: var(--color-white);
+}
+
+.routeAlternativeMetricRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 12px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.routeAlternativeMetricLabelGroup {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.routeAlternativeMetricIcon {
+  position: relative;
+  display: block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.routeAlternativeMetricIcon_highSpeed {
+  background: #FF8C8C;
+}
+
+.routeAlternativeMetricIcon_bridges,
+.routeAlternativeMetricIcon_tunnels {
+  background: repeating-linear-gradient(
+    90deg,
+    #F23FC8 0,
+    #F23FC8 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+}
+
+.routeAlternativeMetricIcon_tunnels {
+  background: repeating-linear-gradient(
+    90deg,
+    #FF2F00 0,
+    #FF2F00 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+}
+
+.routeAlternativeMetricIcon_disturbances {
+  width: 0;
+  height: 0;
+  border-right: 4px solid transparent;
+  border-bottom: 8px solid #F27A3F;
+  border-left: 4px solid transparent;
+}
+
+.routeAlternativeMetricIcon_accidentHistory {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #FF2F00;
+}
+
+.routeAlternativeMetricIconMuted {
+  opacity: 0.55;
+  filter: grayscale(1);
+}
+
+.routeAlternativeMetricLabel {
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.routeAlternativeMetricValue {
+  color: var(--color-white);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.routeAlternativeMetricValuePositive {
+  color: #95FF97;
+}
+
+.routeAlternativeMetricValueMuted {
+  color: rgba(255, 255, 255, 0.48);
 }
 
 @keyframes routeAlternativeIn {
@@ -1218,21 +1316,33 @@
   top: 50%;
   right: calc(100% + 12px);
   max-width: min(240px, calc(100vw - 120px));
-  padding: 9px 12px 8px;
+  padding: 6px 8px 7px;
   border-radius: 4px;
-  background: rgba(17, 17, 17, 0.5);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  color: var(--color-white);
-  font-size: var(--type-small-size);
-  line-height: var(--type-small-line);
-  letter-spacing: var(--type-small-tracking);
-  text-transform: uppercase;
+  background: var(--color-white);
+  color: var(--color-dark);
+  font-size: var(--type-m-small-size);
+  line-height: var(--type-m-small-line);
+  letter-spacing: var(--type-m-small-tracking);
+  text-transform: none;
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
   transform: translate(8px, -50%);
-  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.layerIconBtn::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  width: 8px;
+  height: 8px;
+  background: var(--color-white);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(8px, -50%) rotate(45deg);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
 .layerIconBtn:hover,
@@ -1245,6 +1355,12 @@
 .layerIconBtn:focus-visible::before {
   opacity: 1;
   transform: translate(0, -50%);
+}
+
+.layerIconBtn:hover::after,
+.layerIconBtn:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%) rotate(45deg);
 }
 
 .layerIconBtnOn {
@@ -1614,6 +1730,7 @@
 }
 
 .iconBtn {
+  position: relative;
   width: var(--icon-btn-size);
   height: var(--icon-btn-size);
   padding: 0;
@@ -1633,8 +1750,55 @@
   transition: background-color 250ms ease, color 250ms ease;
 }
 
+.iconBtn::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 12px);
+  max-width: min(240px, calc(100vw - 120px));
+  padding: 6px 8px 7px;
+  border-radius: 4px;
+  background: var(--color-white);
+  color: var(--color-dark);
+  font-size: var(--type-m-small-size);
+  line-height: var(--type-m-small-line);
+  letter-spacing: var(--type-m-small-tracking);
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(8px, -50%);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.iconBtn::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  width: 8px;
+  height: 8px;
+  background: var(--color-white);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(8px, -50%) rotate(45deg);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
 .iconBtn:hover {
   color: var(--color-white);
+}
+
+.iconBtn:hover::before,
+.iconBtn:focus-visible::before {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.iconBtn:hover::after,
+.iconBtn:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%) rotate(45deg);
 }
 
 /* :active = mousedown→mouseup. transition: none gör att invertering snäpper

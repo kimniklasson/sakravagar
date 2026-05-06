@@ -36,7 +36,31 @@ export type RouteLine = {
     disturbances: number | null;
     bridgeMeters: number | null;
     tunnelMeters: number | null;
+    accidentHistoryEvents: number | null;
   };
+  annotations: RouteAnnotations;
+};
+
+export type RouteAnnotationSegmentKind = "highSpeed" | "bridges" | "tunnels";
+export type RouteAnnotationPointKind = "disturbances" | "accidentHistory";
+
+export type RouteAnnotationSegment = {
+  kind: RouteAnnotationSegmentKind;
+  geometry: GeoJSON.LineString;
+};
+
+export type RouteAnnotationPoint = {
+  kind: RouteAnnotationPointKind;
+  coordinates: [number, number];
+  category?: "roadwork" | "traffic";
+};
+
+export type RouteAnnotations = {
+  highSpeed: RouteAnnotationSegment[];
+  bridges: RouteAnnotationSegment[];
+  tunnels: RouteAnnotationSegment[];
+  disturbances: RouteAnnotationPoint[];
+  accidentHistory: RouteAnnotationPoint[];
 };
 
 type RouteAvoidOption = keyof RouteLine["avoidScores"];
@@ -49,6 +73,7 @@ type OsrmRoute = {
   duration: number;
   geometry: GeoJSON.LineString;
   roadEnvironmentDetails?: GraphHopperPathDetail[];
+  maxSpeedDetails?: GraphHopperPathDetail[];
 };
 
 type OsrmResponse = {
@@ -63,6 +88,7 @@ type GraphHopperPath = {
   points: GeoJSON.LineString;
   details?: {
     road_environment?: GraphHopperPathDetail[];
+    max_speed?: GraphHopperPathDetail[];
   };
 };
 
@@ -71,7 +97,7 @@ type GraphHopperResponse = {
   paths?: GraphHopperPath[];
 };
 
-type GraphHopperPathDetail = [number, number, string | null];
+type GraphHopperPathDetail = [number, number, string | number | null];
 
 type GraphHopperRule = {
   if: string;
@@ -110,6 +136,7 @@ type RouteFetchResult = {
 
 type RiskRow = {
   fid: number;
+  events_count?: number | null;
   risk_per_milj_fordon: number;
   geometry: GeoJSON.LineString;
 };
@@ -126,6 +153,12 @@ type DisturbanceRow = {
   lng: number;
   lat: number;
   message_type: string | null;
+};
+
+type EventRow = {
+  id: string;
+  lng: number;
+  lat: number;
 };
 
 type Bbox = {
@@ -464,6 +497,205 @@ function routeOriginLat(route: OsrmRoute): number {
   return coords.reduce((sum, coord) => sum + (coord[1] ?? 60), 0) / coords.length;
 }
 
+function toLngLat(coord: GeoJSON.Position | undefined): [number, number] | null {
+  if (!coord) return null;
+  const [lng, lat] = coord;
+  if (typeof lng !== "number" || typeof lat !== "number") return null;
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  return [lng, lat];
+}
+
+function emptyRouteAnnotations(): RouteAnnotations {
+  return {
+    highSpeed: [],
+    bridges: [],
+    tunnels: [],
+    disturbances: [],
+    accidentHistory: [],
+  };
+}
+
+function routeSegmentAnnotationsFromMask(
+  route: OsrmRoute,
+  kind: RouteAnnotationSegmentKind,
+  includeSegment: (segmentIndex: number) => boolean,
+): RouteAnnotationSegment[] {
+  const coords = route.geometry.coordinates;
+  const segments: RouteAnnotationSegment[] = [];
+  let current: [number, number][] = [];
+
+  const flush = () => {
+    if (current.length >= 2) {
+      segments.push({
+        kind,
+        geometry: { type: "LineString", coordinates: current },
+      });
+    }
+    current = [];
+  };
+
+  for (let index = 0; index < coords.length - 1; index += 1) {
+    const start = toLngLat(coords[index]);
+    const end = toLngLat(coords[index + 1]);
+    if (!start || !end || !includeSegment(index)) {
+      flush();
+      continue;
+    }
+    if (!current.length) current.push(start);
+    current.push(end);
+  }
+  flush();
+  return segments;
+}
+
+function roadEnvironmentSegments(
+  route: OsrmRoute,
+  environment: "BRIDGE" | "TUNNEL",
+  kind: RouteAnnotationSegmentKind,
+): RouteAnnotationSegment[] {
+  const details = route.roadEnvironmentDetails;
+  if (!details) return [];
+
+  const included = new Set<number>();
+  const coords = route.geometry.coordinates;
+  for (const [fromIndex, toIndex, value] of details) {
+    if (typeof value !== "string" || value.toUpperCase() !== environment) continue;
+    const from = Math.max(0, Math.min(coords.length - 1, Math.floor(fromIndex)));
+    const to = Math.max(from, Math.min(coords.length - 1, Math.floor(toIndex)));
+    for (let index = from + 1; index <= to; index += 1) {
+      included.add(index - 1);
+    }
+  }
+
+  return routeSegmentAnnotationsFromMask(route, kind, (segmentIndex) => included.has(segmentIndex));
+}
+
+function speedLimitFromDetail(value: string | number | null): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const match = value.match(/\d+/);
+  if (!match) return null;
+  const speed = Number(match[0]);
+  return Number.isFinite(speed) ? speed : null;
+}
+
+function highSpeedMetricFromDetails(route: OsrmRoute): RouteMetric | null {
+  const details = route.maxSpeedDetails;
+  if (!details) return null;
+
+  const coords = route.geometry.coordinates;
+  if (coords.length < 2) return { score: 0, exposure: 0 };
+
+  const originLat = routeOriginLat(route);
+  let score = 0;
+  let meters = 0;
+
+  for (const [fromIndex, toIndex, value] of details) {
+    const speed = speedLimitFromDetail(value);
+    if (speed === null || speed < 90) continue;
+    const from = Math.max(0, Math.min(coords.length - 1, Math.floor(fromIndex)));
+    const to = Math.max(from, Math.min(coords.length - 1, Math.floor(toIndex)));
+
+    for (let index = from + 1; index <= to; index += 1) {
+      const start = coords[index - 1];
+      const end = coords[index];
+      if (!start || !end) continue;
+      const segmentMeters = distanceBetweenCoordinatesMeters(start, end, originLat);
+      meters += segmentMeters;
+      score += (segmentMeters / 1000) * (1 + (speed - 90) / 20);
+    }
+  }
+
+  return {
+    score: score / Math.max(1, route.distance / 1000),
+    exposure: Math.min(meters, route.distance),
+  };
+}
+
+function highSpeedSegmentsFromDetails(route: OsrmRoute): RouteAnnotationSegment[] | null {
+  const details = route.maxSpeedDetails;
+  if (!details) return null;
+
+  const coords = route.geometry.coordinates;
+  const included = new Set<number>();
+  for (const [fromIndex, toIndex, value] of details) {
+    const speed = speedLimitFromDetail(value);
+    if (speed === null || speed < 90) continue;
+    const from = Math.max(0, Math.min(coords.length - 1, Math.floor(fromIndex)));
+    const to = Math.max(from, Math.min(coords.length - 1, Math.floor(toIndex)));
+    for (let index = from + 1; index <= to; index += 1) {
+      included.add(index - 1);
+    }
+  }
+
+  return routeSegmentAnnotationsFromMask(route, "highSpeed", (segmentIndex) => included.has(segmentIndex));
+}
+
+function highSpeedSegments(route: OsrmRoute, rows: LargeRoadRow[]): RouteAnnotationSegment[] {
+  const detailSegments = highSpeedSegmentsFromDetails(route);
+  if (detailSegments) return detailSegments;
+  if (!rows.length || route.geometry.coordinates.length < 2) return [];
+
+  const samples: GeoJSON.Position[] = [];
+  for (const row of rows) {
+    if ((row.speed_limit ?? 0) < 90) continue;
+    for (const segment of flattenLineString(row.geometry)) {
+      const mid = midpoint(segment);
+      if (mid) samples.push(mid);
+      samples.push(...sampleLine(segment));
+    }
+  }
+  if (!samples.length) return [];
+
+  const originLat = routeOriginLat(route);
+  return routeSegmentAnnotationsFromMask(route, "highSpeed", (segmentIndex) => {
+    const start = route.geometry.coordinates[segmentIndex];
+    const end = route.geometry.coordinates[segmentIndex + 1];
+    if (!start || !end) return false;
+    const mid: GeoJSON.Position = [
+      ((start[0] ?? 0) + (end[0] ?? 0)) / 2,
+      ((start[1] ?? 0) + (end[1] ?? 0)) / 2,
+    ];
+    return samples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 130 ||
+      distancePointToSegmentMeters(mid, sample, sample, originLat) <= 130);
+  });
+}
+
+function disturbanceCategory(messageType: string | null): "roadwork" | "traffic" {
+  const t = (messageType ?? "").toLowerCase();
+  if (t.includes("vägarbete") || t.includes("roadwork")) return "roadwork";
+  return "traffic";
+}
+
+function disturbancePoints(route: OsrmRoute, rows: DisturbanceRow[]): RouteAnnotationPoint[] {
+  if (!rows.length) return [];
+  const line = route.geometry.coordinates;
+  const originLat = routeOriginLat(route);
+  return rows.flatMap((row) => (
+    distancePointToLineMeters([row.lng, row.lat], line, originLat) <= 450
+      ? [{
+          kind: "disturbances" as const,
+          coordinates: [row.lng, row.lat] as [number, number],
+          category: disturbanceCategory(row.message_type),
+        }]
+      : []
+  ));
+}
+
+function accidentHistoryPoints(route: OsrmRoute, rows: EventRow[]): RouteAnnotationPoint[] {
+  if (!rows.length) return [];
+  const line = route.geometry.coordinates;
+  const originLat = routeOriginLat(route);
+  return rows.flatMap((row) => (
+    distancePointToLineMeters([row.lng, row.lat], line, originLat) <= 120
+      ? [{
+          kind: "accidentHistory" as const,
+          coordinates: [row.lng, row.lat] as [number, number],
+        }]
+      : []
+  ));
+}
+
 type RouteMetric = {
   score: number | null;
   exposure: number | null;
@@ -492,6 +724,9 @@ function scoreRisk(route: OsrmRoute, rows: RiskRow[]): RouteMetric {
 }
 
 function scoreHighSpeed(route: OsrmRoute, rows: LargeRoadRow[]): RouteMetric {
+  const detailMetric = highSpeedMetricFromDetails(route);
+  if (detailMetric) return detailMetric;
+
   if (!rows.length) return { score: 0, exposure: 0 };
   const line = route.geometry.coordinates;
   const originLat = routeOriginLat(route);
@@ -515,7 +750,7 @@ function scoreHighSpeed(route: OsrmRoute, rows: LargeRoadRow[]): RouteMetric {
 
   return {
     score: score / Math.max(1, route.distance / 1000),
-    exposure: highSpeedMeters,
+    exposure: Math.min(highSpeedMeters, route.distance),
   };
 }
 
@@ -710,10 +945,15 @@ async function buildRoutePreferenceCustomModel(
   );
 }
 
-async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<RouteLine, "avoidScores" | "exposure">>> {
+type RouteScoreResult = Pick<RouteLine, "avoidScores" | "exposure" | "annotations">;
+
+async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreResult[]> {
   const baseScores = routes.map((route) => {
     const bridges = roadEnvironmentExposure(route, "BRIDGE");
     const tunnels = roadEnvironmentExposure(route, "TUNNEL");
+    const annotations = emptyRouteAnnotations();
+    annotations.bridges = roadEnvironmentSegments(route, "BRIDGE", "bridges");
+    annotations.tunnels = roadEnvironmentSegments(route, "TUNNEL", "tunnels");
     return {
       avoidScores: {
         accidentHistory: null,
@@ -728,7 +968,9 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
         disturbances: null,
         bridgeMeters: bridges.exposure,
         tunnelMeters: tunnels.exposure,
+        accidentHistoryEvents: null,
       },
+      annotations,
     };
   });
 
@@ -740,20 +982,22 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
   const fallbackScores = routes.map((route, index) => {
     const base = baseScores[index];
     return base ?? {
-    avoidScores: {
-      accidentHistory: null,
-      highSpeed: null,
-      disturbances: null,
-      bridges: null,
-      tunnels: null,
-    },
-    exposure: {
-      accidentHistory: null,
-      highSpeedMeters: null,
-      disturbances: null,
-      bridgeMeters: null,
-      tunnelMeters: null,
-    },
+      avoidScores: {
+        accidentHistory: null,
+        highSpeed: null,
+        disturbances: null,
+        bridges: null,
+        tunnels: null,
+      },
+      exposure: {
+        accidentHistory: null,
+        highSpeedMeters: null,
+        disturbances: null,
+        bridgeMeters: null,
+        tunnelMeters: null,
+        accidentHistoryEvents: null,
+      },
+      annotations: emptyRouteAnnotations(),
     };
   });
 
@@ -767,7 +1011,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
 
   try {
     const activeSince = new Date(Date.now() - 90 * 60 * 1000).toISOString();
-    const [riskResult, largeRoadsResult, disturbancesResult] = await Promise.all([
+    const [riskResult, largeRoadsResult, disturbancesResult, eventsResult] = await Promise.all([
       bboxArea(bbox) <= 80
         ? client.rpc("risk_in_bbox", params)
         : Promise.resolve({ data: [], error: null }),
@@ -783,6 +1027,16 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
         .gte("lat", bbox.minLat)
         .lte("lat", bbox.maxLat)
         .limit(500),
+      bboxArea(bbox) <= 80
+        ? client
+            .from("events_public")
+            .select("id, lng, lat")
+            .gte("lng", bbox.minLng)
+            .lte("lng", bbox.maxLng)
+            .gte("lat", bbox.minLat)
+            .lte("lat", bbox.maxLat)
+            .limit(1000)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     const riskRows = riskResult.error ? [] : (riskResult.data ?? []) as RiskRow[];
@@ -794,6 +1048,9 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
     const disturbanceRows = disturbancesResult.error
       ? []
       : (disturbancesResult.data ?? []) as DisturbanceRow[];
+    const eventRows = eventsResult.error
+      ? []
+      : (eventsResult.data ?? []) as EventRow[];
 
     return routes.map((route) => {
       const accidentHistory = scoreRisk(route, riskRows);
@@ -801,6 +1058,13 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
       const disturbances = scoreDisturbances(route, disturbanceRows);
       const bridges = roadEnvironmentExposure(route, "BRIDGE");
       const tunnels = roadEnvironmentExposure(route, "TUNNEL");
+      const accidentPoints = accidentHistoryPoints(route, eventRows);
+      const annotations = emptyRouteAnnotations();
+      annotations.highSpeed = highSpeedSegments(route, largeRoadRows);
+      annotations.bridges = roadEnvironmentSegments(route, "BRIDGE", "bridges");
+      annotations.tunnels = roadEnvironmentSegments(route, "TUNNEL", "tunnels");
+      annotations.disturbances = disturbancePoints(route, disturbanceRows);
+      annotations.accidentHistory = accidentPoints;
       return {
         avoidScores: {
           accidentHistory: accidentHistory.score,
@@ -815,7 +1079,9 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<Array<Pick<R
           disturbances: disturbances.exposure,
           bridgeMeters: bridges.exposure,
           tunnelMeters: tunnels.exposure,
+          accidentHistoryEvents: accidentPoints.length,
         },
+        annotations,
       };
     });
   } catch (err) {
@@ -875,7 +1141,7 @@ async function fetchGraphHopperRoute(
     points_encoded: false,
     instructions: false,
     calc_points: true,
-    details: ["road_environment"],
+    details: ["road_environment", "max_speed"],
   };
 
   if (opts.customModel) {
@@ -917,6 +1183,7 @@ async function fetchGraphHopperRoute(
     duration: path.time / 1000,
     geometry: path.points,
     roadEnvironmentDetails: path.details?.road_environment,
+    maxSpeedDetails: path.details?.max_speed,
   }));
 }
 
@@ -1087,7 +1354,9 @@ export async function POST(req: Request) {
         disturbances: null,
         bridgeMeters: null,
         tunnelMeters: null,
+        accidentHistoryEvents: null,
       },
+      annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
     }));
 
     return jsonResponse({ routes, avoid, maxExtraMinutes, provider: routeResult.provider }, { cacheSeconds: 300 });

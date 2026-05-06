@@ -47,7 +47,7 @@ a:hover {
   text-decoration: underline;
 }
 
-/* Typografi — endast tre tier används i UI-overlayerna (large/medium/small).
+/* Typografi — composable tiers för UI-overlayerna.
    Komposita ovanpå via CSS Modules `composes: type-X from global;`. */
 .type-large {
   font-size: var(--type-large-size);
@@ -59,6 +59,12 @@ a:hover {
   font-size: var(--type-medium-size);
   line-height: var(--type-medium-line);
   letter-spacing: var(--type-medium-tracking);
+}
+
+.type-m-small {
+  font-size: var(--type-m-small-size);
+  line-height: var(--type-m-small-line);
+  letter-spacing: var(--type-m-small-tracking);
 }
 
 .type-small {

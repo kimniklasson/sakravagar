@@ -28,6 +28,7 @@ type RiskSegment = {
 
 export type LayerController = { setVisible: (v: boolean) => void };
 export type RouteClickHandler = (routeId: string) => void;
+export type RouteAnnotationVisibility = Partial<Record<keyof RouteLine["annotations"], boolean>>;
 export type RouteDragCommit = {
   routeId: string;
   lngLat: [number, number];
@@ -94,6 +95,25 @@ const ROUTE_ALT_HIT_LAYER_ID = "route-alt-hit";
 const ROUTE_PRIMARY_LAYER_ID = "route-primary-line";
 const ROUTE_PRIMARY_CASING_LAYER_ID = "route-primary-casing";
 const ROUTE_PRIMARY_HIT_LAYER_ID = "route-primary-hit";
+const ROUTE_ENDPOINT_SOURCE_ID = "route-endpoints";
+const ROUTE_ENDPOINT_LAYER_ID = "route-endpoint-symbols";
+const ROUTE_START_IMAGE_ID = "route-start-marker";
+const ROUTE_END_IMAGE_ID = "route-end-marker";
+const ROUTE_ANNOTATION_LINE_SOURCE_ID = "route-annotation-lines";
+const ROUTE_ANNOTATION_POINT_SOURCE_ID = "route-annotation-points";
+const ROUTE_HIGH_SPEED_LAYER_ID = "route-high-speed-lines";
+const ROUTE_BRIDGE_LAYER_ID = "route-bridge-lines";
+const ROUTE_TUNNEL_LAYER_ID = "route-tunnel-lines";
+const ROUTE_DISTURBANCE_LAYER_ID = "route-disturbance-points";
+const ROUTE_ACCIDENT_LAYER_ID = "route-accident-points";
+const ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID = "route-disturbance-triangle";
+const ROUTE_ANNOTATION_COLORS = {
+  highSpeed: "#FF8C8C",
+  bridges: "#F23FC8",
+  tunnels: "#FF2F00",
+  disturbances: "#F27A3F",
+  accidentHistory: "#FF2F00",
+};
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
 // sån query timeoutar mot Supabase för de tyngre analyslagren (för många
@@ -202,6 +222,104 @@ function ensureDisturbanceMarkerImages(map: MapLibreMap): void {
     ctx.beginPath();
     ctx.roundRect(x, y, side, side, 2);
   });
+}
+
+function ensureRouteAnnotationImages(map: MapLibreMap): void {
+  if (map.hasImage(ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID)) return;
+
+  const pixelRatio = 2;
+  const size = 18;
+  const canvas = document.createElement("canvas");
+  canvas.width = size * pixelRatio;
+  canvas.height = size * pixelRatio;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.scale(pixelRatio, pixelRatio);
+  ctx.beginPath();
+  ctx.moveTo(size / 2, 2);
+  ctx.lineTo(size - 3, size - 3);
+  ctx.lineTo(3, size - 3);
+  ctx.closePath();
+  ctx.fillStyle = ROUTE_ANNOTATION_COLORS.disturbances;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(17, 17, 17, 0.85)";
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  map.addImage(
+    ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID,
+    ctx.getImageData(0, 0, canvas.width, canvas.height),
+    { pixelRatio },
+  );
+}
+
+function ensureRouteEndpointImages(map: MapLibreMap): void {
+  const pixelRatio = 2;
+
+  if (!map.hasImage(ROUTE_START_IMAGE_ID)) {
+    const size = 20;
+    const canvas = document.createElement("canvas");
+    canvas.width = size * pixelRatio;
+    canvas.height = size * pixelRatio;
+    const ctx = canvas.getContext("2d");
+
+    if (ctx) {
+      ctx.scale(pixelRatio, pixelRatio);
+      ctx.strokeStyle = "rgba(17, 17, 17, 0.85)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, 7.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, 7.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(size / 2, 4.5);
+      ctx.lineTo(size - 4.5, size / 2);
+      ctx.lineTo(size / 2, size - 4.5);
+      ctx.lineTo(4.5, size / 2);
+      ctx.closePath();
+      ctx.fill();
+
+      map.addImage(ROUTE_START_IMAGE_ID, ctx.getImageData(0, 0, canvas.width, canvas.height), {
+        pixelRatio,
+      });
+    }
+  }
+
+  if (!map.hasImage(ROUTE_END_IMAGE_ID)) {
+    const width = 24;
+    const height = 48;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * pixelRatio;
+    canvas.height = height * pixelRatio;
+    const ctx = canvas.getContext("2d");
+
+    if (ctx) {
+      ctx.scale(pixelRatio, pixelRatio);
+      ctx.fillStyle = "#95FF97";
+      ctx.strokeStyle = "rgba(17, 17, 17, 0.85)";
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+
+      const pin = new Path2D(
+        "M12 0C16.9706 0 21 4.02944 21 9C21 13.9706 12 24 12 24C12 24 3 13.9706 3 9C3 4.02944 7.02944 0 12 0ZM12 4.5C9.51472 4.5 7.5 6.51472 7.5 9C7.5 11.4853 9.51472 13.5 12 13.5C14.4853 13.5 16.5 11.4853 16.5 9C16.5 6.51472 14.4853 4.5 12 4.5Z",
+      );
+      ctx.stroke(pin);
+      ctx.fill(pin, "evenodd");
+
+      map.addImage(ROUTE_END_IMAGE_ID, ctx.getImageData(0, 0, canvas.width, canvas.height), {
+        pixelRatio,
+      });
+    }
+  }
 }
 
 function ensureSpeedBadgeImage(
@@ -572,6 +690,20 @@ export function addRouteLayer(
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
   });
+  map.addSource(ROUTE_ENDPOINT_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addSource(ROUTE_ANNOTATION_LINE_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addSource(ROUTE_ANNOTATION_POINT_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  ensureRouteAnnotationImages(map);
+  ensureRouteEndpointImages(map);
 
   const beforeId = map.getLayer(LIVE_HALO_LAYER_ID)
     ? LIVE_HALO_LAYER_ID
@@ -652,6 +784,80 @@ export function addRouteLayer(
   );
   map.addLayer(
     {
+      id: ROUTE_HIGH_SPEED_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "highSpeed"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.highSpeed,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3, 12, 6, 16, 9],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_BRIDGE_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "bridges"],
+      layout: { "line-cap": "butt", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.bridges,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3.5, 12, 6.5, 16, 9.5],
+        "line-dasharray": [0.16, 0.34],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_TUNNEL_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "tunnels"],
+      layout: { "line-cap": "butt", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.tunnels,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3.5, 12, 6.5, 16, 9.5],
+        "line-dasharray": [0.2, 0.3],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_DISTURBANCE_LAYER_ID,
+      type: "symbol",
+      source: ROUTE_ANNOTATION_POINT_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "disturbances"],
+      layout: {
+        "icon-image": ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID,
+        "icon-size": ["interpolate", ["linear"], ["zoom"], 5, 0.55, 12, 0.85, 16, 1.1],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_ACCIDENT_LAYER_ID,
+      type: "circle",
+      source: ROUTE_ANNOTATION_POINT_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "accidentHistory"],
+      paint: {
+        "circle-color": ROUTE_ANNOTATION_COLORS.accidentHistory,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.5, 12, 4, 16, 6],
+        "circle-stroke-color": "rgba(17, 17, 17, 0.9)",
+        "circle-stroke-width": 1.5,
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
       id: ROUTE_PRIMARY_HIT_LAYER_ID,
       type: "line",
       source: ROUTE_SOURCE_ID,
@@ -660,6 +866,24 @@ export function addRouteLayer(
       paint: {
         "line-color": "rgba(255, 255, 255, 0)",
         "line-width": ["interpolate", ["linear"], ["zoom"], 5, 16, 12, 24, 16, 34],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_ENDPOINT_LAYER_ID,
+      type: "symbol",
+      source: ROUTE_ENDPOINT_SOURCE_ID,
+      layout: {
+        "icon-image": [
+          "match",
+          ["get", "kind"],
+          "end", ROUTE_END_IMAGE_ID,
+          ROUTE_START_IMAGE_ID,
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
     },
     beforeId,
@@ -799,7 +1023,13 @@ export function addRouteLayer(
         ROUTE_ALT_HIT_LAYER_ID,
         ROUTE_PRIMARY_CASING_LAYER_ID,
         ROUTE_PRIMARY_LAYER_ID,
+        ROUTE_HIGH_SPEED_LAYER_ID,
+        ROUTE_BRIDGE_LAYER_ID,
+        ROUTE_TUNNEL_LAYER_ID,
+        ROUTE_DISTURBANCE_LAYER_ID,
+        ROUTE_ACCIDENT_LAYER_ID,
         ROUTE_PRIMARY_HIT_LAYER_ID,
+        ROUTE_ENDPOINT_LAYER_ID,
       ]) {
         if (map.getLayer(id)) {
           map.setLayoutProperty(id, "visibility", v ? "visible" : "none");
@@ -813,10 +1043,14 @@ export function setRouteLayerData(
   map: MapLibreMap,
   routes: RouteLine[],
   selectedRouteId = routes[0]?.id ?? null,
+  visibleAnnotations: RouteAnnotationVisibility = {},
 ): void {
   if (!map.getSource(ROUTE_SOURCE_ID)) addRouteLayer(map);
   const source = map.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
   if (!source) return;
+  const endpointSource = map.getSource(ROUTE_ENDPOINT_SOURCE_ID) as GeoJSONSource | undefined;
+  const annotationLineSource = map.getSource(ROUTE_ANNOTATION_LINE_SOURCE_ID) as GeoJSONSource | undefined;
+  const annotationPointSource = map.getSource(ROUTE_ANNOTATION_POINT_SOURCE_ID) as GeoJSONSource | undefined;
 
   const features: GeoJSON.Feature<GeoJSON.LineString>[] = routes.map((route) => ({
     type: "Feature",
@@ -830,6 +1064,67 @@ export function setRouteLayerData(
     },
   }));
   source.setData({ type: "FeatureCollection", features });
+
+  const selectedRoute = routes.find((route) => route.id === selectedRouteId);
+  const selectedCoordinates = selectedRoute?.geometry.coordinates.filter(
+    (coord): coord is [number, number] =>
+      Array.isArray(coord) &&
+      coord.length >= 2 &&
+      typeof coord[0] === "number" &&
+      typeof coord[1] === "number",
+  ) ?? [];
+  const startCoordinate = selectedCoordinates[0];
+  const endCoordinate = selectedCoordinates.at(-1);
+  const lineAnnotations = selectedRoute?.annotations
+    ? [
+        ...(visibleAnnotations.highSpeed ? selectedRoute.annotations.highSpeed : []),
+        ...(visibleAnnotations.bridges ? selectedRoute.annotations.bridges : []),
+        ...(visibleAnnotations.tunnels ? selectedRoute.annotations.tunnels : []),
+      ]
+    : [];
+  const pointAnnotations = selectedRoute?.annotations
+    ? [
+        ...(visibleAnnotations.disturbances ? selectedRoute.annotations.disturbances : []),
+        ...(visibleAnnotations.accidentHistory ? selectedRoute.annotations.accidentHistory : []),
+      ]
+    : [];
+
+  endpointSource?.setData({
+    type: "FeatureCollection",
+    features: startCoordinate && endCoordinate
+      ? [
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: startCoordinate },
+            properties: { kind: "start" },
+          },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: endCoordinate },
+            properties: { kind: "end" },
+          },
+        ]
+      : [],
+  });
+  annotationLineSource?.setData({
+    type: "FeatureCollection",
+    features: lineAnnotations.map((annotation): GeoJSON.Feature<GeoJSON.LineString> => ({
+      type: "Feature",
+      geometry: annotation.geometry,
+      properties: { kind: annotation.kind },
+    })),
+  });
+  annotationPointSource?.setData({
+    type: "FeatureCollection",
+    features: pointAnnotations.map((annotation): GeoJSON.Feature<GeoJSON.Point> => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: annotation.coordinates },
+      properties: {
+        kind: annotation.kind,
+        category: annotation.category ?? null,
+      },
+    })),
+  });
   raiseLargeRoadBadges(map);
 }
 

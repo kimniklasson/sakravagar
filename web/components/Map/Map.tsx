@@ -85,11 +85,27 @@ const initialRouteAvoids: RouteAvoidState = {
 };
 
 const routeAvoidLabels: Record<RouteAvoidOption, string> = {
-  accidentHistory: "Olycksrisk",
-  disturbances: "Störningar",
   highSpeed: "Höga hastigheter",
   bridges: "Broar",
   tunnels: "Tunnlar",
+  disturbances: "Störningar",
+  accidentHistory: "Olycksrisk",
+};
+
+const routeAvoidTooltips: Record<RouteAvoidOption, string> = {
+  highSpeed: "90-120 km/h",
+  bridges: "Alla brotyper",
+  tunnels: "Alla tunnlar",
+  disturbances: "Vägarbeten, köer m.m.",
+  accidentHistory: "Historiska olyckor",
+};
+
+const routeMetricLabels: Record<RouteAvoidOption, string> = {
+  highSpeed: "Höga hastigheter",
+  bridges: "Broar",
+  tunnels: "Tunnlar",
+  disturbances: "Störningar",
+  accidentHistory: "Historisk olycksrisk",
 };
 
 const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
@@ -378,7 +394,7 @@ export default function Map() {
       if (!selectedRoute) return current;
       const map = mapRef.current;
       if (map && mapLoadedRef.current) {
-        setRouteLayerData(map, current, routeId);
+        setRouteLayerData(map, current, routeId, routeAvoids);
         focusRoute(map, [selectedRoute, ...current.filter((route) => route.id !== routeId)]);
       }
       setRouteNoticeText(null);
@@ -386,13 +402,13 @@ export default function Map() {
       setSelectedRouteId(routeId);
       return current;
     });
-  }, []);
+  }, [routeAvoids]);
 
   const previewRouteById = useCallback((routeId: string | null) => {
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
-    setRouteLayerData(map, routeLines, routeId ?? selectedRouteId);
-  }, [routeLines, selectedRouteId]);
+    setRouteLayerData(map, routeLines, routeId ?? selectedRouteId, routeAvoids);
+  }, [routeAvoids, routeLines, selectedRouteId]);
 
   const refreshEventStats = async () => {
     const res = await fetch("/api/events/stats");
@@ -478,6 +494,7 @@ export default function Map() {
       layerCtrlRef.current.adt = addAdtLayer(map);
       layerCtrlRef.current.risk = addRiskLayer(map);
       layerCtrlRef.current.risk.setVisible(accidentsRiskOn);
+      layerCtrlRef.current.adt.setVisible(adtOn);
       layerCtrlRef.current.largeRoads.setVisible(largeRoadsOn);
       void addEventsLayer(map)
         .then(() => {
@@ -664,7 +681,7 @@ export default function Map() {
 
     const map = mapRef.current;
     if (map && mapLoadedRef.current) {
-      setRouteLayerData(map, orderedRoutes, selectedRouteId);
+      setRouteLayerData(map, orderedRoutes, selectedRouteId, avoids);
       if (opts.focus) {
         focusRoute(
           map,
@@ -907,7 +924,9 @@ export default function Map() {
           setSelectedRouteId(previewRoutes[0]?.id ?? null);
           setRouteLines(previewRoutes);
           const map = mapRef.current;
-          if (map && mapLoadedRef.current) setRouteLayerData(map, previewRoutes, previewRoutes[0]?.id ?? null);
+          if (map && mapLoadedRef.current) {
+            setRouteLayerData(map, previewRoutes, previewRoutes[0]?.id ?? null, routeAvoidsRef.current);
+          }
         })
         .catch((err) => {
           if (!controller.signal.aborted) console.warn("route drag preview failed", err);
@@ -1171,6 +1190,7 @@ export default function Map() {
           onClick={handleLocate}
           aria-label="Visa min position"
           aria-pressed={atUserLocation}
+          data-tooltip="Visa min position"
         >
           <LocationIcon />
         </button>
@@ -1180,6 +1200,7 @@ export default function Map() {
             className={`${styles.iconBtn} ${styles.zoomPlus}`}
             onClick={handleZoomIn}
             aria-label="Zooma in"
+            data-tooltip="Zooma in"
           >
             <PlusIcon />
           </button>
@@ -1188,6 +1209,7 @@ export default function Map() {
             className={`${styles.iconBtn} ${styles.zoomMinus}`}
             onClick={handleZoomOut}
             aria-label="Zooma ut"
+            data-tooltip="Zooma ut"
           >
             <MinusIcon />
           </button>
@@ -1244,100 +1266,125 @@ function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number 
   return route.exposure?.[option] ?? null;
 }
 
+function routeCappedExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
+  const value = routeExposureValue(route, option);
+  if (value === null) return null;
+  if (option === "highSpeed" || option === "bridges" || option === "tunnels") {
+    return Math.min(Math.max(0, value), route.distanceMeters);
+  }
+  return Math.max(0, value);
+}
+
+type RouteAlternativeMetricRow = {
+  kind: RouteAvoidOption;
+  label: string;
+  value: string;
+  tone?: "positive" | "muted";
+};
+
 type RouteAlternativeCopy = {
   title: string;
-  description: string;
+  rows: RouteAlternativeMetricRow[];
 };
 
 function activeAvoidOptionsForUi(avoids: RouteAvoidState): RouteAvoidOption[] {
   return (Object.keys(routeAvoidLabels) as RouteAvoidOption[]).filter((option) => avoids[option]);
 }
 
-function routeScoreReduction(route: RouteLine, baseline: RouteLine, option: RouteAvoidOption): number | null {
-  const current = routeScoreValue(route, option);
-  const base = routeScoreValue(baseline, option);
-  if (current === null || base === null) return null;
-  return Math.max(0, base - current);
+function formatRouteExposureDistance(meters: number): string {
+  if (meters < 10) return `${Math.max(1, Math.round(meters))} m`;
+  return formatRouteDistance(meters);
 }
 
-function routeExtraText(route: RouteLine, baseline: RouteLine): string {
-  const extraSeconds = route.durationSeconds - baseline.durationSeconds;
-  if (extraSeconds <= 30) return "samma restid";
-  return `${formatRouteDurationDiff(extraSeconds).replace("+", "")} extra`;
+function routeAccidentRiskValue(route: RouteLine, baseline: RouteLine): RouteAlternativeMetricRow {
+  const baseRow = { kind: "accidentHistory" as const, label: routeMetricLabels.accidentHistory };
+  const eventCount = route.exposure?.accidentHistoryEvents;
+  if (eventCount !== null && eventCount !== undefined && eventCount <= 2) {
+    return { ...baseRow, value: "Data ofullständig", tone: "muted" };
+  }
+
+  const current = routeScoreValue(route, "accidentHistory");
+  if (current === null) {
+    return { ...baseRow, value: "Saknas", tone: "muted" };
+  }
+  if (current <= 0) {
+    return { ...baseRow, value: "Inga i data", tone: "muted" };
+  }
+
+  const base = routeScoreValue(baseline, "accidentHistory");
+  if (base === null || base <= 0) {
+    return { ...baseRow, value: "Medel" };
+  }
+
+  const ratio = current / base;
+  if (ratio <= 0.25) return { ...baseRow, value: "Väldigt låg" };
+  if (ratio <= 0.6) return { ...baseRow, value: "Låg" };
+  return { ...baseRow, value: "Medel" };
 }
 
-function routeAlternativeDescription(
+function routeAlternativeMetricRow(
+  route: RouteLine,
+  baseline: RouteLine,
+  option: RouteAvoidOption,
+): RouteAlternativeMetricRow {
+  if (option === "accidentHistory") return routeAccidentRiskValue(route, baseline);
+
+  const current = routeCappedExposureValue(route, option);
+  const baseRow = { kind: option, label: routeMetricLabels[option] };
+  if (current === null) return { ...baseRow, value: "Saknas", tone: "muted" };
+  if (current <= 0) return { ...baseRow, value: "Undviker", tone: "positive" };
+
+  if (option === "disturbances") {
+    return { ...baseRow, value: `${Math.round(current)} st` };
+  }
+
+  return { ...baseRow, value: formatRouteExposureDistance(current) };
+}
+
+function routeAlternativeRows(
   route: RouteLine,
   baseline: RouteLine,
   avoids: RouteAvoidState,
-): string {
-  const activeOptions = activeAvoidOptionsForUi(avoids);
-  if (!activeOptions.length) {
-    return "Kortast restid av alternativen vi hittar just nu.";
-  }
+): RouteAlternativeMetricRow[] {
+  return activeAvoidOptionsForUi(avoids).map((option) => routeAlternativeMetricRow(route, baseline, option));
+}
 
-  const parts: string[] = [];
+function routeAvoidedMetricCount(route: RouteLine, baseline: RouteLine, avoids: RouteAvoidState): number {
+  return routeAlternativeRows(route, baseline, avoids).filter((row) => row.tone === "positive").length;
+}
 
-  if (avoids.accidentHistory) {
-    const reduction = routeScoreReduction(route, baseline, "accidentHistory");
-    const current = routeScoreValue(route, "accidentHistory");
-    if (current !== null && current <= 0.05) {
-      parts.push("nästan ingen uppmätt olyckshistorik längs rutten");
-    } else if (reduction !== null && reduction > 0.05) {
-      parts.push(`${reduction.toFixed(1).replace(".", ",")} lägre riskpoäng än snabbaste`);
-    }
-  }
+function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: RouteAvoidOption): boolean {
+  const current = option === "accidentHistory"
+    ? routeScoreValue(route, option)
+    : routeCappedExposureValue(route, option);
+  if (current === null) return false;
 
-  if (avoids.disturbances) {
-    const current = routeExposureValue(route, "disturbances");
-    const base = routeExposureValue(baseline, "disturbances");
-    if (current !== null && current <= 0) {
-      parts.push("inga aktuella störningar nära rutten");
-    } else if (current !== null && base !== null && base - current >= 1) {
-      parts.push(`${Math.round(base - current)} färre störningar nära rutten`);
-    }
-  }
+  const values = routes
+    .map((candidate) => (
+      option === "accidentHistory"
+        ? routeScoreValue(candidate, option)
+        : routeCappedExposureValue(candidate, option)
+    ))
+    .filter((value): value is number => value !== null);
+  if (!values.length) return false;
+  return current <= Math.min(...values) + 0.001;
+}
 
-  if (avoids.highSpeed) {
-    const current = routeExposureValue(route, "highSpeed");
-    const base = routeExposureValue(baseline, "highSpeed");
-    if (current !== null && current <= 100) {
-      parts.push("nästan ingen väg i 90+ km/h");
-    } else if (current !== null && base !== null && base - current > 100) {
-      parts.push(`${formatRouteDistance(base - current)} mindre 90+ väg än snabbaste`);
-    } else if (current !== null && current > 100) {
-      parts.push(`${formatRouteDistance(current)} väg i 90+ km/h kvar`);
-    }
-  }
+function routeImprovesOption(route: RouteLine, baseline: RouteLine, option: RouteAvoidOption): boolean {
+  const current = option === "accidentHistory"
+    ? routeScoreValue(route, option)
+    : routeCappedExposureValue(route, option);
+  const base = option === "accidentHistory"
+    ? routeScoreValue(baseline, option)
+    : routeCappedExposureValue(baseline, option);
+  if (current === null || base === null) return false;
+  if (option === "disturbances") return current < base;
+  if (option === "accidentHistory") return base - current > 0.05;
+  return base - current > 25;
+}
 
-  if (avoids.bridges) {
-    const current = routeExposureValue(route, "bridges");
-    const base = routeExposureValue(baseline, "bridges");
-    if (current !== null && current <= 25) {
-      parts.push("nästan ingen bro längs rutten");
-    } else if (current !== null && base !== null && base - current > 25) {
-      parts.push(`${formatRouteDistance(base - current)} mindre bro än snabbaste`);
-    } else if (current !== null && current > 25) {
-      parts.push(`${formatRouteDistance(current)} bro kvar`);
-    }
-  }
-
-  if (avoids.tunnels) {
-    const current = routeExposureValue(route, "tunnels");
-    const base = routeExposureValue(baseline, "tunnels");
-    if (current !== null && current <= 25) {
-      parts.push("nästan ingen tunnel längs rutten");
-    } else if (current !== null && base !== null && base - current > 25) {
-      parts.push(`${formatRouteDistance(base - current)} mindre tunnel än snabbaste`);
-    } else if (current !== null && current > 25) {
-      parts.push(`${formatRouteDistance(current)} tunnel kvar`);
-    }
-  }
-
-  const prefix = parts.length > 0
-    ? parts.slice(0, 2).join(" och ")
-    : "Ett annat sätt att balansera lugn och restid";
-  return `${prefix}. Tar ${routeExtraText(route, baseline)}.`;
+function routeIsFastest(route: RouteLine, baseline: RouteLine): boolean {
+  return route.id === baseline.id || route.source === "fastest" || route.durationSeconds <= baseline.durationSeconds + 30;
 }
 
 function routeAlternativeTitle(
@@ -1345,75 +1392,41 @@ function routeAlternativeTitle(
   index: number,
   baseline: RouteLine,
   avoids: RouteAvoidState,
+  routes: RouteLine[],
 ): string {
   const activeOptions = activeAvoidOptionsForUi(avoids);
-  const isFastest = route.id === baseline.id || route.source === "fastest" || route.durationSeconds <= baseline.durationSeconds + 30;
-  if (!activeOptions.length || isFastest) return "Snabbaste";
+  if (!activeOptions.length || routeIsFastest(route, baseline)) return "Snabbaste";
 
-  const extraMinutes = routeExtraMinutes(route, baseline);
-  const highSpeedMeters = routeExposureValue(route, "highSpeed");
-  const baseHighSpeedMeters = routeExposureValue(baseline, "highSpeed");
-  const accidentReduction = routeScoreReduction(route, baseline, "accidentHistory") ?? 0;
-  const disturbanceReduction = routeScoreReduction(route, baseline, "disturbances") ?? 0;
-  const bridgeMeters = routeExposureValue(route, "bridges");
-  const baseBridgeMeters = routeExposureValue(baseline, "bridges");
-  const tunnelMeters = routeExposureValue(route, "tunnels");
-  const baseTunnelMeters = routeExposureValue(baseline, "tunnels");
+  const shortestDistance = Math.min(...routes.map((candidate) => candidate.distanceMeters));
+  if (route.distanceMeters <= shortestDistance + 50) return "Kortast";
 
-  if (
-    avoids.highSpeed &&
-    highSpeedMeters !== null &&
-    highSpeedMeters > 100 &&
-    highSpeedMeters <= 3000 &&
-    baseHighSpeedMeters !== null &&
-    highSpeedMeters < baseHighSpeedMeters
-  ) {
-    return "Liten utmaning";
+  const avoidedCount = routeAvoidedMetricCount(route, baseline, avoids);
+  if (activeOptions.length > 1 && avoidedCount >= Math.max(2, activeOptions.length - 1)) {
+    return "Mest lugn";
   }
 
-  if (extraMinutes <= 12 && (accidentReduction > 0.05 || disturbanceReduction > 0.05)) {
-    return "Snabb men tryggare";
+  if (avoids.highSpeed && routeIsBestForOption(route, routes, "highSpeed") && routeImprovesOption(route, baseline, "highSpeed")) {
+    return "Lägre hastigheter";
   }
 
-  if (avoids.highSpeed && highSpeedMeters !== null && highSpeedMeters <= 100) {
-    return "Lugnaste";
-  }
-
-  if (avoids.tunnels && tunnelMeters !== null && tunnelMeters <= 25) {
-    return "Utan tunnlar";
-  }
-
-  if (
-    avoids.tunnels &&
-    tunnelMeters !== null &&
-    baseTunnelMeters !== null &&
-    baseTunnelMeters - tunnelMeters > 25
-  ) {
-    return "Mindre tunnel";
-  }
-
-  if (avoids.bridges && bridgeMeters !== null && bridgeMeters <= 25) {
-    return "Utan broar";
-  }
-
-  if (
-    avoids.bridges &&
-    bridgeMeters !== null &&
-    baseBridgeMeters !== null &&
-    baseBridgeMeters - bridgeMeters > 25
-  ) {
-    return "Mindre bro";
-  }
-
-  if (avoids.disturbances && disturbanceReduction > 0.05) {
+  if (avoids.disturbances && routeIsBestForOption(route, routes, "disturbances") && routeImprovesOption(route, baseline, "disturbances")) {
     return "Färre störningar";
   }
 
-  if (avoids.accidentHistory && accidentReduction > 0.05) {
+  if (avoids.bridges && routeIsBestForOption(route, routes, "bridges") && routeImprovesOption(route, baseline, "bridges")) {
+    return routeCappedExposureValue(route, "bridges") === 0 ? "Utan broar" : "Färre broar";
+  }
+
+  if (avoids.tunnels && routeIsBestForOption(route, routes, "tunnels") && routeImprovesOption(route, baseline, "tunnels")) {
+    return routeCappedExposureValue(route, "tunnels") === 0 ? "Utan tunnlar" : "Färre tunnlar";
+  }
+
+  if (avoids.accidentHistory && routeIsBestForOption(route, routes, "accidentHistory") && routeImprovesOption(route, baseline, "accidentHistory")) {
     return "Lägre olycksrisk";
   }
 
-  return index === 1 ? "Alternativ rutt" : "Lugnare alternativ";
+  if (routeExtraMinutes(route, baseline) <= 10 && activeOptions.length > 1) return "Balanserad";
+  return index === 1 ? "Alternativ rutt" : "Mindre intensiv";
 }
 
 function routeAlternativeCopy(
@@ -1421,11 +1434,12 @@ function routeAlternativeCopy(
   index: number,
   baseline: RouteLine | null,
   avoids: RouteAvoidState,
+  routes: RouteLine[],
 ): RouteAlternativeCopy {
   const fallbackBaseline = baseline ?? route;
   return {
-    title: routeAlternativeTitle(route, index, fallbackBaseline, avoids),
-    description: routeAlternativeDescription(route, fallbackBaseline, avoids),
+    title: routeAlternativeTitle(route, index, fallbackBaseline, avoids, routes),
+    rows: routeAlternativeRows(route, fallbackBaseline, avoids),
   };
 }
 
@@ -1669,12 +1683,20 @@ function RoutePlannerBox({
                 className={`${styles.routeAvoidPill} ${routeAvoids[option] ? styles.routeAvoidPillOn : ""}`}
                 onClick={() => onToggleAvoid(option)}
                 aria-pressed={routeAvoids[option]}
+                aria-describedby={`route-avoid-tooltip-${option}`}
               >
                 <span className={styles.routeAvoidCheckbox} aria-hidden="true" />
                 <span>{routeAvoidLabels[option]}</span>
                 {showPillSpinner && routeAvoids[option] && (
                   <span className={styles.routeAvoidPillSpinner} aria-hidden="true" />
                 )}
+                <span
+                  id={`route-avoid-tooltip-${option}`}
+                  className={styles.routeAvoidTooltip}
+                  role="tooltip"
+                >
+                  {routeAvoidTooltips[option]}
+                </span>
               </button>
             ))}
           </div>
@@ -1804,7 +1826,7 @@ function RouteAlternativesTray({
       }}
     >
       {routes.map((route, index) => {
-        const copy = routeAlternativeCopy(route, index, baselineRoute, routeAvoids);
+        const copy = routeAlternativeCopy(route, index, baselineRoute, routeAvoids, routes);
         const selected = route.id === selectedRouteId;
         return (
           <button
@@ -1827,7 +1849,6 @@ function RouteAlternativesTray({
             onBlur={() => onPreviewRoute(null)}
             aria-pressed={selected}
           >
-            <span className={styles.routeAlternativeRail} aria-hidden="true" />
             <span className={styles.routeAlternativeTop}>
               <span className={styles.routeAlternativeTitle}>{copy.title}</span>
               <span className={styles.routeAlternativeDistance}>
@@ -1837,7 +1858,31 @@ function RouteAlternativesTray({
             <span className={styles.routeAlternativeTime}>
               {formatRouteDuration(route.durationSeconds)}
             </span>
-            <span className={styles.routeAlternativeDescription}>{copy.description}</span>
+            {copy.rows.length > 0 && (
+              <span className={styles.routeAlternativeMetrics}>
+                {copy.rows.map((row) => (
+                  <span className={styles.routeAlternativeMetricRow} key={row.label}>
+                    <span className={styles.routeAlternativeMetricLabelGroup}>
+                      <span
+                        className={`${styles.routeAlternativeMetricIcon} ${
+                          styles[`routeAlternativeMetricIcon_${row.kind}`]
+                        } ${row.tone === "muted" ? styles.routeAlternativeMetricIconMuted : ""}`}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.routeAlternativeMetricLabel}>{row.label}</span>
+                    </span>
+                    <span
+                      className={`${styles.routeAlternativeMetricValue} ${
+                        row.tone === "positive" ? styles.routeAlternativeMetricValuePositive : ""
+                      } ${row.tone === "muted" ? styles.routeAlternativeMetricValueMuted : ""
+                      }`}
+                    >
+                      {row.value}
+                    </span>
+                  </span>
+                ))}
+              </span>
+            )}
           </button>
         );
       })}
@@ -1858,11 +1903,6 @@ function formatRouteDuration(seconds: number): string {
   return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-function formatRouteDurationDiff(seconds: number): string {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `+${minutes} min`;
-}
-
 type LayerIconName = "help" | "close" | "accidents" | "flow" | "live" | "disturbances" | "speed";
 
 function LayerIconButton({
@@ -1881,6 +1921,7 @@ function LayerIconButton({
   onBadgeClick?: () => void;
 }) {
   const showBadge = on && typeof badgeCount === "number" && badgeCount > 0;
+  const tooltipLabel = label.startsWith("Stäng") ? label : `Visa ${label.toLowerCase()}`;
   return (
     <span className={styles.layerIconItem}>
       <button
@@ -1889,7 +1930,7 @@ function LayerIconButton({
         onClick={onToggle}
         aria-label={label}
         aria-pressed={on}
-        data-label={label}
+        data-label={tooltipLabel}
       >
         <span
           className={`${styles.layerIconGlyph} ${styles[`layerIconGlyph_${icon}`]}`}
