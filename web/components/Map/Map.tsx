@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
@@ -114,6 +114,19 @@ const routeMetricLabels: Record<RouteAvoidOption, string> = {
   accidentHistory: "Historisk olycksrisk",
 };
 
+const routeLoadingMessages = [
+  "Mäter distanser...",
+  "Räknar vägar...",
+  "Hittar alternativ...",
+  "Väger risker...",
+  "Letar lugnare sträckor...",
+  "Jämför vägval...",
+  "Kollar störningar...",
+  "Undviker omvägar...",
+  "Synkar kartan...",
+  "Finjusterar rutten...",
+];
+
 const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
 const mobileInfoBoxQuery = "(max-width: 767px)";
 const customRouteStopIdPrefix = "via-";
@@ -124,6 +137,13 @@ function isMobileViewport(): boolean {
 
 function isCustomRouteStop(stop: RouteStop): boolean {
   return stop.id.startsWith(customRouteStopIdPrefix);
+}
+
+function shuffledRouteLoadingMessages(): string[] {
+  return routeLoadingMessages
+    .map((message) => ({ message, sort: Math.random() }))
+    .sort((a, b) => a.sort - b.sort)
+    .map(({ message }) => message);
 }
 
 function dedupeRouteCoordinates(coordinates: [number, number][]): [number, number][] {
@@ -1342,7 +1362,9 @@ export default function Map() {
           routeLoading || routeCompareLoading ? styles.routeLoadingOverlayActive : ""
         }`}
         aria-hidden="true"
-      />
+      >
+        <RouteLoadingIndicator active={routeLoading || routeCompareLoading} />
+      </div>
       {infoOpen && (
         <button
           type="button"
@@ -1686,6 +1708,46 @@ function routeAlternativeCopy(
     title: routeAlternativeTitle(route, index, fallbackBaseline, avoids, routes, isCustomRoute),
     rows: routeAlternativeRows(route, fallbackBaseline, avoids),
   };
+}
+
+function RouteLoadingIndicator({ active }: { active: boolean }) {
+  const [messages, setMessages] = useState(shuffledRouteLoadingMessages);
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  useEffect(() => {
+    if (!active) return;
+    setMessages(shuffledRouteLoadingMessages());
+    setMessageIndex(0);
+  }, [active]);
+
+  useEffect(() => {
+    if (!active) return;
+    const id = window.setInterval(() => {
+      setMessageIndex((index) => (index + 1) % messages.length);
+    }, 2200);
+    return () => window.clearInterval(id);
+  }, [active, messages.length]);
+
+  return (
+    <div className={styles.routeLoadingIndicator}>
+      <div className={styles.routeLoadingRuler} aria-hidden="true">
+        <span className={styles.routeLoadingRulerBase} />
+        <span className={styles.routeLoadingRulerSweep} />
+      </div>
+      <div
+        className={styles.routeLoadingMessageMask}
+        style={{ "--route-loading-message-index": messageIndex } as CSSProperties}
+      >
+        <div className={styles.routeLoadingMessageStack}>
+          {messages.map((message) => (
+            <span key={message} className={styles.routeLoadingMessage}>
+              {message}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RoutePlannerBox({
