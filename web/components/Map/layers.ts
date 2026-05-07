@@ -33,6 +33,7 @@ export type RouteDragCommit = {
   routeId: string;
   lngLat: [number, number];
   segmentIndex: number;
+  anchorCoordinates: [number, number][];
 };
 export type RouteDragHandler = (commit: RouteDragCommit) => void;
 type HeatmapStop = { density: number; color: string; alpha: number };
@@ -72,12 +73,8 @@ const LARGE_ROADS_BADGE_LAYER_ID = "large-roads-speed-badge-symbols";
 const DISTURBANCE_SOURCE_ID = "disturbances";
 const DISTURBANCE_LAYER_ID = "disturbances-points";
 const DISTURBANCE_HIT_LAYER_ID = "disturbances-hit-target";
-const DISTURBANCE_ROADWORK_IMAGE_ID = "disturbance-roadwork-triangle";
-const DISTURBANCE_TRAFFIC_IMAGE_ID = "disturbance-traffic-square";
-const DISTURBANCE_COLORS = {
-  roadwork: "#FFE36A",
-  traffic: "#FF8A4A",
-};
+const DISTURBANCE_MARKER_IMAGE_ID = "disturbance-triangle";
+const DISTURBANCE_COLOR = "#999999";
 const TRAFFIC_FLOW_SOURCE_ID = "traffic-flow";
 const TRAFFIC_FLOW_LAYER_ID = "traffic-flow-lines";
 const TRAFFIC_FLOW_HIT_LAYER_ID = "traffic-flow-hit-target";
@@ -119,6 +116,7 @@ const ROUTE_ANNOTATION_COLORS = {
 // sån query timeoutar mot Supabase för de tyngre analyslagren (för många
 // segment). Zoom 9 är ~2° vilket fungerar bra för Risk/ÅDT.
 const NVDB_MIN_ZOOM = 9;
+const DISTURBANCE_MIN_ZOOM = NVDB_MIN_ZOOM;
 const ADT_TILE_DEG = 0.6;
 const ADT_TILE_PADDING = 0.2;
 const ADT_MAX_CONCURRENT_TILES = 8;
@@ -184,11 +182,7 @@ function ensureDisturbanceMarkerImages(map: MapLibreMap): void {
   const size = 22;
   const strokeWidth = 2;
 
-  const addMarker = (
-    id: string,
-    fill: string,
-    drawPath: (ctx: CanvasRenderingContext2D) => void,
-  ) => {
+  const addMarker = (id: string) => {
     if (map.hasImage(id)) return;
     const canvas = document.createElement("canvas");
     canvas.width = size * pixelRatio;
@@ -197,8 +191,12 @@ function ensureDisturbanceMarkerImages(map: MapLibreMap): void {
     if (!ctx) return;
 
     ctx.scale(pixelRatio, pixelRatio);
-    drawPath(ctx);
-    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(size / 2, 3);
+    ctx.lineTo(size - 4, size - 4);
+    ctx.lineTo(4, size - 4);
+    ctx.closePath();
+    ctx.fillStyle = DISTURBANCE_COLOR;
     ctx.fill();
     ctx.strokeStyle = "#222222";
     ctx.lineWidth = strokeWidth;
@@ -207,21 +205,7 @@ function ensureDisturbanceMarkerImages(map: MapLibreMap): void {
     map.addImage(id, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio });
   };
 
-  addMarker(DISTURBANCE_ROADWORK_IMAGE_ID, DISTURBANCE_COLORS.roadwork, (ctx) => {
-    ctx.beginPath();
-    ctx.moveTo(size / 2, 3);
-    ctx.lineTo(size - 4, size - 4);
-    ctx.lineTo(4, size - 4);
-    ctx.closePath();
-  });
-
-  addMarker(DISTURBANCE_TRAFFIC_IMAGE_ID, DISTURBANCE_COLORS.traffic, (ctx) => {
-    const side = 14;
-    const x = (size - side) / 2;
-    const y = (size - side) / 2;
-    ctx.beginPath();
-    ctx.roundRect(x, y, side, side, 2);
-  });
+  addMarker(DISTURBANCE_MARKER_IMAGE_ID);
 }
 
 function ensureRouteAnnotationImages(map: MapLibreMap): void {
@@ -676,6 +660,32 @@ function routeFeatureCoordinates(feature: maplibregl.MapGeoJSONFeature | undefin
   );
 }
 
+function routeDragAnchorCoordinates(
+  coordinates: [number, number][],
+  segmentIndex: number,
+  dragStart: [number, number],
+): [number, number][] {
+  const startIndex = Math.max(0, Math.min(segmentIndex, coordinates.length - 1));
+  const anchorIndices = new Set<number>();
+
+  if (startIndex >= 8) {
+    anchorIndices.add(Math.round(startIndex * 0.66));
+  }
+
+  anchorIndices.add(Math.max(0, startIndex - 1));
+
+  const anchors = [...anchorIndices]
+    .sort((a, b) => a - b)
+    .map((index) => coordinates[index])
+    .filter((coord): coord is [number, number] => Boolean(coord));
+  anchors.push(dragStart);
+
+  return anchors.filter((coord, index, list) => {
+    const prev = list[index - 1];
+    return !prev || prev[0] !== coord[0] || prev[1] !== coord[1];
+  });
+}
+
 export function addRouteLayer(
   map: MapLibreMap,
   onRouteClick?: RouteClickHandler,
@@ -907,7 +917,12 @@ export function addRouteLayer(
   if (onPrimaryRouteDrag) {
     let hoverPopup: maplibregl.Popup | null = null;
     let routeDotMarker: maplibregl.Marker | null = null;
-    let dragging: { routeId: string; coordinates: [number, number][] } | null = null;
+    let dragging: {
+      routeId: string;
+      coordinates: [number, number][];
+      anchorCoordinates: [number, number][];
+      segmentIndex: number;
+    } | null = null;
     let hasDragged = false;
 
     const closeHoverPopup = () => {
@@ -944,7 +959,8 @@ export function addRouteLayer(
       onPrimaryRoutePreview({
         routeId: dragging.routeId,
         lngLat: [event.lngLat.lng, event.lngLat.lat],
-        segmentIndex: 0,
+        segmentIndex: dragging.segmentIndex,
+        anchorCoordinates: dragging.anchorCoordinates,
       });
     };
 
@@ -958,6 +974,7 @@ export function addRouteLayer(
         routeId: drag.routeId,
         lngLat: [event.lngLat.lng, event.lngLat.lat],
         segmentIndex: target?.segmentIndex ?? 0,
+        anchorCoordinates: drag.anchorCoordinates,
       });
     };
 
@@ -972,11 +989,12 @@ export function addRouteLayer(
       hoverPopup = new maplibregl.Popup({
         closeButton: false,
         closeOnClick: false,
+        className: "route-drag-popup",
         offset: 14,
       })
         .setLngLat(event.lngLat)
         .setHTML(
-          '<div style="padding:6px 8px;border-radius:4px;background:#fff;color:#111;font:600 12px Arial,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.22);white-space:nowrap">Dra för att ändra rutt</div>',
+          '<div class="route-drag-popup-body">Dra för att ändra rutt</div>',
         )
         .addTo(map);
     });
@@ -1001,11 +1019,17 @@ export function addRouteLayer(
       const feature = event.features?.[0];
       const routeId = feature?.properties?.id;
       const coordinates = routeFeatureCoordinates(feature);
-      if (typeof routeId !== "string" || coordinates.length < 2) return;
+      const target = closestRoutePoint(map, coordinates, event.point);
+      if (typeof routeId !== "string" || coordinates.length < 2 || !target) return;
 
       event.preventDefault();
       closeHoverPopup();
-      dragging = { routeId, coordinates };
+      dragging = {
+        routeId,
+        coordinates,
+        anchorCoordinates: routeDragAnchorCoordinates(coordinates, target.segmentIndex, target.lngLat),
+        segmentIndex: target.segmentIndex,
+      };
       hasDragged = false;
       map.dragPan.disable();
       map.getCanvas().style.cursor = "pointer";
@@ -1178,16 +1202,12 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
       id: DISTURBANCE_LAYER_ID,
       type: "symbol",
       source: DISTURBANCE_SOURCE_ID,
+      minzoom: DISTURBANCE_MIN_ZOOM,
       layout: {
-        "icon-image": [
-          "match", ["get", "category"],
-          "roadwork", DISTURBANCE_ROADWORK_IMAGE_ID,
-          "traffic", DISTURBANCE_TRAFFIC_IMAGE_ID,
-          DISTURBANCE_TRAFFIC_IMAGE_ID,
-        ],
+        "icon-image": DISTURBANCE_MARKER_IMAGE_ID,
         "icon-size": [
           "interpolate", ["linear"], ["zoom"],
-          4, 0.85,
+          DISTURBANCE_MIN_ZOOM, 0.85,
           10, 1,
           14, 1.18,
         ],
@@ -1206,8 +1226,9 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
       id: DISTURBANCE_HIT_LAYER_ID,
       type: "circle",
       source: DISTURBANCE_SOURCE_ID,
+      minzoom: DISTURBANCE_MIN_ZOOM,
       paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 12, 12, 18, 16, 24],
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], DISTURBANCE_MIN_ZOOM, 12, 12, 18, 16, 24],
         "circle-color": "#000000",
         "circle-opacity": 0,
       },
