@@ -109,7 +109,7 @@ Returnerar:
 - ruttkandidater
 - primär geometri
 - tid/distans
-- `avoidScores` för `accidentHistory`, `highSpeed`, `disturbances`, `bridges` och `tunnels`
+- `avoidScores` för `accidentHistory`, `highSpeed`, `trafficIntensity`, `disturbances`, `bridges` och `tunnels`
 
 GraphHopper-kandidater:
 
@@ -117,11 +117,12 @@ GraphHopper-kandidater:
 2. Alternativa snabbaste rutter när filter är aktiva.
 3. Filterstyrda custom model-kandidater:
    - `highSpeed` sänker prioritet för motorväg/trunk och höga hastigheter.
+   - `trafficIntensity` sänker prioritet för trafikintensiva ÅDT-segment och aktiva liveflödessegment med tät/långsam trafik.
    - `bridges`/`tunnels` sänker prioritet för GraphHoppers `road_environment`-värden `BRIDGE` och `TUNNEL`.
    - `accidentHistory` skapar penalty zones runt risksegment i baseline-korridoren.
    - `disturbances` skapar penalty zones runt aktiva störningspunkter i baseline-korridoren.
 
-Olyckshistorik, störningar, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Bro-/tunnelexponering räknas från GraphHopper `road_environment` path details, medan övriga filter även poängsätts efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
+Olyckshistorik, trafikintensiva vägar, störningar, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Bro-/tunnelexponering räknas från GraphHopper `road_environment` path details, medan övriga filter även poängsätts efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
 
 ## Segment
 

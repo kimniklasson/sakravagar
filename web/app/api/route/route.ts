@@ -26,6 +26,7 @@ export type RouteLine = {
   avoidScores: {
     accidentHistory: number | null;
     highSpeed: number | null;
+    trafficIntensity: number | null;
     disturbances: number | null;
     bridges: number | null;
     tunnels: number | null;
@@ -33,6 +34,7 @@ export type RouteLine = {
   exposure: {
     accidentHistory: number | null;
     highSpeedMeters: number | null;
+    trafficIntensityMeters: number | null;
     disturbances: number | null;
     bridgeMeters: number | null;
     tunnelMeters: number | null;
@@ -41,7 +43,7 @@ export type RouteLine = {
   annotations: RouteAnnotations;
 };
 
-export type RouteAnnotationSegmentKind = "highSpeed" | "bridges" | "tunnels";
+export type RouteAnnotationSegmentKind = "highSpeed" | "trafficIntensity" | "bridges" | "tunnels";
 export type RouteAnnotationPointKind = "disturbances" | "accidentHistory";
 
 export type RouteAnnotationSegment = {
@@ -57,6 +59,7 @@ export type RouteAnnotationPoint = {
 
 export type RouteAnnotations = {
   highSpeed: RouteAnnotationSegment[];
+  trafficIntensity: RouteAnnotationSegment[];
   bridges: RouteAnnotationSegment[];
   tunnels: RouteAnnotationSegment[];
   disturbances: RouteAnnotationPoint[];
@@ -148,6 +151,27 @@ type LargeRoadRow = {
   geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
 };
 
+type AdtRow = {
+  fid: number;
+  adt_total: number | null;
+  adt_tung?: number | null;
+  matar?: number | null;
+  geometry: GeoJSON.LineString;
+};
+
+type TrafficFlowRow = {
+  site_id: number;
+  fid: number;
+  vehicle_flow_rate: number | null;
+  average_vehicle_speed: number | null;
+  data_quality: string | null;
+  measurement_time: string | null;
+  last_seen: string;
+  sample_count: number;
+  snap_distance_m: number | null;
+  geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
+};
+
 type DisturbanceRow = {
   id: string;
   lng: number;
@@ -193,16 +217,21 @@ const avoidTunnelCustomModel: GraphHopperCustomModel = {
 
 const RISK_PENALTY_MAX_AREAS = 48;
 const DISTURBANCE_PENALTY_MAX_AREAS = 32;
+const TRAFFIC_INTENSITY_ADT_PENALTY_MAX_AREAS = 56;
+const TRAFFIC_INTENSITY_FLOW_PENALTY_MAX_AREAS = 24;
 const RISK_PENALTY_PADDING_METERS = 140;
 const DISTURBANCE_PENALTY_RADIUS_METERS = 450;
+const TRAFFIC_INTENSITY_PENALTY_PADDING_METERS = 120;
 const PENALTY_ZONE_BBOX_PADDING = 0.08;
 const PENALTY_ZONE_MAX_BBOX_AREA = 80;
+const TRAFFIC_FLOW_ACTIVE_WINDOW_MS = 45 * 60 * 1000;
 
-const routeAvoidOptions = ["accidentHistory", "highSpeed", "disturbances", "bridges", "tunnels"] as const;
+const routeAvoidOptions = ["accidentHistory", "highSpeed", "trafficIntensity", "disturbances", "bridges", "tunnels"] as const;
 
 const noAvoids: RouteAvoidState = {
   accidentHistory: false,
   highSpeed: false,
+  trafficIntensity: false,
   disturbances: false,
   bridges: false,
   tunnels: false,
@@ -229,6 +258,7 @@ function parseAvoidState(value: unknown): RouteAvoidState {
   return {
     accidentHistory: input.accidentHistory === true,
     highSpeed: input.highSpeed === true,
+    trafficIntensity: input.trafficIntensity === true,
     disturbances: input.disturbances === true,
     bridges: input.bridges === true,
     tunnels: input.tunnels === true,
@@ -486,6 +516,24 @@ function flattenLineString(
   return geometry.type === "MultiLineString" ? geometry.coordinates : [geometry.coordinates];
 }
 
+function lineLengthMeters(line: GeoJSON.Position[], originLat: number): number {
+  let meters = 0;
+  for (let index = 1; index < line.length; index += 1) {
+    const start = line[index - 1];
+    const end = line[index];
+    if (!start || !end) continue;
+    meters += distanceBetweenCoordinatesMeters(start, end, originLat);
+  }
+  return meters;
+}
+
+function geometryLengthMeters(
+  geometry: GeoJSON.LineString | GeoJSON.MultiLineString,
+  originLat: number,
+): number {
+  return flattenLineString(geometry).reduce((sum, line) => sum + lineLengthMeters(line, originLat), 0);
+}
+
 function midpoint(line: GeoJSON.Position[]): GeoJSON.Position | null {
   if (!line.length) return null;
   return line[Math.floor(line.length / 2)] ?? null;
@@ -508,6 +556,7 @@ function toLngLat(coord: GeoJSON.Position | undefined): [number, number] | null 
 function emptyRouteAnnotations(): RouteAnnotations {
   return {
     highSpeed: [],
+    trafficIntensity: [],
     bridges: [],
     tunnels: [],
     disturbances: [],
@@ -782,6 +831,150 @@ function scoreDisturbances(route: OsrmRoute, rows: DisturbanceRow[]): RouteMetri
   };
 }
 
+function adtIntensityScore(adtTotal: number | null): number {
+  const adt = Math.max(0, adtTotal ?? 0);
+  if (adt < 2_000) return 0;
+  if (adt < 5_000) return 0.12;
+  if (adt < 10_000) return 0.28;
+  if (adt < 20_000) return 0.55;
+  if (adt < 40_000) return 0.78;
+  if (adt < 60_000) return 0.92;
+  return 1;
+}
+
+function adtPenaltyMultiplier(row: AdtRow): string {
+  const score = adtIntensityScore(row.adt_total);
+  if (score >= 0.92) return "0.22";
+  if (score >= 0.78) return "0.32";
+  if (score >= 0.55) return "0.45";
+  return "0.65";
+}
+
+function trafficFlowCategory(row: TrafficFlowRow): "calm" | "moving" | "busy" | "slow" {
+  const flow = row.vehicle_flow_rate ?? 0;
+  const speed = row.average_vehicle_speed;
+  if ((typeof speed === "number" && speed < 25) || flow >= 2500) return "slow";
+  if ((typeof speed === "number" && speed < 45) || flow >= 1600) return "busy";
+  if (flow >= 800) return "moving";
+  return "calm";
+}
+
+function trafficFlowIntensityScore(row: TrafficFlowRow): number {
+  switch (trafficFlowCategory(row)) {
+    case "slow":
+      return 0.82;
+    case "busy":
+      return 0.62;
+    case "moving":
+      return 0.28;
+    case "calm":
+      return 0.08;
+  }
+}
+
+function trafficFlowPenaltyMultiplier(row: TrafficFlowRow): string {
+  switch (trafficFlowCategory(row)) {
+    case "slow":
+      return "0.28";
+    case "busy":
+      return "0.42";
+    case "moving":
+      return "0.68";
+    case "calm":
+      return "0.9";
+  }
+}
+
+function adtRowNearRoute(route: OsrmRoute, row: AdtRow, originLat: number): boolean {
+  const line = route.geometry.coordinates;
+  const mid = midpoint(row.geometry.coordinates);
+  const samples = mid ? [...sampleLine(row.geometry.coordinates), mid] : sampleLine(row.geometry.coordinates);
+  return samples.some((point) => distancePointToLineMeters(point, line, originLat) <= 95);
+}
+
+function trafficFlowRowNearRoute(route: OsrmRoute, row: TrafficFlowRow, originLat: number): boolean {
+  const line = route.geometry.coordinates;
+  return flattenLineString(row.geometry).some((segment) => {
+    const mid = midpoint(segment);
+    const samples = mid ? [...sampleLine(segment), mid] : sampleLine(segment);
+    return samples.some((point) => distancePointToLineMeters(point, line, originLat) <= 130);
+  });
+}
+
+function scoreTrafficIntensity(route: OsrmRoute, adtRows: AdtRow[], trafficFlowRows: TrafficFlowRow[]): RouteMetric {
+  if (!adtRows.length && !trafficFlowRows.length) return { score: null, exposure: null };
+
+  const originLat = routeOriginLat(route);
+  let coveredMeters = 0;
+  let weightedMeters = 0;
+  let intensiveMeters = 0;
+
+  for (const row of adtRows) {
+    if (!adtRowNearRoute(route, row, originLat)) continue;
+    const meters = Math.max(35, geometryLengthMeters(row.geometry, originLat));
+    const intensity = adtIntensityScore(row.adt_total);
+    coveredMeters += meters;
+    weightedMeters += meters * intensity;
+    if (intensity >= 0.55) intensiveMeters += meters;
+  }
+
+  for (const row of trafficFlowRows) {
+    if (!trafficFlowRowNearRoute(route, row, originLat)) continue;
+    const meters = Math.max(60, geometryLengthMeters(row.geometry, originLat));
+    const intensity = trafficFlowIntensityScore(row);
+    coveredMeters += meters;
+    weightedMeters += meters * intensity * 0.55;
+    if (intensity >= 0.62) intensiveMeters += meters;
+  }
+
+  if (coveredMeters <= 0) return { score: null, exposure: null };
+
+  const averageIntensity = weightedMeters / Math.max(1, coveredMeters);
+  const intensiveShare = Math.min(1, intensiveMeters / Math.max(1, route.distance));
+  return {
+    score: Math.min(1, averageIntensity * 0.75 + intensiveShare * 0.35),
+    exposure: Math.min(intensiveMeters, route.distance),
+  };
+}
+
+function trafficIntensitySegments(
+  route: OsrmRoute,
+  adtRows: AdtRow[],
+  trafficFlowRows: TrafficFlowRow[],
+): RouteAnnotationSegment[] {
+  if ((!adtRows.length && !trafficFlowRows.length) || route.geometry.coordinates.length < 2) return [];
+
+  const originLat = routeOriginLat(route);
+  const samples: GeoJSON.Position[] = [];
+  for (const row of adtRows) {
+    if (adtIntensityScore(row.adt_total) < 0.55) continue;
+    const mid = midpoint(row.geometry.coordinates);
+    if (mid) samples.push(mid);
+    samples.push(...sampleLine(row.geometry.coordinates));
+  }
+  for (const row of trafficFlowRows) {
+    if (trafficFlowIntensityScore(row) < 0.62) continue;
+    for (const segment of flattenLineString(row.geometry)) {
+      const mid = midpoint(segment);
+      if (mid) samples.push(mid);
+      samples.push(...sampleLine(segment));
+    }
+  }
+  if (!samples.length) return [];
+
+  return routeSegmentAnnotationsFromMask(route, "trafficIntensity", (segmentIndex) => {
+    const start = route.geometry.coordinates[segmentIndex];
+    const end = route.geometry.coordinates[segmentIndex + 1];
+    if (!start || !end) return false;
+    const mid: GeoJSON.Position = [
+      ((start[0] ?? 0) + (end[0] ?? 0)) / 2,
+      ((start[1] ?? 0) + (end[1] ?? 0)) / 2,
+    ];
+    return samples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 130 ||
+      distancePointToSegmentMeters(mid, sample, sample, originLat) <= 130);
+  });
+}
+
 function roadEnvironmentExposure(route: OsrmRoute, environment: "BRIDGE" | "TUNNEL"): RouteMetric {
   const details = route.roadEnvironmentDetails;
   if (!details) return { score: null, exposure: null };
@@ -814,10 +1007,15 @@ function roadEnvironmentExposure(route: OsrmRoute, environment: "BRIDGE" | "TUNN
 async function fetchPenaltyZoneRows(
   routes: OsrmRoute[],
   avoid: RouteAvoidState,
-): Promise<{ riskRows: RiskRow[]; disturbanceRows: DisturbanceRow[] }> {
-  const empty = { riskRows: [], disturbanceRows: [] };
+): Promise<{
+  riskRows: RiskRow[];
+  disturbanceRows: DisturbanceRow[];
+  adtRows: AdtRow[];
+  trafficFlowRows: TrafficFlowRow[];
+}> {
+  const empty = { riskRows: [], disturbanceRows: [], adtRows: [], trafficFlowRows: [] };
   if (!supabaseUrl || !supabaseAnon) return empty;
-  if (!avoid.accidentHistory && !avoid.disturbances) return empty;
+  if (!avoid.accidentHistory && !avoid.disturbances && !avoid.trafficIntensity) return empty;
 
   const bbox = routeBbox(routes, PENALTY_ZONE_BBOX_PADDING);
   if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return empty;
@@ -833,7 +1031,8 @@ async function fetchPenaltyZoneRows(
 
   try {
     const activeSince = new Date(Date.now() - 90 * 60 * 1000).toISOString();
-    const [riskResult, disturbancesResult] = await Promise.all([
+    const trafficFlowActiveSince = new Date(Date.now() - TRAFFIC_FLOW_ACTIVE_WINDOW_MS).toISOString();
+    const [riskResult, disturbancesResult, adtResult, trafficFlowResult] = await Promise.all([
       avoid.accidentHistory
         ? client.rpc("risk_in_bbox", params)
         : Promise.resolve({ data: [], error: null }),
@@ -848,6 +1047,15 @@ async function fetchPenaltyZoneRows(
             .lte("lat", bbox.maxLat)
             .limit(120)
         : Promise.resolve({ data: [], error: null }),
+      avoid.trafficIntensity
+        ? client.rpc("adt_in_bbox", params)
+        : Promise.resolve({ data: [], error: null }),
+      avoid.trafficIntensity && bboxArea(bbox) <= 30
+        ? client.rpc("traffic_flow_segments_in_bbox", {
+            ...params,
+            active_since: trafficFlowActiveSince,
+          })
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     return {
@@ -855,6 +1063,8 @@ async function fetchPenaltyZoneRows(
       disturbanceRows: disturbancesResult.error
         ? []
         : (disturbancesResult.data ?? []) as DisturbanceRow[],
+      adtRows: adtResult.error ? [] : (adtResult.data ?? []) as AdtRow[],
+      trafficFlowRows: trafficFlowResult.error ? [] : (trafficFlowResult.data ?? []) as TrafficFlowRow[],
     };
   } catch (err) {
     console.warn("route penalty zone lookup failed", err);
@@ -877,7 +1087,12 @@ function disturbancePenaltyMultiplier(messageType: string | null): string {
 }
 
 function buildPenaltyZoneCustomModel(
-  rows: { riskRows: RiskRow[]; disturbanceRows: DisturbanceRow[] },
+  rows: {
+    riskRows: RiskRow[];
+    disturbanceRows: DisturbanceRow[];
+    adtRows: AdtRow[];
+    trafficFlowRows: TrafficFlowRow[];
+  },
   avoid: RouteAvoidState,
 ): GraphHopperCustomModel | undefined {
   const features: GraphHopperAreaFeature[] = [];
@@ -920,6 +1135,48 @@ function buildPenaltyZoneCustomModel(
     }
   }
 
+  if (avoid.trafficIntensity) {
+    const adtRows = [...rows.adtRows]
+      .filter((row) => adtIntensityScore(row.adt_total) >= 0.55)
+      .sort((a, b) => adtIntensityScore(b.adt_total) - adtIntensityScore(a.adt_total))
+      .slice(0, TRAFFIC_INTENSITY_ADT_PENALTY_MAX_AREAS);
+
+    for (const row of adtRows) {
+      const feature = linePenaltyArea(
+        `traffic_intensity_adt_${row.fid}`,
+        row.geometry.coordinates,
+        TRAFFIC_INTENSITY_PENALTY_PADDING_METERS,
+      );
+      if (!feature) continue;
+      features.push(feature);
+      priority.push({
+        if: `in_${feature.id}`,
+        multiply_by: adtPenaltyMultiplier(row),
+      });
+    }
+
+    const trafficFlowRows = [...rows.trafficFlowRows]
+      .filter((row) => trafficFlowIntensityScore(row) >= 0.62)
+      .sort((a, b) => trafficFlowIntensityScore(b) - trafficFlowIntensityScore(a))
+      .slice(0, TRAFFIC_INTENSITY_FLOW_PENALTY_MAX_AREAS);
+
+    for (const [index, row] of trafficFlowRows.entries()) {
+      const line = flattenLineString(row.geometry)[0];
+      if (!line) continue;
+      const feature = linePenaltyArea(
+        `traffic_intensity_flow_${index + 1}_${row.site_id}_${row.fid}`,
+        line,
+        TRAFFIC_INTENSITY_PENALTY_PADDING_METERS,
+      );
+      if (!feature) continue;
+      features.push(feature);
+      priority.push({
+        if: `in_${feature.id}`,
+        multiply_by: trafficFlowPenaltyMultiplier(row),
+      });
+    }
+  }
+
   return mergeCustomModels({
     priority,
     areas: features.length
@@ -947,7 +1204,7 @@ async function buildRoutePreferenceCustomModel(
 
 type RouteScoreResult = Pick<RouteLine, "avoidScores" | "exposure" | "annotations">;
 
-async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreResult[]> {
+async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidState): Promise<RouteScoreResult[]> {
   const baseScores = routes.map((route) => {
     const bridges = roadEnvironmentExposure(route, "BRIDGE");
     const tunnels = roadEnvironmentExposure(route, "TUNNEL");
@@ -958,6 +1215,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
       avoidScores: {
         accidentHistory: null,
         highSpeed: null,
+        trafficIntensity: null,
         disturbances: null,
         bridges: bridges.score,
         tunnels: tunnels.score,
@@ -965,6 +1223,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
       exposure: {
         accidentHistory: null,
         highSpeedMeters: null,
+        trafficIntensityMeters: null,
         disturbances: null,
         bridgeMeters: bridges.exposure,
         tunnelMeters: tunnels.exposure,
@@ -985,6 +1244,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
       avoidScores: {
         accidentHistory: null,
         highSpeed: null,
+        trafficIntensity: null,
         disturbances: null,
         bridges: null,
         tunnels: null,
@@ -992,6 +1252,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
       exposure: {
         accidentHistory: null,
         highSpeedMeters: null,
+        trafficIntensityMeters: null,
         disturbances: null,
         bridgeMeters: null,
         tunnelMeters: null,
@@ -1011,7 +1272,8 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
 
   try {
     const activeSince = new Date(Date.now() - 90 * 60 * 1000).toISOString();
-    const [riskResult, largeRoadsResult, disturbancesResult, eventsResult] = await Promise.all([
+    const trafficFlowActiveSince = new Date(Date.now() - TRAFFIC_FLOW_ACTIVE_WINDOW_MS).toISOString();
+    const [riskResult, largeRoadsResult, disturbancesResult, eventsResult, adtResult, trafficFlowResult] = await Promise.all([
       bboxArea(bbox) <= 80
         ? client.rpc("risk_in_bbox", params)
         : Promise.resolve({ data: [], error: null }),
@@ -1037,6 +1299,15 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
             .lte("lat", bbox.maxLat)
             .limit(1000)
         : Promise.resolve({ data: [], error: null }),
+      avoid.trafficIntensity && bboxArea(bbox) <= 80
+        ? client.rpc("adt_in_bbox", params)
+        : Promise.resolve({ data: [], error: null }),
+      avoid.trafficIntensity && bboxArea(bbox) <= 30
+        ? client.rpc("traffic_flow_segments_in_bbox", {
+            ...params,
+            active_since: trafficFlowActiveSince,
+          })
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     const riskRows = riskResult.error ? [] : (riskResult.data ?? []) as RiskRow[];
@@ -1051,16 +1322,26 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
     const eventRows = eventsResult.error
       ? []
       : (eventsResult.data ?? []) as EventRow[];
+    const adtRows = adtResult.error ? [] : (adtResult.data ?? []) as AdtRow[];
+    const trafficFlowRows = trafficFlowResult.error
+      ? []
+      : (trafficFlowResult.data ?? []) as TrafficFlowRow[];
 
     return routes.map((route) => {
       const accidentHistory = scoreRisk(route, riskRows);
       const highSpeed = scoreHighSpeed(route, largeRoadRows);
+      const trafficIntensity = avoid.trafficIntensity
+        ? scoreTrafficIntensity(route, adtRows, trafficFlowRows)
+        : { score: null, exposure: null };
       const disturbances = scoreDisturbances(route, disturbanceRows);
       const bridges = roadEnvironmentExposure(route, "BRIDGE");
       const tunnels = roadEnvironmentExposure(route, "TUNNEL");
       const accidentPoints = accidentHistoryPoints(route, eventRows);
       const annotations = emptyRouteAnnotations();
       annotations.highSpeed = highSpeedSegments(route, largeRoadRows);
+      annotations.trafficIntensity = avoid.trafficIntensity
+        ? trafficIntensitySegments(route, adtRows, trafficFlowRows)
+        : [];
       annotations.bridges = roadEnvironmentSegments(route, "BRIDGE", "bridges");
       annotations.tunnels = roadEnvironmentSegments(route, "TUNNEL", "tunnels");
       annotations.disturbances = disturbancePoints(route, disturbanceRows);
@@ -1069,6 +1350,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
         avoidScores: {
           accidentHistory: accidentHistory.score,
           highSpeed: highSpeed.score,
+          trafficIntensity: trafficIntensity.score,
           disturbances: disturbances.score,
           bridges: bridges.score,
           tunnels: tunnels.score,
@@ -1076,6 +1358,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[]): Promise<RouteScoreRe
         exposure: {
           accidentHistory: accidentHistory.exposure,
           highSpeedMeters: highSpeed.exposure,
+          trafficIntensityMeters: trafficIntensity.exposure,
           disturbances: disturbances.exposure,
           bridgeMeters: bridges.exposure,
           tunnelMeters: tunnels.exposure,
@@ -1227,6 +1510,7 @@ async function fetchProviderRoutes(
     const source = [
       avoid.highSpeed ? "high-speed" : null,
       avoid.accidentHistory ? "accident-history" : null,
+      avoid.trafficIntensity ? "traffic-intensity" : null,
       avoid.disturbances ? "disturbances" : null,
       avoid.bridges ? "bridges" : null,
       avoid.tunnels ? "tunnels" : null,
@@ -1333,7 +1617,7 @@ export async function POST(req: Request) {
         ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
         : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
     const providerRoutes = routeResult.routes;
-    const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes);
+    const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid);
     const routes: RouteLine[] = providerRoutes.map((route, index) => ({
       id: `route-${index + 1}`,
       source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
@@ -1344,6 +1628,7 @@ export async function POST(req: Request) {
       avoidScores: scores[index]?.avoidScores ?? {
         accidentHistory: null,
         highSpeed: null,
+        trafficIntensity: null,
         disturbances: null,
         bridges: null,
         tunnels: null,
@@ -1351,6 +1636,7 @@ export async function POST(req: Request) {
       exposure: scores[index]?.exposure ?? {
         accidentHistory: null,
         highSpeedMeters: null,
+        trafficIntensityMeters: null,
         disturbances: null,
         bridgeMeters: null,
         tunnelMeters: null,

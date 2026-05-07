@@ -1270,6 +1270,12 @@
   background: #FF8C8C;
 }
 
+.routeAlternativeMetricIcon_trafficIntensity {
+  height: 3px;
+  border-radius: 999px;
+  background: #4DA3FF;
+}
+
 .routeAlternativeMetricIcon_bridges,
 .routeAlternativeMetricIcon_tunnels {
   background: repeating-linear-gradient(

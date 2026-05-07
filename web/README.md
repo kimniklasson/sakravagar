@@ -77,11 +77,12 @@ Aktiva "Undvik om möjligt"-filter:
 
 - `Vägar med olyckshistorik`
 - `Höga hastigheter`
+- `Trafikintensiva vägar`
 - `Störningar (kö/vägarbeten)`
 - `Broar`
 - `Tunnlar`
 
-GraphHopper påverkar höga hastigheter, broar och tunnlar via custom model. Broar/tunnlar exponeras med `road_environment` path details. Olyckshistorik och störningar skickas också in som dynamiska penalty zones när deras filter är aktiva, och poängsätts efteråt för ranking/exponering i UI:t.
+GraphHopper påverkar höga hastigheter, broar och tunnlar via custom model. Broar/tunnlar exponeras med `road_environment` path details. Olyckshistorik, trafikintensiva vägar och störningar skickas också in som dynamiska penalty zones när deras filter är aktiva, och poängsätts efteråt för ranking/exponering i UI:t. Trafikintensitet använder ÅDT som bas och liveflöde som förstärkning där det finns.
 
 ## Byta visualiseringstyp
 

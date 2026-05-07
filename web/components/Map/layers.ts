@@ -99,6 +99,7 @@ const ROUTE_END_IMAGE_ID = "route-end-marker";
 const ROUTE_ANNOTATION_LINE_SOURCE_ID = "route-annotation-lines";
 const ROUTE_ANNOTATION_POINT_SOURCE_ID = "route-annotation-points";
 const ROUTE_HIGH_SPEED_LAYER_ID = "route-high-speed-lines";
+const ROUTE_TRAFFIC_INTENSITY_LAYER_ID = "route-traffic-intensity-lines";
 const ROUTE_BRIDGE_LAYER_ID = "route-bridge-lines";
 const ROUTE_TUNNEL_LAYER_ID = "route-tunnel-lines";
 const ROUTE_DISTURBANCE_LAYER_ID = "route-disturbance-points";
@@ -106,6 +107,7 @@ const ROUTE_ACCIDENT_LAYER_ID = "route-accident-points";
 const ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID = "route-disturbance-triangle";
 const ROUTE_ANNOTATION_COLORS = {
   highSpeed: "#FF8C8C",
+  trafficIntensity: "#4DA3FF",
   bridges: "#F23FC8",
   tunnels: "#FF2F00",
   disturbances: "#F27A3F",
@@ -808,6 +810,20 @@ export function addRouteLayer(
   );
   map.addLayer(
     {
+      id: ROUTE_TRAFFIC_INTENSITY_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "trafficIntensity"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.trafficIntensity,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.4, 12, 2.5, 16, 3.5],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
       id: ROUTE_BRIDGE_LAYER_ID,
       type: "line",
       source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
@@ -1047,6 +1063,7 @@ export function addRouteLayer(
         ROUTE_ALT_HIT_LAYER_ID,
         ROUTE_PRIMARY_CASING_LAYER_ID,
         ROUTE_PRIMARY_LAYER_ID,
+        ROUTE_TRAFFIC_INTENSITY_LAYER_ID,
         ROUTE_HIGH_SPEED_LAYER_ID,
         ROUTE_BRIDGE_LAYER_ID,
         ROUTE_TUNNEL_LAYER_ID,
@@ -1102,6 +1119,7 @@ export function setRouteLayerData(
   const lineAnnotations = selectedRoute?.annotations
     ? [
         ...(visibleAnnotations.highSpeed ? selectedRoute.annotations.highSpeed : []),
+        ...(visibleAnnotations.trafficIntensity ? selectedRoute.annotations.trafficIntensity : []),
         ...(visibleAnnotations.bridges ? selectedRoute.annotations.bridges : []),
         ...(visibleAnnotations.tunnels ? selectedRoute.annotations.tunnels : []),
       ]

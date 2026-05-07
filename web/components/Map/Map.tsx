@@ -32,7 +32,7 @@ const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
 
 type RouteStopSource = "manual" | "gps";
-type RouteAvoidOption = "accidentHistory" | "highSpeed" | "disturbances" | "bridges" | "tunnels";
+type RouteAvoidOption = "accidentHistory" | "highSpeed" | "trafficIntensity" | "disturbances" | "bridges" | "tunnels";
 type RouteAvoidState = Record<RouteAvoidOption, boolean>;
 type RouteTimeBudget = number | "unlimited";
 type RouteStop = {
@@ -85,6 +85,7 @@ const initialRouteStops: RouteStop[] = [
 const initialRouteAvoids: RouteAvoidState = {
   accidentHistory: false,
   highSpeed: false,
+  trafficIntensity: false,
   disturbances: false,
   bridges: false,
   tunnels: false,
@@ -92,6 +93,7 @@ const initialRouteAvoids: RouteAvoidState = {
 
 const routeAvoidLabels: Record<RouteAvoidOption, string> = {
   highSpeed: "Höga hastigheter",
+  trafficIntensity: "Trafikintensiva vägar",
   bridges: "Broar",
   tunnels: "Tunnlar",
   disturbances: "Störningar",
@@ -100,6 +102,7 @@ const routeAvoidLabels: Record<RouteAvoidOption, string> = {
 
 const routeAvoidTooltips: Record<RouteAvoidOption, string> = {
   highSpeed: "90-120 km/h",
+  trafficIntensity: "Vägar som brukar ha mycket trafik",
   bridges: "Alla brotyper",
   tunnels: "Alla tunnlar",
   disturbances: "Vägarbeten, köer m.m.",
@@ -108,6 +111,7 @@ const routeAvoidTooltips: Record<RouteAvoidOption, string> = {
 
 const routeMetricLabels: Record<RouteAvoidOption, string> = {
   highSpeed: "Höga hastigheter",
+  trafficIntensity: "Trafikintensiva vägar",
   bridges: "Broar",
   tunnels: "Tunnlar",
   disturbances: "Störningar",
@@ -1524,6 +1528,7 @@ export default function Map() {
 
 function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
   if (option === "highSpeed") return route.exposure?.highSpeedMeters ?? null;
+  if (option === "trafficIntensity") return route.exposure?.trafficIntensityMeters ?? null;
   if (option === "bridges") return route.exposure?.bridgeMeters ?? null;
   if (option === "tunnels") return route.exposure?.tunnelMeters ?? null;
   return route.exposure?.[option] ?? null;
@@ -1532,7 +1537,7 @@ function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number 
 function routeCappedExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
   const value = routeExposureValue(route, option);
   if (value === null) return null;
-  if (option === "highSpeed" || option === "bridges" || option === "tunnels") {
+  if (option === "highSpeed" || option === "trafficIntensity" || option === "bridges" || option === "tunnels") {
     return Math.min(Math.max(0, value), route.distanceMeters);
   }
   return Math.max(0, value);
@@ -1599,6 +1604,17 @@ function routeAlternativeMetricRow(
 
   if (option === "disturbances") {
     return { ...baseRow, value: `${Math.round(current)} st` };
+  }
+
+  if (option === "trafficIntensity") {
+    const score = routeScoreValue(route, "trafficIntensity");
+    if (current <= 50 || (score !== null && score < 0.08)) {
+      return { ...baseRow, value: "Undviker", tone: "positive" };
+    }
+    if (score === null) return { ...baseRow, value: formatRouteExposureDistance(current) };
+    if (score >= 0.58) return { ...baseRow, value: "Hög" };
+    if (score >= 0.32) return { ...baseRow, value: "Måttlig" };
+    return { ...baseRow, value: "Låg" };
   }
 
   return { ...baseRow, value: formatRouteExposureDistance(current) };
@@ -1673,6 +1689,10 @@ function routeAlternativeTitle(
 
   if (avoids.highSpeed && routeIsBestForOption(route, routes, "highSpeed") && routeImprovesOption(route, baseline, "highSpeed")) {
     return "Lägre hastigheter";
+  }
+
+  if (avoids.trafficIntensity && routeIsBestForOption(route, routes, "trafficIntensity") && routeImprovesOption(route, baseline, "trafficIntensity")) {
+    return routeCappedExposureValue(route, "trafficIntensity") === 0 ? "Mindre trafik" : "Lugnare trafik";
   }
 
   if (avoids.disturbances && routeIsBestForOption(route, routes, "disturbances") && routeImprovesOption(route, baseline, "disturbances")) {
