@@ -733,8 +733,8 @@ export function addRouteLayer(
       filter: ["!=", ["get", "selected"], true],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": "#ffffff",
-        "line-opacity": 0.45,
+        "line-color": "#666666",
+        "line-opacity": 1,
         "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 12, 4, 16, 7],
       },
     },

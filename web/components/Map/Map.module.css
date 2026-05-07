@@ -67,12 +67,14 @@
   width: var(--overlay-width);
   height: calc(100% - (var(--overlay-inset) * 2));
   font-family: var(--font-univers);
+  pointer-events: none;
 }
 
 .routeControls {
   width: 100%;
   min-height: 0;
   flex: none;
+  pointer-events: auto;
 }
 
 .routeControlsWithAlternatives {
@@ -92,6 +94,7 @@
   cursor: pointer;
   color: var(--color-dark);
   overflow: hidden;
+  pointer-events: auto;
   transition: padding 320ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -232,6 +235,10 @@
 }
 
 .helpPanelScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.helpPanelClose {
   display: none;
 }
 
@@ -1272,12 +1279,26 @@
   transition: right 360ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease;
 }
 
+.layerMenuToggleItem {
+  display: none;
+}
+
+.layerHelpItem {
+  margin-bottom: 14px;
+}
+
+.layerMenuItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .layerControlsHelpOpen {
   right: calc(var(--overlay-inset) + var(--help-panel-width) + 16px);
   z-index: 3;
 }
 
-.layerControlsHelpOpen .layerIconItem:first-child .layerIconBtnOn {
+.layerControlsHelpOpen .layerHelpItem .layerIconBtnOn {
   background: var(--color-beige);
 }
 
@@ -1286,10 +1307,6 @@
   display: block;
   width: var(--icon-btn-size);
   height: var(--icon-btn-size);
-}
-
-.layerIconItem:first-child {
-  margin-bottom: 14px;
 }
 
 .layerIconBtn {
@@ -1384,6 +1401,11 @@
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
+}
+
+.layerIconGlyph_layers {
+  mask-image: url("/icons/layers.svg");
+  -webkit-mask-image: url("/icons/layers.svg");
 }
 
 .layerIconGlyph_help {
@@ -1891,8 +1913,9 @@
   .rightControls,
   .helpPanel {
     --overlay-inset: 24px;
-    --mobile-bottom-gap: 16px;
+    --mobile-bottom-gap: 24px;
     --mobile-bottom-clearance: max(var(--mobile-bottom-gap), calc(var(--app-visual-bottom, 0px) + var(--mobile-bottom-gap)));
+    --route-results-bottom-clearance: max(32px, calc(var(--app-visual-bottom, 0px) + 32px));
     --icon-btn-size: 40px;
   }
 
@@ -1909,13 +1932,18 @@
     width: 100%;
   }
 
+  .routeInputRow {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
   .routeAlternatives {
-    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
+    bottom: calc(var(--route-results-bottom-clearance) + env(safe-area-inset-bottom));
     padding-right: var(--overlay-inset);
   }
 
   .routeAlternativeCard {
-    flex-basis: min(300px, calc(100vw - (var(--overlay-inset) * 2)));
+    flex-basis: min(280px, calc(100vw - (var(--overlay-inset) * 2)));
   }
 
   .controlsInfoOpen {
@@ -1935,6 +1963,39 @@
   .helpPanelOpen {
     opacity: 1;
     transform: translateY(0);
+  }
+
+  .helpPanelClose {
+    display: inline-flex;
+    position: absolute;
+    top: calc(24px + env(safe-area-inset-top));
+    right: 24px;
+    z-index: 1;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-dark);
+    cursor: pointer;
+  }
+
+  .helpPanelCloseIcon {
+    display: block;
+    width: 24px;
+    height: 24px;
+    background: currentColor;
+    mask-image: url("/icons/close.svg");
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: 24px 24px;
+    -webkit-mask-image: url("/icons/close.svg");
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    -webkit-mask-size: 24px 24px;
   }
 
   .helpPanel::before {
@@ -1963,6 +2024,10 @@
   .infoBox {
     width: 100%;
     padding: 24px;
+  }
+
+  .infoBoxCompact {
+    padding: 16px;
   }
 
   .infoBoxOpen {
@@ -1996,6 +2061,15 @@
     white-space: nowrap;
   }
 
+  .routeAvoidSection {
+    margin-top: 16px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   .rightControls {
     top: auto;
     right: var(--overlay-inset);
@@ -2006,7 +2080,7 @@
   }
 
   .rightControlsWithRouteResults {
-    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom) + var(--route-results-height, 0px) + 16px);
+    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom));
   }
 
   .rightControlsHelpOpen {
@@ -2092,20 +2166,97 @@
   }
 
   .layerControls {
-    top: calc(var(--overlay-inset) + env(safe-area-inset-top));
+    top: auto;
     right: var(--overlay-inset);
-    bottom: auto;
+    bottom: calc(var(--mobile-bottom-clearance) + env(safe-area-inset-bottom) + var(--icon-btn-size) + 4px);
     left: auto;
     width: var(--icon-btn-size);
-    z-index: 3;
+    z-index: 4;
+    gap: 4px;
+    transition: opacity 180ms ease;
+  }
+
+  .layerMenuToggleItem {
+    display: block;
+  }
+
+  .layerHelpItem {
+    margin-bottom: 0;
+  }
+
+  .layerMenuToggleItem .layerIconBtn::before,
+  .layerMenuToggleItem .layerIconBtn::after,
+  .layerHelpItem .layerIconBtn::before,
+  .layerHelpItem .layerIconBtn::after {
+    display: none;
+  }
+
+  .layerMenuItems {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 4px);
+    align-items: flex-end;
+    gap: 4px;
+    width: max-content;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity 180ms ease, transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .layerMenuItems .layerIconItem {
+    width: auto;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 180ms ease, transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .layerMenuItems .layerIconBtn {
+    width: auto;
+    min-width: 0;
+    padding: 0 14px 0 16px;
+    gap: 16px;
+    justify-content: flex-end;
+    white-space: nowrap;
+  }
+
+  .layerMenuItems .layerIconBtn::before {
+    content: attr(data-label);
+    position: static;
+    display: block;
+    max-width: none;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: currentColor;
+    font-family: var(--font-univers);
+    font-size: var(--type-m-small-size);
+    line-height: var(--type-m-small-line);
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .layerMenuItems .layerIconBtn::after {
+    display: none;
+  }
+
+  .layerControlsMenuOpen .layerMenuItems,
+  .layerControlsMenuOpen .layerMenuItems .layerIconItem {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
   }
 
   .layerControlsHelpOpen {
     right: var(--overlay-inset);
     z-index: 42;
+    opacity: 0;
+    pointer-events: none;
   }
 
-  .layerControlsHelpOpen .layerIconItem:not(:first-child) {
+  .layerControlsHelpOpen .layerMenuToggleItem,
+  .layerControlsHelpOpen .layerMenuItems {
     display: none;
   }
 

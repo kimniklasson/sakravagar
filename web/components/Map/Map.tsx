@@ -109,6 +109,11 @@ const routeMetricLabels: Record<RouteAvoidOption, string> = {
 };
 
 const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
+const mobileInfoBoxQuery = "(max-width: 767px)";
+
+function isMobileViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(mobileInfoBoxQuery).matches;
+}
 
 const helpSections: HelpSection[] = [
   {
@@ -343,7 +348,8 @@ export default function Map() {
   const mapLoadedRef = useRef(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoBoxOpen, setInfoBoxOpen] = useState(false);
-  const [infoBoxCompact, setInfoBoxCompact] = useState(false);
+  const [infoBoxCompact, setInfoBoxCompact] = useState(isMobileViewport);
+  const [layerMenuOpen, setLayerMenuOpen] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -392,9 +398,10 @@ export default function Map() {
     setRouteLines((current) => {
       const selectedRoute = current.find((route) => route.id === routeId);
       if (!selectedRoute) return current;
+      const currentAvoids = routeAvoidsRef.current;
       const map = mapRef.current;
       if (map && mapLoadedRef.current) {
-        setRouteLayerData(map, current, routeId, routeAvoids);
+        setRouteLayerData(map, current, routeId, currentAvoids);
         focusRoute(map, [selectedRoute, ...current.filter((route) => route.id !== routeId)]);
       }
       setRouteNoticeText(null);
@@ -402,7 +409,7 @@ export default function Map() {
       setSelectedRouteId(routeId);
       return current;
     });
-  }, [routeAvoids]);
+  }, []);
 
   const previewRouteById = useCallback((routeId: string | null) => {
     const map = mapRef.current;
@@ -438,30 +445,46 @@ export default function Map() {
   useEffect(() => {
     const root = document.documentElement;
     let frame = 0;
+    let stableViewportHeight = window.innerHeight;
+    let stableViewportWidth = window.innerWidth;
+
+    const textInputFocused = () => {
+      const el = document.activeElement;
+      return el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el instanceof HTMLSelectElement ||
+        Boolean(el instanceof HTMLElement && el.isContentEditable);
+    };
 
     const updateViewportVars = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        const vv = window.visualViewport;
-        const height = vv?.height ?? window.innerHeight;
-        const offsetTop = vv?.offsetTop ?? 0;
-        const bottomInset = Math.max(0, window.innerHeight - height - offsetTop);
+        const focused = textInputFocused();
+        const widthChanged = Math.abs(window.innerWidth - stableViewportWidth) > 24;
+        if (!focused || widthChanged) {
+          stableViewportHeight = window.innerHeight;
+          stableViewportWidth = window.innerWidth;
+        }
 
-        root.style.setProperty("--app-visual-height", `${height}px`);
-        root.style.setProperty("--app-visual-top", `${offsetTop}px`);
-        root.style.setProperty("--app-visual-bottom", `${bottomInset}px`);
+        root.style.setProperty("--app-visual-height", `${stableViewportHeight}px`);
+        root.style.setProperty("--app-visual-top", "0px");
+        root.style.setProperty("--app-visual-bottom", "0px");
         mapRef.current?.resize();
       });
     };
 
     updateViewportVars();
     window.addEventListener("resize", updateViewportVars);
+    window.addEventListener("focusin", updateViewportVars);
+    window.addEventListener("focusout", updateViewportVars);
     window.visualViewport?.addEventListener("resize", updateViewportVars);
     window.visualViewport?.addEventListener("scroll", updateViewportVars);
 
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updateViewportVars);
+      window.removeEventListener("focusin", updateViewportVars);
+      window.removeEventListener("focusout", updateViewportVars);
       window.visualViewport?.removeEventListener("resize", updateViewportVars);
       window.visualViewport?.removeEventListener("scroll", updateViewportVars);
       root.style.removeProperty("--app-visual-height");
@@ -1176,6 +1199,7 @@ export default function Map() {
         open={infoOpen}
         activeSectionId={activeHelpSectionId}
         onSectionChange={setActiveHelpSectionId}
+        onClose={() => setInfoOpen(false)}
         updatedText={liveUpdatedText(eventStats?.latestLastSeen ?? null, now)}
         periodDays={eventStats?.periodDays ?? null}
       />
@@ -1215,45 +1239,62 @@ export default function Map() {
           </button>
         </div>
       </div>
-      <div className={`${styles.layerControls} ${infoOpen ? styles.layerControlsHelpOpen : ""}`}>
+      <div
+        className={`${styles.layerControls} ${infoOpen ? styles.layerControlsHelpOpen : ""} ${
+          layerMenuOpen ? styles.layerControlsMenuOpen : ""
+        }`}
+      >
+        <LayerIconButton
+          label={layerMenuOpen ? "Stäng kartlager" : "Kartlager"}
+          icon={layerMenuOpen ? "close" : "layers"}
+          on={layerMenuOpen}
+          onToggle={() => setLayerMenuOpen((v) => !v)}
+          className={styles.layerMenuToggleItem}
+        />
         <LayerIconButton
           label={infoOpen ? "Stäng hjälp" : "Hjälp"}
           icon={infoOpen ? "close" : "help"}
           on={infoOpen}
-          onToggle={() => setInfoOpen((v) => !v)}
+          onToggle={() => {
+            setLayerMenuOpen(false);
+            setInfoOpen((v) => !v);
+          }}
+          className={styles.layerHelpItem}
         />
-        <LayerIconButton
-          label="Olyckor och risk"
-          icon="accidents"
-          on={accidentsRiskOn}
-          onToggle={handleAccidentsRiskToggle}
-          badgeCount={liveCount}
-          onBadgeClick={handleFocusLiveEvents}
-        />
-        <LayerIconButton
-          label="Trafikflöde (snitt)"
-          icon="flow"
-          on={adtOn}
-          onToggle={() => setAdtOn((v) => !v)}
-        />
-        <LayerIconButton
-          label="Liveflöde (storstad)"
-          icon="live"
-          on={trafficFlowOn}
-          onToggle={() => setTrafficFlowOn((v) => !v)}
-        />
-        <LayerIconButton
-          label="Trafikstörningar"
-          icon="disturbances"
-          on={disturbancesOn}
-          onToggle={() => setDisturbancesOn((v) => !v)}
-        />
-        <LayerIconButton
-          label="Höga hastigheter"
-          icon="speed"
-          on={largeRoadsOn}
-          onToggle={() => setLargeRoadsOn((v) => !v)}
-        />
+        <div className={styles.layerMenuItems}>
+          <LayerIconButton
+            label="Olyckor och risk"
+            icon="accidents"
+            on={accidentsRiskOn}
+            onToggle={handleAccidentsRiskToggle}
+            badgeCount={liveCount}
+            onBadgeClick={handleFocusLiveEvents}
+          />
+          <LayerIconButton
+            label="Trafikflöde"
+            icon="flow"
+            on={adtOn}
+            onToggle={() => setAdtOn((v) => !v)}
+          />
+          <LayerIconButton
+            label="Liveflöde (storstad)"
+            icon="live"
+            on={trafficFlowOn}
+            onToggle={() => setTrafficFlowOn((v) => !v)}
+          />
+          <LayerIconButton
+            label="Trafikstörningar"
+            icon="disturbances"
+            on={disturbancesOn}
+            onToggle={() => setDisturbancesOn((v) => !v)}
+          />
+          <LayerIconButton
+            label="Höga hastigheter"
+            icon="speed"
+            on={largeRoadsOn}
+            onToggle={() => setLargeRoadsOn((v) => !v)}
+          />
+        </div>
       </div>
     </>
   );
@@ -1903,7 +1944,7 @@ function formatRouteDuration(seconds: number): string {
   return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-type LayerIconName = "help" | "close" | "accidents" | "flow" | "live" | "disturbances" | "speed";
+type LayerIconName = "layers" | "help" | "close" | "accidents" | "flow" | "live" | "disturbances" | "speed";
 
 function LayerIconButton({
   label,
@@ -1912,6 +1953,7 @@ function LayerIconButton({
   onToggle,
   badgeCount,
   onBadgeClick,
+  className,
 }: {
   label: string;
   icon: LayerIconName;
@@ -1919,11 +1961,12 @@ function LayerIconButton({
   onToggle: () => void;
   badgeCount?: number;
   onBadgeClick?: () => void;
+  className?: string;
 }) {
   const showBadge = on && typeof badgeCount === "number" && badgeCount > 0;
   const tooltipLabel = label.startsWith("Stäng") ? label : `Visa ${label.toLowerCase()}`;
   return (
-    <span className={styles.layerIconItem}>
+    <span className={`${styles.layerIconItem} ${className ?? ""}`}>
       <button
         type="button"
         className={`${styles.layerIconBtn} ${on ? styles.layerIconBtnOn : ""}`}
@@ -1958,12 +2001,14 @@ function HelpPanel({
   open,
   activeSectionId,
   onSectionChange,
+  onClose,
   updatedText,
   periodDays,
 }: {
   open: boolean;
   activeSectionId: HelpSectionId | null;
   onSectionChange: (id: HelpSectionId | null) => void;
+  onClose: () => void;
   updatedText: string;
   periodDays: number | null;
 }) {
@@ -1979,6 +2024,14 @@ function HelpPanel({
       aria-label="Data och kartlager"
       inert={!open}
     >
+      <button
+        type="button"
+        className={styles.helpPanelClose}
+        onClick={onClose}
+        aria-label="Stäng hjälp"
+      >
+        <span className={styles.helpPanelCloseIcon} aria-hidden="true" />
+      </button>
       <div className={styles.helpPanelScroll}>
         <div className={styles.helpPanelHeader}>
           <p className={styles.helpPanelEyebrow}>Data och kartlager</p>

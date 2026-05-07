@@ -39,7 +39,7 @@
   /* Typografi-skala — används i UI-overlayerna.
      Allt övrigt (färg/padding/margin/uppercase/etc) sätts per komponent
      ovanpå dessa via .type-* utility-klasser i globals.css. */
-  --type-large-size: 20px;
+  --type-large-size: 18px;
   --type-large-line: 1.15;
   --type-large-tracking: -0.05em;
 
