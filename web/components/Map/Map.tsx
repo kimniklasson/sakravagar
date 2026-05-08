@@ -447,6 +447,7 @@ export default function Map() {
   const routeDragPreviewAbortRef = useRef<AbortController | null>(null);
   const routeDragPreviewInFlightRef = useRef(false);
   const routeDragPreviewRequestedKeyRef = useRef<string | null>(null);
+  const routeControlsRef = useRef<HTMLDivElement | null>(null);
   const routeLinesRef = useRef<RouteLine[]>([]);
   const selectedRouteIdRef = useRef<string | null>(null);
   const customRouteMarkersRef = useRef<maplibregl.Marker[]>([]);
@@ -563,6 +564,28 @@ export default function Map() {
       root.style.removeProperty("--app-visual-height");
       root.style.removeProperty("--app-visual-top");
       root.style.removeProperty("--app-visual-bottom");
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = routeControlsRef.current;
+    if (!element) return;
+
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      document.documentElement.style.setProperty("--route-controls-bottom", `${Math.ceil(rect.bottom)}px`);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    for (const child of Array.from(element.children)) observer.observe(child);
+    window.addEventListener("resize", update);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      document.documentElement.style.removeProperty("--route-controls-bottom");
     };
   }, []);
 
@@ -1385,6 +1408,7 @@ export default function Map() {
           updatedText={liveUpdatedText(eventStats?.latestLastSeen ?? null, now)}
         />
         <div
+          ref={routeControlsRef}
           className={styles.routeControls}
         >
           <RoutePlannerBox
@@ -1396,7 +1420,6 @@ export default function Map() {
             routeError={routeError}
             routeNoticeText={routeNoticeText}
             routeAvoids={routeAvoids}
-            routeWorking={routeLoading || routeCompareLoading}
             onFocusStop={setActiveRouteStopId}
             onDeactivate={() => setActiveRouteStopId(null)}
             onChangeStop={setRouteStopLabel}
@@ -1633,14 +1656,14 @@ function routeAvoidedMetricCount(route: RouteLine, baseline: RouteLine, avoids: 
 }
 
 function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: RouteAvoidOption): boolean {
-  const current = option === "accidentHistory"
+  const current = option === "accidentHistory" || option === "trafficIntensity"
     ? routeScoreValue(route, option)
     : routeCappedExposureValue(route, option);
   if (current === null) return false;
 
   const values = routes
     .map((candidate) => (
-      option === "accidentHistory"
+      option === "accidentHistory" || option === "trafficIntensity"
         ? routeScoreValue(candidate, option)
         : routeCappedExposureValue(candidate, option)
     ))
@@ -1650,15 +1673,16 @@ function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: Rou
 }
 
 function routeImprovesOption(route: RouteLine, baseline: RouteLine, option: RouteAvoidOption): boolean {
-  const current = option === "accidentHistory"
+  const current = option === "accidentHistory" || option === "trafficIntensity"
     ? routeScoreValue(route, option)
     : routeCappedExposureValue(route, option);
-  const base = option === "accidentHistory"
+  const base = option === "accidentHistory" || option === "trafficIntensity"
     ? routeScoreValue(baseline, option)
     : routeCappedExposureValue(baseline, option);
   if (current === null || base === null) return false;
   if (option === "disturbances") return current < base;
   if (option === "accidentHistory") return base - current > 0.05;
+  if (option === "trafficIntensity") return base - current > 0.025;
   return base - current > 25;
 }
 
@@ -1779,7 +1803,6 @@ function RoutePlannerBox({
   routeError,
   routeNoticeText,
   routeAvoids,
-  routeWorking,
   onFocusStop,
   onDeactivate,
   onChangeStop,
@@ -1798,7 +1821,6 @@ function RoutePlannerBox({
   routeError: string | null;
   routeNoticeText: string | null;
   routeAvoids: RouteAvoidState;
-  routeWorking: boolean;
   onFocusStop: (id: string) => void;
   onDeactivate: () => void;
   onChangeStop: (id: string, label: string) => void;
@@ -1811,7 +1833,6 @@ function RoutePlannerBox({
 }) {
   const visibleStops = stops;
   const activeStop = visibleStops.find((stop) => stop.id === activeStopId) ?? null;
-  const showPillSpinner = routeWorking && activeAvoidCount(routeAvoids) > 0;
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
 
   const activeStopLoading = activeStop
@@ -2022,9 +2043,6 @@ function RoutePlannerBox({
               >
                 <span className={styles.routeAvoidCheckbox} aria-hidden="true" />
                 <span>{routeAvoidLabels[option]}</span>
-                {showPillSpinner && routeAvoids[option] && (
-                  <span className={styles.routeAvoidPillSpinner} aria-hidden="true" />
-                )}
                 <span
                   id={`route-avoid-tooltip-${option}`}
                   className={styles.routeAvoidTooltip}
@@ -2087,7 +2105,14 @@ function RouteAlternativesTray({
     const selected = routeAlternativesRef.current?.querySelector<HTMLElement>(
       `[data-route-id="${CSS.escape(selectedRouteId)}"]`,
     );
-    selected?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+    const tray = routeAlternativesRef.current;
+    if (!selected || !tray) return;
+
+    const targetLeft = selected.offsetLeft - (tray.clientWidth - selected.offsetWidth) / 2;
+    tray.scrollTo({
+      left: Math.max(0, targetLeft),
+      behavior: "smooth",
+    });
   }, [routes, selectedRouteId, revealSelectedRouteRef]);
 
   useLayoutEffect(() => {
@@ -2096,6 +2121,10 @@ function RouteAlternativesTray({
 
     const update = () => {
       document.documentElement.style.setProperty("--route-results-height", `${element.offsetHeight}px`);
+      document.documentElement.style.setProperty(
+        "--route-results-loader-bottom",
+        `calc(max(32px, calc(var(--app-visual-bottom, 0px) + 32px)) + env(safe-area-inset-bottom) + ${element.offsetHeight}px)`,
+      );
     };
 
     update();
@@ -2108,6 +2137,7 @@ function RouteAlternativesTray({
       observer.disconnect();
       window.removeEventListener("resize", update);
       document.documentElement.style.removeProperty("--route-results-height");
+      document.documentElement.style.removeProperty("--route-results-loader-bottom");
     };
   }, [routes]);
 
