@@ -196,10 +196,17 @@ const calmRouteCustomModel: GraphHopperCustomModel = {
   priority: [
     { if: "road_class == MOTORWAY", multiply_by: "0.03" },
     { if: "road_class == TRUNK", multiply_by: "0.08" },
-    { if: "road_class == PRIMARY", multiply_by: "0.25" },
     { if: "max_speed >= 100", multiply_by: "0.02" },
     { if: "max_speed >= 90", multiply_by: "0.04" },
-    { if: "max_speed >= 80", multiply_by: "0.45" },
+  ],
+};
+
+const balancedCalmRouteCustomModel: GraphHopperCustomModel = {
+  priority: [
+    { if: "road_class == MOTORWAY", multiply_by: "0.16" },
+    { if: "road_class == TRUNK", multiply_by: "0.24" },
+    { if: "max_speed >= 100", multiply_by: "0.1" },
+    { if: "max_speed >= 90", multiply_by: "0.2" },
   ],
 };
 
@@ -274,6 +281,29 @@ function parseAvoidState(value: unknown): RouteAvoidState {
 
 function activeAvoidOptions(avoid: RouteAvoidState): RouteAvoidOption[] {
   return routeAvoidOptions.filter((option) => avoid[option]);
+}
+
+function coreFearAvoidState(avoid: RouteAvoidState): RouteAvoidState {
+  return {
+    ...avoid,
+    accidentHistory: false,
+    disturbances: false,
+  };
+}
+
+function hasCoreFearAvoid(avoid: RouteAvoidState): boolean {
+  return avoid.highSpeed || avoid.trafficIntensity || avoid.bridges || avoid.tunnels;
+}
+
+function hasSecondaryAvoid(avoid: RouteAvoidState): boolean {
+  return avoid.accidentHistory || avoid.disturbances;
+}
+
+function routeAvoidStateForOption(option: RouteAvoidOption): RouteAvoidState {
+  return {
+    ...noAvoids,
+    [option]: true,
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -449,12 +479,32 @@ function routeGeometryKey(route: OsrmRoute): string {
   ].join("|");
 }
 
+function routesAreNearDuplicates(a: OsrmRoute, b: OsrmRoute): boolean {
+  if (Math.abs(a.distance - b.distance) > 1_200) return false;
+  if (Math.abs(a.duration - b.duration) > 120) return false;
+
+  const aLine = routeMatchLine(a);
+  const bLine = routeMatchLine(b);
+  if (aLine.length < 2 || bLine.length < 2) return false;
+
+  const originLat = (routeOriginLat(a) + routeOriginLat(b)) / 2;
+  const aSamples = sampleLineMax(aLine, 32);
+  const bSamples = sampleLineMax(bLine, 32);
+  const aNear = aSamples.filter((point) => distancePointToLineMeters(point, bLine, originLat) <= 160).length;
+  const bNear = bSamples.filter((point) => distancePointToLineMeters(point, aLine, originLat) <= 160).length;
+  return (
+    aNear / Math.max(1, aSamples.length) >= 0.88 &&
+    bNear / Math.max(1, bSamples.length) >= 0.88
+  );
+}
+
 function dedupeRoutes(routes: OsrmRoute[]): OsrmRoute[] {
   const seen = new Set<string>();
   const deduped: OsrmRoute[] = [];
   for (const route of routes) {
     const key = routeGeometryKey(route);
     if (seen.has(key)) continue;
+    if (deduped.some((candidate) => routesAreNearDuplicates(route, candidate))) continue;
     seen.add(key);
     deduped.push(route);
   }
@@ -1540,6 +1590,31 @@ async function fetchProviderRoutes(
   const baseline = fastestRoutes[0];
   if (!baseline) return { provider: "graphhopper", routes: fastestRoutes };
   const maxWeightFactor = graphHopperMaxWeightFactor(baseline, maxExtraMinutes);
+  if (activeOptions.length === 0) {
+    const noFilterRequests = alternatives > 0
+      ? [
+          fetchGraphHopperRoute(coordinates, {
+            source: "fastest-alternatives",
+            alternativeRoutes: Math.max(3, alternatives + 2),
+            maxWeightFactor: Math.max(1.8, maxWeightFactor),
+          }),
+        ]
+      : [];
+    const noFilterResults = await Promise.allSettled(noFilterRequests);
+    const noFilterRoutes = dedupeRoutes([
+      ...fastestRoutes,
+      ...noFilterResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
+    ]).sort((a, b) => {
+      if (a.duration !== b.duration) return a.duration - b.duration;
+      return a.distance - b.distance;
+    });
+
+    return {
+      provider: "graphhopper",
+      routes: noFilterRoutes.slice(0, 1),
+    };
+  }
+
   const trafficIntensityActive = avoid.trafficIntensity;
   const pathCount = trafficIntensityActive
     ? Math.max(2, Math.min(3, alternatives + 1))
@@ -1551,15 +1626,13 @@ async function fetchProviderRoutes(
     : maxWeightFactor;
   const genericAlternativeRequests: Array<Promise<OsrmRoute[]>> = [];
 
-  if (activeOptions.length > 0) {
-    genericAlternativeRequests.push(
-      fetchGraphHopperRoute(coordinates, {
-        source: "fastest-alternatives",
-        alternativeRoutes: pathCount,
-        maxWeightFactor: alternativeMaxWeightFactor,
-      }),
-    );
-  }
+  genericAlternativeRequests.push(
+    fetchGraphHopperRoute(coordinates, {
+      source: "fastest-alternatives",
+      alternativeRoutes: pathCount,
+      maxWeightFactor: alternativeMaxWeightFactor,
+    }),
+  );
 
   const skipCombinedTrafficPreference =
     avoid.highSpeed &&
@@ -1599,6 +1672,102 @@ async function fetchProviderRoutes(
           maxWeightFactor: alternativeMaxWeightFactor,
         }),
       );
+    }
+  }
+
+  if (avoid.highSpeed) {
+    const balancedModel = mergeCustomModels(
+      balancedCalmRouteCustomModel,
+      avoid.bridges ? avoidBridgeCustomModel : undefined,
+      avoid.tunnels ? avoidTunnelCustomModel : undefined,
+    );
+
+    if (balancedModel) {
+      const balancedPathCount = maxExtraMinutes === null
+        ? Math.max(4, alternatives + 2)
+        : Math.max(3, alternatives + 1);
+
+      preferenceRequests.push(
+        fetchGraphHopperRoute(coordinates, {
+          source: "avoid-high-speed-balanced",
+          customModel: balancedModel,
+        }),
+        fetchGraphHopperRoute(coordinates, {
+          source: "avoid-high-speed-balanced-alternatives",
+          customModel: balancedModel,
+          alternativeRoutes: balancedPathCount,
+          maxWeightFactor: alternativeMaxWeightFactor,
+        }),
+      );
+    }
+  }
+
+  const activeCoreOptions = (["highSpeed", "trafficIntensity", "bridges", "tunnels"] as const)
+    .filter((option) => avoid[option]);
+  if (activeCoreOptions.length > 1) {
+    for (const option of activeCoreOptions) {
+      const singleAvoid = routeAvoidStateForOption(option);
+      const singlePreferenceModel = await buildRoutePreferenceCustomModel(fastestRoutes, singleAvoid);
+      if (!singlePreferenceModel) continue;
+
+      preferenceRequests.push(
+        fetchGraphHopperRoute(coordinates, {
+          source: `avoid-primary-${option}`,
+          customModel: singlePreferenceModel,
+          timeoutMs: option === "trafficIntensity" ? GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS : undefined,
+        }),
+      );
+
+      if (option !== "trafficIntensity") {
+        const singlePathCount = maxExtraMinutes === null
+          ? Math.max(4, alternatives + 2)
+          : Math.max(3, alternatives + 1);
+        preferenceRequests.push(
+          fetchGraphHopperRoute(coordinates, {
+            source: `avoid-primary-${option}-alternatives`,
+            customModel: singlePreferenceModel,
+            alternativeRoutes: singlePathCount,
+            maxWeightFactor: alternativeMaxWeightFactor,
+          }),
+        );
+      }
+    }
+  }
+
+  if (hasCoreFearAvoid(avoid) && hasSecondaryAvoid(avoid)) {
+    const coreAvoid = coreFearAvoidState(avoid);
+    const corePreferenceModel = await buildRoutePreferenceCustomModel(fastestRoutes, coreAvoid);
+    if (corePreferenceModel) {
+      const source = [
+        coreAvoid.highSpeed ? "high-speed" : null,
+        coreAvoid.trafficIntensity ? "traffic-intensity" : null,
+        coreAvoid.bridges ? "bridges" : null,
+        coreAvoid.tunnels ? "tunnels" : null,
+      ].filter(Boolean).join("-");
+      const corePathCount = coreAvoid.trafficIntensity
+        ? Math.max(2, Math.min(3, alternatives + 1))
+        : maxExtraMinutes === null
+          ? Math.max(4, alternatives + 2)
+          : Math.max(3, alternatives + 1);
+
+      preferenceRequests.push(
+        fetchGraphHopperRoute(coordinates, {
+          source: `avoid-core-${source}`,
+          customModel: corePreferenceModel,
+          timeoutMs: coreAvoid.trafficIntensity ? GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS : undefined,
+        }),
+      );
+
+      if (!coreAvoid.trafficIntensity) {
+        preferenceRequests.push(
+          fetchGraphHopperRoute(coordinates, {
+            source: `avoid-core-${source}-alternatives`,
+            customModel: corePreferenceModel,
+            alternativeRoutes: corePathCount,
+            maxWeightFactor: alternativeMaxWeightFactor,
+          }),
+        );
+      }
     }
   }
 
@@ -1670,12 +1839,22 @@ async function fetchProviderRoutes(
     if (index === 0) return true;
     return isRouteWithinMaxExtra(route, baseline, maxExtraMinutes);
   });
+  const fastestBudgetedRoute = [...budgetedRoutes].sort((a, b) => {
+    if (a.duration !== b.duration) return a.duration - b.duration;
+    return a.distance - b.distance;
+  })[0];
+  const orderedBudgetedRoutes = fastestBudgetedRoute
+    ? [
+        fastestBudgetedRoute,
+        ...budgetedRoutes.filter((route) => route !== fastestBudgetedRoute),
+      ]
+    : budgetedRoutes;
   const limit = activeOptions.length > 0
     ? maxExtraMinutes === null
       ? Math.max(10, alternatives + 7)
       : Math.max(4, alternatives + 3)
     : 1;
-  return { provider: "graphhopper", routes: budgetedRoutes.slice(0, limit) };
+  return { provider: "graphhopper", routes: orderedBudgetedRoutes.slice(0, limit) };
 }
 
 export async function POST(req: Request) {

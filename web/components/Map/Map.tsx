@@ -132,6 +132,18 @@ const routeLoadingMessages = [
 ];
 
 const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
+const routeAvoidOptionWeights: Record<RouteAvoidOption, number> = {
+  highSpeed: 5,
+  trafficIntensity: 4,
+  bridges: 1.6,
+  tunnels: 1.6,
+  disturbances: 0.25,
+  accidentHistory: 0.2,
+};
+const routeAvoidSortTieEpsilon = 0.005;
+const routeExtraMinuteScoreDivisor = 240;
+const routeDurationTieSeconds = 30;
+const routeDistanceTieMeters = 50;
 const mobileInfoBoxQuery = "(max-width: 767px)";
 const customRouteStopIdPrefix = "via-";
 
@@ -281,6 +293,15 @@ function isRouteWithinBudget(route: RouteLine, baseline: RouteLine, timeBudget: 
   return timeBudget === "unlimited" || routeExtraMinutes(route, baseline) <= timeBudget;
 }
 
+type ScoredRouteCandidate = {
+  index: number;
+  route: RouteLine;
+  comparable: boolean;
+  withinBudget: boolean;
+  score: number;
+  optionCosts: globalThis.Map<RouteAvoidOption, number>;
+};
+
 function selectRouteCandidates(
   candidates: RouteLine[],
   avoids: RouteAvoidState,
@@ -337,26 +358,34 @@ function selectRouteCandidates(
   }
 
   let hasComparableScores = false;
-  const scored = candidates.map((route, index) => {
+  const scored: ScoredRouteCandidate[] = candidates.map((route, index) => {
     let avoidCost = 0;
     let available = 0;
+    let weightTotal = 0;
+    const optionCosts = new globalThis.Map<RouteAvoidOption, number>();
 
     for (const option of activeOptions) {
       const value = routeScoreValue(route, option);
       if (value === null) continue;
       available += 1;
-      avoidCost += value / Math.max(1, optionMax.get(option) ?? 1);
+      const weight = routeAvoidOptionWeights[option];
+      const normalized = value / Math.max(1, optionMax.get(option) ?? 1);
+      optionCosts.set(option, normalized);
+      avoidCost += normalized * weight;
+      weightTotal += weight;
     }
 
     if (available > 0) hasComparableScores = true;
-    const averageAvoidCost = available > 0 ? avoidCost / available : Number.POSITIVE_INFINITY;
+    const weightedAvoidCost = weightTotal > 0 ? avoidCost / weightTotal : Number.POSITIVE_INFINITY;
     const withinBudget = isRouteWithinBudget(route, baseline, timeBudget);
+    const extraTimeCost = routeExtraMinutes(route, baseline) / routeExtraMinuteScoreDivisor;
     return {
       index,
       route,
       comparable: available > 0,
       withinBudget,
-      score: available > 0 && withinBudget ? averageAvoidCost : Number.POSITIVE_INFINITY,
+      score: available > 0 && withinBudget ? weightedAvoidCost + extraTimeCost : Number.POSITIVE_INFINITY,
+      optionCosts,
     };
   });
 
@@ -373,21 +402,39 @@ function selectRouteCandidates(
     };
   }
 
-  budgeted.sort((a, b) => {
-    if (a.score !== b.score) return a.score - b.score;
-    const aExtra = routeExtraMinutes(a.route, baseline);
-    const bExtra = routeExtraMinutes(b.route, baseline);
-    if (aExtra !== bExtra) return aExtra - bExtra;
-    if (a.route.durationSeconds !== b.route.durationSeconds) {
+  const dominantRoutes = budgeted.filter((candidate) => !budgeted.some((other) => {
+    if (other.index === candidate.index) return false;
+    if (!other.comparable || !candidate.comparable) return false;
+    if (!other.withinBudget || !candidate.withinBudget) return false;
+    if (other.route.durationSeconds > candidate.route.durationSeconds + routeDurationTieSeconds) return false;
+
+    let betterAvoidMatch = false;
+    for (const option of activeOptions) {
+      const otherCost = other.optionCosts.get(option);
+      const candidateCost = candidate.optionCosts.get(option);
+      if (otherCost === undefined || candidateCost === undefined) return false;
+      if (otherCost > candidateCost + routeAvoidSortTieEpsilon) return false;
+      if (otherCost + routeAvoidSortTieEpsilon < candidateCost) betterAvoidMatch = true;
+    }
+
+    return betterAvoidMatch;
+  }));
+
+  dominantRoutes.sort((a, b) => {
+    if (Math.abs(a.score - b.score) > routeAvoidSortTieEpsilon) return a.score - b.score;
+    if (Math.abs(a.route.durationSeconds - b.route.durationSeconds) > routeDurationTieSeconds) {
       return a.route.durationSeconds - b.route.durationSeconds;
+    }
+    if (Math.abs(a.route.distanceMeters - b.route.distanceMeters) > routeDistanceTieMeters) {
+      return a.route.distanceMeters - b.route.distanceMeters;
     }
     return a.index - b.index;
   });
 
-  const selected = budgeted[0];
+  const selected = dominantRoutes[0];
   if (!selected || !selected.comparable || !selected.withinBudget) {
     return {
-      routes: budgeted.map((item) => item.route),
+      routes: dominantRoutes.map((item) => item.route),
       selectedIndex: 0,
       active: true,
       hasComparableScores,
@@ -395,7 +442,7 @@ function selectRouteCandidates(
     };
   }
 
-  const rest = budgeted
+  const rest = dominantRoutes
     .filter((item) => item.index !== selected.index)
     .map((item) => item.route);
   return {
@@ -778,11 +825,7 @@ export default function Map() {
     const selection = selectRouteCandidates(candidates, avoids, timeBudget);
     const selectedRoute = selection.routes[0] ?? null;
     const selectedRouteId = selectedRoute?.id ?? null;
-    const orderedRoutes = [...selection.routes].sort((a, b) => {
-      if (a.durationSeconds !== b.durationSeconds) return a.durationSeconds - b.durationSeconds;
-      if (a.distanceMeters !== b.distanceMeters) return a.distanceMeters - b.distanceMeters;
-      return a.id.localeCompare(b.id);
-    });
+    const orderedRoutes = selection.routes;
     shouldRevealSelectedRouteRef.current = Boolean(selectedRouteId && selection.active && isMobileViewport());
     setSelectedRouteId(selectedRouteId);
     setRouteLines(orderedRoutes);
