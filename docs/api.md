@@ -67,13 +67,13 @@ Returnerar aktiva Trafikverket TrafficFlow-mätningar snappade till närmaste v�
 
 ## Disturbances
 
-`GET /api/disturbances`
+`GET /api/disturbances?bbox=minLng,minLat,maxLng,maxLat`
 
 Query:
 
 - `bbox` krävs.
 
-Returnerar aktiva vägarbeten, köer och trafikstörningar från `disturbances_public`. Separat från olyckshistorik.
+Returnerar aktiva vägarbeten, köer och trafikstörningar från `disturbances_public` inom angiven bbox. Separat från olyckshistorik.
 
 ## Large roads
 

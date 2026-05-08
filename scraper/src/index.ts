@@ -1,5 +1,5 @@
 import { env } from "./env.js";
-import { fetchDeviations, fetchDisturbances, fetchTrafficFlows } from "./trafikverket.js";
+import { fetchSituationDeviations, fetchTrafficFlows, splitSituationDeviations } from "./trafikverket.js";
 import { makeClient, upsertDisturbances, upsertEvents, upsertTrafficFlows } from "./supabase.js";
 import { deviationToRow, disturbanceToRow, trafficFlowToRow } from "./transform.js";
 
@@ -7,11 +7,11 @@ async function main(): Promise<void> {
   const start = Date.now();
   const now = new Date().toISOString();
 
-  const [deviations, disturbances, trafficFlows] = await Promise.all([
-    fetchDeviations(env.TRAFIKVERKET_API_KEY),
-    fetchDisturbances(env.TRAFIKVERKET_API_KEY),
+  const [situationDeviations, trafficFlows] = await Promise.all([
+    fetchSituationDeviations(env.TRAFIKVERKET_API_KEY),
     fetchTrafficFlows(env.TRAFIKVERKET_API_KEY),
   ]);
+  const { deviations, disturbances } = splitSituationDeviations(situationDeviations);
   const rows = deviations
     .map((d) => deviationToRow(d, now))
     .filter((r): r is NonNullable<typeof r> => r !== null);

@@ -144,6 +144,8 @@ const routeAvoidSortTieEpsilon = 0.005;
 const routeExtraMinuteScoreDivisor = 240;
 const routeDurationTieSeconds = 30;
 const routeDistanceTieMeters = 50;
+const routeHighSpeedAvoidedMeters = 50;
+const routeHighSpeedNearAvoidedMeters = 500;
 const mobileInfoBoxQuery = "(max-width: 767px)";
 const customRouteStopIdPrefix = "via-";
 
@@ -293,6 +295,14 @@ function isRouteWithinBudget(route: RouteLine, baseline: RouteLine, timeBudget: 
   return timeBudget === "unlimited" || routeExtraMinutes(route, baseline) <= timeBudget;
 }
 
+function routeHighSpeedPriorityTier(route: RouteLine): number {
+  const highSpeedMeters = routeCappedExposureValue(route, "highSpeed");
+  if (highSpeedMeters === null) return 2;
+  if (highSpeedMeters <= routeHighSpeedAvoidedMeters) return 0;
+  if (highSpeedMeters <= routeHighSpeedNearAvoidedMeters) return 1;
+  return 2;
+}
+
 type ScoredRouteCandidate = {
   index: number;
   route: RouteLine;
@@ -406,6 +416,12 @@ function selectRouteCandidates(
     if (other.index === candidate.index) return false;
     if (!other.comparable || !candidate.comparable) return false;
     if (!other.withinBudget || !candidate.withinBudget) return false;
+    if (avoids.highSpeed) {
+      const candidateHighSpeedTier = routeHighSpeedPriorityTier(candidate.route);
+      const otherHighSpeedTier = routeHighSpeedPriorityTier(other.route);
+      if (otherHighSpeedTier > candidateHighSpeedTier) return false;
+      if (candidateHighSpeedTier <= 1 && otherHighSpeedTier <= 1) return false;
+    }
     if (other.route.durationSeconds > candidate.route.durationSeconds + routeDurationTieSeconds) return false;
 
     let betterAvoidMatch = false;
@@ -421,6 +437,11 @@ function selectRouteCandidates(
   }));
 
   dominantRoutes.sort((a, b) => {
+    if (avoids.highSpeed) {
+      const highSpeedTierA = routeHighSpeedPriorityTier(a.route);
+      const highSpeedTierB = routeHighSpeedPriorityTier(b.route);
+      if (highSpeedTierA !== highSpeedTierB) return highSpeedTierA - highSpeedTierB;
+    }
     if (Math.abs(a.score - b.score) > routeAvoidSortTieEpsilon) return a.score - b.score;
     if (Math.abs(a.route.durationSeconds - b.route.durationSeconds) > routeDurationTieSeconds) {
       return a.route.durationSeconds - b.route.durationSeconds;

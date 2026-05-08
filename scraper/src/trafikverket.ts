@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 const API_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json";
+const SITUATION_QUERY_LIMIT = 10_000;
+const TRAFIKVERKET_REQUEST_TIMEOUT_MS = 20_000;
+const TRAFIKVERKET_TRAFFIC_FLOW_TIMEOUT_MS = 25_000;
 
 // Schema för en Deviation (en enskild händelse) i API-svaret.
 // Exakta fält är dokumenterade i Trafikverkets datakatalog men kan ändras över tid —
@@ -87,43 +90,74 @@ function buildQuery(apiKey: string, messageType?: string): string {
 
   return `<REQUEST>
   <LOGIN authenticationkey="${apiKey}" />
-  <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="1000">
+  <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="${SITUATION_QUERY_LIMIT}">
     ${filter}
   </QUERY>
 </REQUEST>`;
 }
 
-async function fetchSituationDeviations(apiKey: string, messageType?: string): Promise<Deviation[]> {
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/xml" },
-    body: buildQuery(apiKey, messageType),
-  });
+async function fetchTrafikverketJson(body: string, label: string, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/xml" },
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`${label} timed out`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Trafikverket API ${res.status}: ${body}`);
+    throw new Error(`${label} ${res.status}: ${body}`);
   }
 
-  const json = await res.json();
+  return res.json();
+}
+
+export async function fetchSituationDeviations(apiKey: string, messageType?: string): Promise<Deviation[]> {
+  const json = await fetchTrafikverketJson(
+    buildQuery(apiKey, messageType),
+    "Trafikverket API",
+    TRAFIKVERKET_REQUEST_TIMEOUT_MS,
+  );
   const parsed = ResponseSchema.parse(json);
 
   const situations = parsed.RESPONSE.RESULT.flatMap((r) => r.Situation ?? []);
   return situations.flatMap((s) => s.Deviation);
 }
 
+export function splitSituationDeviations(deviations: Deviation[]): {
+  deviations: Deviation[];
+  disturbances: Deviation[];
+} {
+  return {
+    deviations: deviations.filter((d) => d.MessageType === "Olycka"),
+    disturbances: deviations.filter((d) => d.MessageType !== "Olycka"),
+  };
+}
+
 export async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
   const deviations = await fetchSituationDeviations(apiKey, "Olycka");
   // API:ets filter matchar hela Situationer — andra Deviations i samma Situation
   // (t.ex. Trafikmeddelande) följer med. Filtrera ner till rena olyckor här.
-  return deviations.filter((d) => d.MessageType === "Olycka");
+  return splitSituationDeviations(deviations).deviations;
 }
 
 export async function fetchDisturbances(apiKey: string): Promise<Deviation[]> {
   const deviations = await fetchSituationDeviations(apiKey);
   // Störningar är driftinfo, inte historisk olycksdata. Vi sparar allt med
   // koordinat som inte är MessageType=Olycka i separat tabell.
-  return deviations.filter((d) => d.MessageType !== "Olycka");
+  return splitSituationDeviations(deviations).disturbances;
 }
 
 export async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> {
@@ -139,18 +173,11 @@ export async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> 
   </QUERY>
 </REQUEST>`;
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/xml" },
+  const json = await fetchTrafikverketJson(
     body,
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Trafikverket TrafficFlow API ${res.status}: ${body}`);
-  }
-
-  const json = await res.json();
+    "Trafikverket TrafficFlow API",
+    TRAFIKVERKET_TRAFFIC_FLOW_TIMEOUT_MS,
+  );
   const parsed = TrafficFlowResponseSchema.parse(json);
   const flows = parsed.RESPONSE.RESULT.flatMap((r) => r.TrafficFlow ?? []);
   return flows.filter((f) => f.Deleted !== true && f.VehicleType === "anyVehicle");

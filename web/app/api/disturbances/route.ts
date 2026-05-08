@@ -39,10 +39,10 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const { bbox, error: bboxError } = parseBboxParam(searchParams.get("bbox"), {
-    required: false,
+    required: true,
     maxArea: 5000,
   });
-  if (bboxError) {
+  if (bboxError || !bbox) {
     return jsonResponse({ error: bboxError }, { status: 400 });
   }
   const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
@@ -56,13 +56,11 @@ export async function GET(req: Request) {
     .order("last_seen", { ascending: false })
     .limit(2000);
 
-  if (bbox) {
-    query = query
-      .gte("lng", bbox.minLng)
-      .lte("lng", bbox.maxLng)
-      .gte("lat", bbox.minLat)
-      .lte("lat", bbox.maxLat);
-  }
+  query = query
+    .gte("lng", bbox.minLng)
+    .lte("lng", bbox.maxLng)
+    .gte("lat", bbox.minLat)
+    .lte("lat", bbox.maxLat);
 
   const { data, error } = await query;
   if (error) {

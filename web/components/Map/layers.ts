@@ -1267,7 +1267,8 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
 }
 
 export async function refreshDisturbancesLayer(map: MapLibreMap): Promise<{ disturbanceCount: number }> {
-  const res = await fetch("/api/disturbances");
+  const params = new URLSearchParams({ bbox: bboxToParam(mapBoundsBbox(map, 0.2)) });
+  const res = await fetch(`/api/disturbances?${params.toString()}`);
   if (!res.ok) {
     console.error("failed to fetch disturbances", await res.text());
     return { disturbanceCount: 0 };

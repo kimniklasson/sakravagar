@@ -238,7 +238,19 @@ const PENALTY_ZONE_BBOX_PADDING = 0.08;
 const PENALTY_ZONE_MAX_BBOX_AREA = 80;
 const TRAFFIC_FLOW_ACTIVE_WINDOW_MS = 45 * 60 * 1000;
 const GRAPHHOPPER_ROUTE_TIMEOUT_MS = 15_000;
+const GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS = 7_000;
 const GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS = 9_000;
+const HYBRID_ROUTE_MAX_JOIN_METERS = 6;
+const HYBRID_ROUTE_REJOIN_AFTER_SEPARATION_METERS = 320;
+const HYBRID_ROUTE_MIN_LEG_METERS = 1_500;
+const HYBRID_ROUTE_MAX_SOURCE_ROUTES = 12;
+const HYBRID_ROUTE_MAX_SAMPLES_PER_ROUTE = 90;
+const HYBRID_ROUTE_MAX_CANDIDATES = 8;
+const HYBRID_ROUTE_MAX_DISTANCE_FACTOR = 1.18;
+const HYBRID_ROUTE_MAX_REFERENCE_DISTANCE_METERS = 100_000;
+const HYBRID_ROUTE_CONNECTOR_SPEED_MPS = 10;
+const ROUTE_SEMANTIC_DUPLICATE_HIGH_SPEED_DIFF_METERS = 700;
+const ROUTE_SEMANTIC_DUPLICATE_ENVIRONMENT_DIFF_METERS = 120;
 
 const routeAvoidOptions = ["accidentHistory", "highSpeed", "trafficIntensity", "disturbances", "bridges", "tunnels"] as const;
 
@@ -492,10 +504,106 @@ function routesAreNearDuplicates(a: OsrmRoute, b: OsrmRoute): boolean {
   const bSamples = sampleLineMax(bLine, 32);
   const aNear = aSamples.filter((point) => distancePointToLineMeters(point, bLine, originLat) <= 160).length;
   const bNear = bSamples.filter((point) => distancePointToLineMeters(point, aLine, originLat) <= 160).length;
-  return (
+  const geometricallyNear = (
     aNear / Math.max(1, aSamples.length) >= 0.88 &&
     bNear / Math.max(1, bSamples.length) >= 0.88
   );
+  if (!geometricallyNear) return false;
+  return !routesHaveMeaningfullyDifferentAvoidDetails(a, b);
+}
+
+function routeDetailExposureMeters(
+  route: OsrmRoute,
+  property: RouteDetailProperty,
+  includeValue: (value: string | number | null) => boolean,
+): number | null {
+  const details = route[property];
+  if (!details) return null;
+
+  const coords = route.geometry.coordinates;
+  if (coords.length < 2) return 0;
+
+  const originLat = routeOriginLat(route);
+  let meters = 0;
+  for (const [fromIndex, toIndex, value] of details) {
+    if (!includeValue(value)) continue;
+    const from = Math.max(0, Math.min(coords.length - 1, Math.floor(fromIndex)));
+    const to = Math.max(from, Math.min(coords.length - 1, Math.floor(toIndex)));
+    for (let index = from + 1; index <= to; index += 1) {
+      const start = coords[index - 1];
+      const end = coords[index];
+      if (!start || !end) continue;
+      meters += distanceBetweenCoordinatesMeters(start, end, originLat);
+    }
+  }
+  return Math.min(meters, route.distance);
+}
+
+function routeHighSpeedDetailExposureMeters(route: OsrmRoute): number | null {
+  return routeDetailExposureMeters(route, "maxSpeedDetails", (value) => {
+    const speed = speedLimitFromDetail(value);
+    return speed !== null && speed >= 90;
+  });
+}
+
+function routeEnvironmentDetailExposureMeters(
+  route: OsrmRoute,
+  environment: "BRIDGE" | "TUNNEL",
+): number | null {
+  return routeDetailExposureMeters(route, "roadEnvironmentDetails", (value) => (
+    typeof value === "string" && value.toUpperCase() === environment
+  ));
+}
+
+function exposureDiffAboveThreshold(
+  a: number | null,
+  b: number | null,
+  threshold: number,
+): boolean {
+  return a !== null && b !== null && Math.abs(a - b) >= threshold;
+}
+
+function routesHaveMeaningfullyDifferentAvoidDetails(a: OsrmRoute, b: OsrmRoute): boolean {
+  return (
+    exposureDiffAboveThreshold(
+      routeHighSpeedDetailExposureMeters(a),
+      routeHighSpeedDetailExposureMeters(b),
+      ROUTE_SEMANTIC_DUPLICATE_HIGH_SPEED_DIFF_METERS,
+    ) ||
+    exposureDiffAboveThreshold(
+      routeEnvironmentDetailExposureMeters(a, "BRIDGE"),
+      routeEnvironmentDetailExposureMeters(b, "BRIDGE"),
+      ROUTE_SEMANTIC_DUPLICATE_ENVIRONMENT_DIFF_METERS,
+    ) ||
+    exposureDiffAboveThreshold(
+      routeEnvironmentDetailExposureMeters(a, "TUNNEL"),
+      routeEnvironmentDetailExposureMeters(b, "TUNNEL"),
+      ROUTE_SEMANTIC_DUPLICATE_ENVIRONMENT_DIFF_METERS,
+    )
+  );
+}
+
+function routeAvoidDetailSortCost(route: OsrmRoute, activeOptions: RouteAvoidOption[]): number {
+  let weightedCost = 0;
+  let weightTotal = 0;
+
+  const addCost = (exposureMeters: number | null, weight: number) => {
+    if (exposureMeters === null) return;
+    weightedCost += (Math.min(exposureMeters, route.distance) / Math.max(1, route.distance)) * weight;
+    weightTotal += weight;
+  };
+
+  if (activeOptions.includes("highSpeed")) {
+    addCost(routeHighSpeedDetailExposureMeters(route), 5);
+  }
+  if (activeOptions.includes("bridges")) {
+    addCost(routeEnvironmentDetailExposureMeters(route, "BRIDGE"), 1.6);
+  }
+  if (activeOptions.includes("tunnels")) {
+    addCost(routeEnvironmentDetailExposureMeters(route, "TUNNEL"), 1.6);
+  }
+
+  return weightTotal > 0 ? weightedCost / weightTotal : 0;
 }
 
 function dedupeRoutes(routes: OsrmRoute[]): OsrmRoute[] {
@@ -509,6 +617,240 @@ function dedupeRoutes(routes: OsrmRoute[]): OsrmRoute[] {
     deduped.push(route);
   }
   return deduped;
+}
+
+type RouteDetailProperty = "maxSpeedDetails" | "roadEnvironmentDetails";
+
+type HybridSegmentSource = {
+  route: OsrmRoute;
+  segmentIndex: number;
+} | null;
+
+type HybridJoin = {
+  prefixIndex: number;
+  suffixIndex: number;
+  distanceMeters: number;
+};
+
+function routeCumulativeDistances(route: OsrmRoute): number[] {
+  const coords = route.geometry.coordinates;
+  const originLat = routeOriginLat(route);
+  const cumulative = [0];
+  for (let index = 1; index < coords.length; index += 1) {
+    const start = coords[index - 1];
+    const end = coords[index];
+    cumulative[index] = (cumulative[index - 1] ?? 0) +
+      (start && end ? distanceBetweenCoordinatesMeters(start, end, originLat) : 0);
+  }
+  return cumulative;
+}
+
+function hybridRouteSampleIndexes(cumulative: number[]): number[] {
+  const total = cumulative.at(-1) ?? 0;
+  if (total < HYBRID_ROUTE_MIN_LEG_METERS * 2) return [];
+
+  const indexes: number[] = [];
+  const candidateIndexes: number[] = [];
+  for (let index = 1; index < cumulative.length - 1; index += 1) {
+    const fromStart = cumulative[index] ?? 0;
+    const toEnd = total - fromStart;
+    if (fromStart >= HYBRID_ROUTE_MIN_LEG_METERS && toEnd >= HYBRID_ROUTE_MIN_LEG_METERS) {
+      candidateIndexes.push(index);
+    }
+  }
+  if (candidateIndexes.length <= HYBRID_ROUTE_MAX_SAMPLES_PER_ROUTE) return candidateIndexes;
+
+  const step = candidateIndexes.length / HYBRID_ROUTE_MAX_SAMPLES_PER_ROUTE;
+  for (let index = 0; index < HYBRID_ROUTE_MAX_SAMPLES_PER_ROUTE; index += 1) {
+    const sampleIndex = candidateIndexes[Math.floor(index * step)];
+    if (sampleIndex !== undefined) indexes.push(sampleIndex);
+  }
+  return indexes;
+}
+
+function findHybridJoin(prefixRoute: OsrmRoute, suffixRoute: OsrmRoute): HybridJoin | null {
+  const prefixCoords = prefixRoute.geometry.coordinates;
+  const suffixCoords = suffixRoute.geometry.coordinates;
+  if (prefixCoords.length < 4 || suffixCoords.length < 4) return null;
+
+  const prefixCumulative = routeCumulativeDistances(prefixRoute);
+  const suffixCumulative = routeCumulativeDistances(suffixRoute);
+  const prefixSamples = hybridRouteSampleIndexes(prefixCumulative);
+  const suffixSamples = hybridRouteSampleIndexes(suffixCumulative);
+  if (!prefixSamples.length || !suffixSamples.length) return null;
+
+  const originLat = (routeOriginLat(prefixRoute) + routeOriginLat(suffixRoute)) / 2;
+  const suffixLine = routeMatchLine(suffixRoute);
+  let seenMeaningfulSeparation = false;
+
+  for (const prefixIndex of prefixSamples) {
+    const prefixCoord = prefixCoords[prefixIndex];
+    if (!prefixCoord) continue;
+    const distanceToSuffixLine = distancePointToLineMeters(prefixCoord, suffixLine, originLat);
+    if (distanceToSuffixLine > HYBRID_ROUTE_REJOIN_AFTER_SEPARATION_METERS) {
+      seenMeaningfulSeparation = true;
+      continue;
+    }
+    if (!seenMeaningfulSeparation) continue;
+
+    let bestForPrefix: HybridJoin | null = null;
+    for (const suffixIndex of suffixSamples) {
+      const suffixCoord = suffixCoords[suffixIndex];
+      if (!suffixCoord) continue;
+      const distanceMeters = distanceBetweenCoordinatesMeters(prefixCoord, suffixCoord, originLat);
+      if (distanceMeters > HYBRID_ROUTE_MAX_JOIN_METERS) continue;
+      if (!bestForPrefix || distanceMeters < bestForPrefix.distanceMeters) {
+        bestForPrefix = { prefixIndex, suffixIndex, distanceMeters };
+      }
+    }
+    if (bestForPrefix) return bestForPrefix;
+  }
+
+  return null;
+}
+
+function routeDetailValueForSegment(
+  route: OsrmRoute,
+  property: RouteDetailProperty,
+  segmentIndex: number,
+): string | number | null | undefined {
+  const details = route[property];
+  if (!details) return undefined;
+  const detail = details.find(([fromIndex, toIndex]) => {
+    const from = Math.floor(fromIndex);
+    const to = Math.floor(toIndex);
+    return segmentIndex >= from && segmentIndex < to;
+  });
+  return detail?.[2];
+}
+
+function buildHybridPathDetails(
+  segmentSources: HybridSegmentSource[],
+  property: RouteDetailProperty,
+): GraphHopperPathDetail[] | undefined {
+  const details: GraphHopperPathDetail[] = [];
+  let currentValue: string | number | null | undefined;
+  let currentStart = -1;
+
+  const flush = (endIndex: number) => {
+    if (currentStart >= 0 && currentValue !== undefined && currentValue !== null) {
+      details.push([currentStart, endIndex, currentValue]);
+    }
+    currentStart = -1;
+    currentValue = undefined;
+  };
+
+  segmentSources.forEach((source, segmentIndex) => {
+    const value = source
+      ? routeDetailValueForSegment(source.route, property, source.segmentIndex)
+      : undefined;
+    if (value === currentValue) return;
+    flush(segmentIndex);
+    if (value !== undefined && value !== null) {
+      currentStart = segmentIndex;
+      currentValue = value;
+    }
+  });
+  flush(segmentSources.length);
+
+  return details.length ? details : undefined;
+}
+
+function buildHybridRoute(
+  prefixRoute: OsrmRoute,
+  suffixRoute: OsrmRoute,
+  join: HybridJoin,
+  source: string,
+): OsrmRoute | null {
+  const prefixCoords = prefixRoute.geometry.coordinates;
+  const suffixCoords = suffixRoute.geometry.coordinates;
+  const prefixJoin = prefixCoords[join.prefixIndex];
+  const suffixJoin = suffixCoords[join.suffixIndex];
+  if (!prefixJoin || !suffixJoin) return null;
+
+  const coordinates: GeoJSON.Position[] = prefixCoords.slice(0, join.prefixIndex + 1);
+  const segmentSources: HybridSegmentSource[] = [];
+  for (let index = 0; index < join.prefixIndex; index += 1) {
+    segmentSources.push({ route: prefixRoute, segmentIndex: index });
+  }
+
+  if (join.distanceMeters > 1) {
+    coordinates.push(suffixJoin);
+    segmentSources.push(null);
+  }
+
+  for (let index = join.suffixIndex + 1; index < suffixCoords.length; index += 1) {
+    coordinates.push(suffixCoords[index] as GeoJSON.Position);
+    segmentSources.push({ route: suffixRoute, segmentIndex: index - 1 });
+  }
+
+  if (coordinates.length < 2 || segmentSources.length !== coordinates.length - 1) return null;
+
+  const originLat = coordinates.reduce((sum, coord) => sum + (coord[1] ?? 60), 0) / coordinates.length;
+  const distance = lineLengthMeters(coordinates, originLat);
+  const referenceDistance = Math.max(prefixRoute.distance, suffixRoute.distance);
+  if (distance > referenceDistance * HYBRID_ROUTE_MAX_DISTANCE_FACTOR) return null;
+
+  const prefixCumulative = routeCumulativeDistances(prefixRoute);
+  const suffixCumulative = routeCumulativeDistances(suffixRoute);
+  const prefixTotal = Math.max(1, prefixCumulative.at(-1) ?? prefixRoute.distance);
+  const suffixTotal = Math.max(1, suffixCumulative.at(-1) ?? suffixRoute.distance);
+  const prefixDistance = prefixCumulative[join.prefixIndex] ?? 0;
+  const suffixDistance = suffixTotal - (suffixCumulative[join.suffixIndex] ?? 0);
+  const duration =
+    prefixRoute.duration * (prefixDistance / prefixTotal) +
+    suffixRoute.duration * (suffixDistance / suffixTotal) +
+    join.distanceMeters / HYBRID_ROUTE_CONNECTOR_SPEED_MPS;
+
+  return {
+    source,
+    distance,
+    duration,
+    geometry: { type: "LineString", coordinates },
+    maxSpeedDetails: buildHybridPathDetails(segmentSources, "maxSpeedDetails"),
+    roadEnvironmentDetails: buildHybridPathDetails(segmentSources, "roadEnvironmentDetails"),
+  };
+}
+
+function buildHybridRoutes(routes: OsrmRoute[], activeOptions: RouteAvoidOption[]): OsrmRoute[] {
+  if (activeOptions.length < 2) return [];
+  const sourceRoutes = dedupeRoutes(routes)
+    .slice(0, HYBRID_ROUTE_MAX_SOURCE_ROUTES);
+  const hybrids: OsrmRoute[] = [];
+
+  for (let prefixIndex = 0; prefixIndex < sourceRoutes.length; prefixIndex += 1) {
+    const prefixRoute = sourceRoutes[prefixIndex];
+    if (!prefixRoute) continue;
+    for (let suffixIndex = 0; suffixIndex < sourceRoutes.length; suffixIndex += 1) {
+      if (prefixIndex === suffixIndex) continue;
+      const suffixRoute = sourceRoutes[suffixIndex];
+      if (!suffixRoute || routesAreNearDuplicates(prefixRoute, suffixRoute)) continue;
+      const referenceDistance = Math.max(prefixRoute.distance, suffixRoute.distance);
+      if (referenceDistance > HYBRID_ROUTE_MAX_REFERENCE_DISTANCE_METERS) continue;
+      const join = findHybridJoin(prefixRoute, suffixRoute);
+      if (!join) continue;
+      const hybrid = buildHybridRoute(
+        prefixRoute,
+        suffixRoute,
+        join,
+        `hybrid-${prefixIndex + 1}-${suffixIndex + 1}`,
+      );
+      if (!hybrid) continue;
+      if (routes.some((route) => routesAreNearDuplicates(hybrid, route))) continue;
+      if (hybrids.some((route) => routesAreNearDuplicates(hybrid, route))) continue;
+      hybrids.push(hybrid);
+    }
+  }
+
+  return dedupeRoutes(hybrids)
+    .sort((a, b) => {
+      const avoidCostA = routeAvoidDetailSortCost(a, activeOptions);
+      const avoidCostB = routeAvoidDetailSortCost(b, activeOptions);
+      if (Math.abs(avoidCostA - avoidCostB) > 0.002) return avoidCostA - avoidCostB;
+      if (a.duration !== b.duration) return a.duration - b.duration;
+      return a.distance - b.distance;
+    })
+    .slice(0, HYBRID_ROUTE_MAX_CANDIDATES);
 }
 
 function project([lng, lat]: GeoJSON.Position, originLat: number): [number, number] {
@@ -1616,10 +1958,17 @@ async function fetchProviderRoutes(
   }
 
   const trafficIntensityActive = avoid.trafficIntensity;
+  const highSpeedOnly =
+    avoid.highSpeed &&
+    !avoid.trafficIntensity &&
+    !avoid.accidentHistory &&
+    !avoid.disturbances &&
+    !avoid.bridges &&
+    !avoid.tunnels;
   const pathCount = trafficIntensityActive
     ? Math.max(2, Math.min(3, alternatives + 1))
     : maxExtraMinutes === null
-      ? alternatives + 5
+      ? Math.max(4, alternatives + (highSpeedOnly ? 2 : 4))
       : alternatives + 1;
   const alternativeMaxWeightFactor = trafficIntensityActive
     ? Math.min(maxWeightFactor, 1.9)
@@ -1631,6 +1980,7 @@ async function fetchProviderRoutes(
       source: "fastest-alternatives",
       alternativeRoutes: pathCount,
       maxWeightFactor: alternativeMaxWeightFactor,
+      timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
     }),
   );
 
@@ -1663,13 +2013,14 @@ async function fetchProviderRoutes(
       }),
     );
 
-    if (!avoid.trafficIntensity) {
+    if (!avoid.trafficIntensity && !highSpeedOnly) {
       preferenceRequests.push(
         fetchGraphHopperRoute(coordinates, {
           source: `avoid-${source}-alternatives`,
           customModel: preferenceModel,
           alternativeRoutes: pathCount,
           maxWeightFactor: alternativeMaxWeightFactor,
+          timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
         }),
       );
     }
@@ -1684,21 +2035,27 @@ async function fetchProviderRoutes(
 
     if (balancedModel) {
       const balancedPathCount = maxExtraMinutes === null
-        ? Math.max(4, alternatives + 2)
+        ? Math.max(3, alternatives + 1)
         : Math.max(3, alternatives + 1);
-
-      preferenceRequests.push(
+      const balancedRequests = [
         fetchGraphHopperRoute(coordinates, {
           source: "avoid-high-speed-balanced",
           customModel: balancedModel,
         }),
-        fetchGraphHopperRoute(coordinates, {
-          source: "avoid-high-speed-balanced-alternatives",
-          customModel: balancedModel,
-          alternativeRoutes: balancedPathCount,
-          maxWeightFactor: alternativeMaxWeightFactor,
-        }),
-      );
+      ];
+      if (!trafficIntensityActive) {
+        balancedRequests.push(
+          fetchGraphHopperRoute(coordinates, {
+            source: "avoid-high-speed-balanced-alternatives",
+            customModel: balancedModel,
+            alternativeRoutes: balancedPathCount,
+            maxWeightFactor: alternativeMaxWeightFactor,
+            timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
+          }),
+        );
+      }
+
+      preferenceRequests.push(...balancedRequests);
     }
   }
 
@@ -1718,9 +2075,9 @@ async function fetchProviderRoutes(
         }),
       );
 
-      if (option !== "trafficIntensity") {
+      if (option !== "trafficIntensity" && !trafficIntensityActive) {
         const singlePathCount = maxExtraMinutes === null
-          ? Math.max(4, alternatives + 2)
+          ? Math.max(3, alternatives + 1)
           : Math.max(3, alternatives + 1);
         preferenceRequests.push(
           fetchGraphHopperRoute(coordinates, {
@@ -1728,6 +2085,7 @@ async function fetchProviderRoutes(
             customModel: singlePreferenceModel,
             alternativeRoutes: singlePathCount,
             maxWeightFactor: alternativeMaxWeightFactor,
+            timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
           }),
         );
       }
@@ -1765,6 +2123,7 @@ async function fetchProviderRoutes(
             customModel: corePreferenceModel,
             alternativeRoutes: corePathCount,
             maxWeightFactor: alternativeMaxWeightFactor,
+            timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
           }),
         );
       }
@@ -1779,20 +2138,10 @@ async function fetchProviderRoutes(
     );
 
     if (highSpeedBalanceModel) {
-      const highSpeedPathCount = maxExtraMinutes === null
-        ? Math.max(4, alternatives + 3)
-        : Math.max(3, alternatives + 1);
-
       preferenceRequests.push(
         fetchGraphHopperRoute(coordinates, {
           source: "avoid-high-speed-balance",
           customModel: highSpeedBalanceModel,
-        }),
-        fetchGraphHopperRoute(coordinates, {
-          source: "avoid-high-speed-balance-alternatives",
-          customModel: highSpeedBalanceModel,
-          alternativeRoutes: highSpeedPathCount,
-          maxWeightFactor,
         }),
       );
     }
@@ -1809,12 +2158,6 @@ async function fetchProviderRoutes(
           source: "avoid-high-speed-diverse",
           customModel: diverseModel,
         }),
-        fetchGraphHopperRoute(coordinates, {
-          source: "avoid-high-speed-diverse-alternatives",
-          customModel: diverseModel,
-          alternativeRoutes: pathCount,
-          maxWeightFactor: alternativeMaxWeightFactor,
-        }),
       );
     }
   }
@@ -1823,10 +2166,14 @@ async function fetchProviderRoutes(
     Promise.allSettled(preferenceRequests),
     Promise.allSettled(genericAlternativeRequests),
   ]);
-  const routes = [
+  const providerRoutes = [
     ...fastestRoutes,
     ...preferenceResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
     ...genericAlternativeResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
+  ];
+  const routes = [
+    ...providerRoutes,
+    ...buildHybridRoutes(providerRoutes, activeOptions),
   ];
 
   if (!routes.length) {

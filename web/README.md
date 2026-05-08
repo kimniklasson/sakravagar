@@ -61,7 +61,7 @@ web/
 - `/api/risk` — deduplicerad segmentrisk via `risk_in_bbox`.
 - `/api/adt` — ÅDT/flöde via `adt_in_bbox`.
 - `/api/traffic-flow` — aktiva TrafficFlow-mätningar snappade till segment.
-- `/api/disturbances` — aktiva vägarbeten/kö-/trafikstörningar.
+- `/api/disturbances?bbox=...` — aktiva vägarbeten/kö-/trafikstörningar inom kartans bbox.
 - `/api/large-roads` — höghastighetssegment för badge-lagret och ruttfiltrets scoring.
 - `/api/geocode` — Nominatim-proxy för svensk search/reverse.
 - `/api/route` — routingproxy. Använder GraphHopper om env finns, annars OSRM.

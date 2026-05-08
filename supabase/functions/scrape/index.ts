@@ -12,6 +12,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const TRAFIKVERKET_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json";
+const SITUATION_QUERY_LIMIT = 10_000;
+const TRAFIKVERKET_REQUEST_TIMEOUT_MS = 20_000;
+const TRAFIKVERKET_TRAFFIC_FLOW_TIMEOUT_MS = 25_000;
 
 type Deviation = {
   Id: string;
@@ -94,36 +97,58 @@ function buildQuery(apiKey: string, messageType?: string): string {
 
   return `<REQUEST>
   <LOGIN authenticationkey="${apiKey}" />
-  <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="1000">
+  <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="${SITUATION_QUERY_LIMIT}">
     ${filter}
   </QUERY>
 </REQUEST>`;
 }
 
-async function fetchSituationDeviations(apiKey: string, messageType?: string): Promise<Deviation[]> {
-  const res = await fetch(TRAFIKVERKET_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/xml" },
-    body: buildQuery(apiKey, messageType),
-  });
-  if (!res.ok) {
-    throw new Error(`Trafikverket API ${res.status}: ${await res.text()}`);
+async function fetchTrafikverketJson(body: string, label: string, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(TRAFIKVERKET_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/xml" },
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`${label} timed out`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(`${label} ${res.status}: ${await res.text()}`);
+  }
+  return res.json();
+}
+
+async function fetchSituationDeviations(apiKey: string, messageType?: string): Promise<Deviation[]> {
+  const json = await fetchTrafikverketJson(
+    buildQuery(apiKey, messageType),
+    "Trafikverket API",
+    TRAFIKVERKET_REQUEST_TIMEOUT_MS,
+  );
   const results: Array<{ Situation?: Array<{ Deviation?: Deviation[] }> }> =
-    json?.RESPONSE?.RESULT ?? [];
+    (json as { RESPONSE?: { RESULT?: Array<{ Situation?: Array<{ Deviation?: Deviation[] }> }> } })
+      ?.RESPONSE?.RESULT ?? [];
   const situations = results.flatMap((r) => r.Situation ?? []);
   return situations.flatMap((s) => s.Deviation ?? []);
 }
 
-async function fetchDeviations(apiKey: string): Promise<Deviation[]> {
-  const deviations = await fetchSituationDeviations(apiKey, "Olycka");
-  return deviations.filter((d) => d.MessageType === "Olycka");
-}
-
-async function fetchDisturbances(apiKey: string): Promise<Deviation[]> {
-  const deviations = await fetchSituationDeviations(apiKey);
-  return deviations.filter((d) => d.MessageType !== "Olycka");
+function splitSituationDeviations(deviations: Deviation[]): {
+  deviations: Deviation[];
+  disturbances: Deviation[];
+} {
+  return {
+    deviations: deviations.filter((d) => d.MessageType === "Olycka"),
+    disturbances: deviations.filter((d) => d.MessageType !== "Olycka"),
+  };
 }
 
 async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> {
@@ -139,16 +164,13 @@ async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> {
   </QUERY>
 </REQUEST>`;
 
-  const res = await fetch(TRAFIKVERKET_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/xml" },
+  const json = await fetchTrafikverketJson(
     body,
-  });
-  if (!res.ok) {
-    throw new Error(`Trafikverket TrafficFlow API ${res.status}: ${await res.text()}`);
-  }
-  const json = await res.json();
-  const results: Array<{ TrafficFlow?: TrafficFlow[] }> = json?.RESPONSE?.RESULT ?? [];
+    "Trafikverket TrafficFlow API",
+    TRAFIKVERKET_TRAFFIC_FLOW_TIMEOUT_MS,
+  );
+  const results: Array<{ TrafficFlow?: TrafficFlow[] }> =
+    (json as { RESPONSE?: { RESULT?: Array<{ TrafficFlow?: TrafficFlow[] }> } })?.RESPONSE?.RESULT ?? [];
   return results
     .flatMap((r) => r.TrafficFlow ?? [])
     .filter((f) => f.Deleted !== true && f.VehicleType === "anyVehicle");
@@ -242,11 +264,11 @@ Deno.serve(async (req: Request) => {
   const now = new Date().toISOString();
 
   try {
-    const [deviations, disturbances, trafficFlows] = await Promise.all([
-      fetchDeviations(apiKey),
-      fetchDisturbances(apiKey),
+    const [situationDeviations, trafficFlows] = await Promise.all([
+      fetchSituationDeviations(apiKey),
       fetchTrafficFlows(apiKey),
     ]);
+    const { deviations, disturbances } = splitSituationDeviations(situationDeviations);
     const rows = deviations
       .map((d) => deviationToRow(d, now))
       .filter((r): r is UpsertRow => r !== null);
