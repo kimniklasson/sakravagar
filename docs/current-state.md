@@ -208,7 +208,6 @@ pnpm web
 
 ## Nästa fokus
 
-- Commit/pusha den senaste backend/security-härdningen om den ser bra ut: generiska Supabase-serverfel, validerad `events?since=` och validerad `geocode?limit=`.
 - Sätt en routing-performancebudget innan mer optimering: vanliga rutter under 3 sekunder, filtrerade rutter helst under 10-12 sekunder och aldrig över 20 sekunder utan tydlig fallback.
 - Trimma GraphHopper-fanout, särskilt `highSpeed` och `highSpeed+traffic`, utan att tappa minst 3-5 trovärdiga alternativ.
 - Lägg lätt routing-observability: anonymiserad filterkombination, antal kandidater, total route-tid, GraphHopper-timeouts, provider, fallback och antal rutter tillbaka. Logga inte koordinater i klartext.
