@@ -124,6 +124,13 @@ GraphHopper-kandidater:
 
 Olyckshistorik, trafikintensiva vägar, störningar, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Bro-/tunnelexponering räknas från GraphHopper `road_environment` path details, medan övriga filter även poängsätts efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
 
+Performancebudget:
+
+- Snabbaste rutt/icke-filtrerad routing ska normalt kännas klar inom 0-4 sekunder och timeoutar server-side efter 20 sekunder.
+- Filtrerade alternativ ska normalt kännas klara inom 0-12 sekunder, kan visa mjuk väntinfo efter 12 och 30 sekunder, och timeoutar server-side efter 55 sekunder.
+- `/api/route` sätter `maxDuration = 60` så appens egna timeout hinner svara före Vercels hårda gräns.
+- Timeoutfel returnerar 504 med användarcopy som föreslår att prova senare, kortare resa eller färre undvik-val.
+
 ## Segment
 
 `GET /api/segment`

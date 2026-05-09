@@ -3,6 +3,7 @@ import { jsonResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const OSRM_BASE_URL = process.env.OSRM_BASE_URL ?? "https://router.project-osrm.org";
 const OSRM_PROFILE = process.env.OSRM_PROFILE ?? "driving";
@@ -240,6 +241,9 @@ const TRAFFIC_FLOW_ACTIVE_WINDOW_MS = 45 * 60 * 1000;
 const GRAPHHOPPER_ROUTE_TIMEOUT_MS = 15_000;
 const GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS = 7_000;
 const GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS = 9_000;
+const ROUTE_FASTEST_SERVER_TIMEOUT_MS = 20_000;
+const ROUTE_FILTERED_SERVER_TIMEOUT_MS = 55_000;
+const ROUTE_PREVIEW_SERVER_TIMEOUT_MS = 7_000;
 const HYBRID_ROUTE_MAX_JOIN_METERS = 6;
 const HYBRID_ROUTE_REJOIN_AFTER_SEPARATION_METERS = 320;
 const HYBRID_ROUTE_MIN_LEG_METERS = 1_500;
@@ -262,6 +266,49 @@ const noAvoids: RouteAvoidState = {
   bridges: false,
   tunnels: false,
 };
+
+class RouteDeadlineError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super("route request timed out");
+  }
+}
+
+function routeTimeoutMessage() {
+  return "Tidsgränsen nåddes för sökningen. Prova igen senare, med en kortare resa eller med färre undvik-val.";
+}
+
+function routeRequestTimeoutMs(
+  preview: boolean,
+  alternatives: number,
+  avoid: RouteAvoidState,
+): number {
+  if (preview) return ROUTE_PREVIEW_SERVER_TIMEOUT_MS;
+  if (alternatives === 0 || activeAvoidOptions(avoid).length === 0) return ROUTE_FASTEST_SERVER_TIMEOUT_MS;
+  return ROUTE_FILTERED_SERVER_TIMEOUT_MS;
+}
+
+function withRouteDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new RouteDeadlineError(timeoutMs)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+function isRouteTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof RouteDeadlineError ||
+    (error instanceof Error && error.message.toLowerCase().includes("timed out"))
+  );
+}
 
 function isCoordinate(value: unknown): value is [number, number] {
   if (!Array.isArray(value) || value.length !== 2) return false;
@@ -2236,43 +2283,51 @@ export async function POST(req: Request) {
       : null;
 
   try {
-    const routeResult = preview
-      ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
-      : alternatives === 0
+    const timeoutMs = routeRequestTimeoutMs(preview, alternatives, avoid);
+    const result = await withRouteDeadline((async () => {
+      const routeResult = preview
         ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
-        : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
-    const providerRoutes = routeResult.routes;
-    const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid);
-    const routes: RouteLine[] = providerRoutes.map((route, index) => ({
-      id: `route-${index + 1}`,
-      source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
-      distanceMeters: route.distance,
-      durationSeconds: route.duration,
-      geometry: route.geometry,
-      safetyScore: scores[index]?.avoidScores.accidentHistory ?? null,
-      avoidScores: scores[index]?.avoidScores ?? {
-        accidentHistory: null,
-        highSpeed: null,
-        trafficIntensity: null,
-        disturbances: null,
-        bridges: null,
-        tunnels: null,
-      },
-      exposure: scores[index]?.exposure ?? {
-        accidentHistory: null,
-        highSpeedMeters: null,
-        trafficIntensityMeters: null,
-        disturbances: null,
-        bridgeMeters: null,
-        tunnelMeters: null,
-        accidentHistoryEvents: null,
-      },
-      annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
-    }));
+        : alternatives === 0
+          ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
+          : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
+      const providerRoutes = routeResult.routes;
+      const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid);
+      const routes: RouteLine[] = providerRoutes.map((route, index) => ({
+        id: `route-${index + 1}`,
+        source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
+        distanceMeters: route.distance,
+        durationSeconds: route.duration,
+        geometry: route.geometry,
+        safetyScore: scores[index]?.avoidScores.accidentHistory ?? null,
+        avoidScores: scores[index]?.avoidScores ?? {
+          accidentHistory: null,
+          highSpeed: null,
+          trafficIntensity: null,
+          disturbances: null,
+          bridges: null,
+          tunnels: null,
+        },
+        exposure: scores[index]?.exposure ?? {
+          accidentHistory: null,
+          highSpeedMeters: null,
+          trafficIntensityMeters: null,
+          disturbances: null,
+          bridgeMeters: null,
+          tunnelMeters: null,
+          accidentHistoryEvents: null,
+        },
+        annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
+      }));
 
-    return jsonResponse({ routes, avoid, maxExtraMinutes, provider: routeResult.provider }, { cacheSeconds: 300 });
+      return { routes, avoid, maxExtraMinutes, provider: routeResult.provider };
+    })(), timeoutMs);
+
+    return jsonResponse(result, { cacheSeconds: 300 });
   } catch (err) {
     console.error("routing failed", err);
+    if (isRouteTimeoutError(err)) {
+      return jsonResponse({ error: routeTimeoutMessage() }, { status: 504 });
+    }
     return jsonResponse({ error: "routing failed" }, { status: 502 });
   }
 }

@@ -2,7 +2,7 @@
 
 Historisk olycksdata på svenska vägar — en webbapp som hjälper nervösa förare känna trygghet och välja säkrare rutter.
 
-Idé, validering och strategi i [PROJECT.md](./PROJECT.md). Nuläge i [docs/current-state.md](./docs/current-state.md), vägval i [docs/decisions.md](./docs/decisions.md), utvecklarflöde i [docs/dev-workflow.md](./docs/dev-workflow.md), routingdrift i [docs/routing-ops.md](./docs/routing-ops.md) och senaste större sessionslogg i [docs/session-2026-05-01.md](./docs/session-2026-05-01.md).
+Idé, validering och strategi i [PROJECT.md](./PROJECT.md). Nuläge i [docs/current-state.md](./docs/current-state.md), vägval i [docs/decisions.md](./docs/decisions.md), utvecklarflöde i [docs/dev-workflow.md](./docs/dev-workflow.md), routingdrift i [docs/routing-ops.md](./docs/routing-ops.md) och senaste större sessionslogg i [docs/session-2026-05-09.md](./docs/session-2026-05-09.md).
 
 ## Arkitektur
 

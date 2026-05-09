@@ -62,7 +62,7 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 
 ## Nuvarande byggfokus
 
-1. Sätt routing-performancebudget och trimma GraphHopper-fanout utan att tappa trovärdiga alternativ.
+1. Trimma GraphHopper-fanout mot routing-performancebudgeten utan att tappa trovärdiga alternativ.
 2. Lägg lätt routing-observability utan koordinater i klartext.
 3. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg.
 4. Frontend cleanup utan UX-ändring: bryt ut route state/hooks, route cards, layer loaders och scoring helpers ur de största filerna.

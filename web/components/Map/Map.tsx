@@ -131,6 +131,31 @@ const routeLoadingMessages = [
   "Finjusterar rutten...",
 ];
 
+type RouteLoadingMode = "fastest" | "filtered";
+
+const routeLoadingHints: Record<RouteLoadingMode, Array<{ afterMs: number; text: string }>> = {
+  fastest: [
+    {
+      afterMs: 4_000,
+      text: "Det tar längre tid än vanligt. Vi hämtar snabbaste vägen.",
+    },
+    {
+      afterMs: 12_000,
+      text: "Det tar ovanligt lång tid att hitta rutten. Prova igen om det inte släpper.",
+    },
+  ],
+  filtered: [
+    {
+      afterMs: 12_000,
+      text: "Det här tar längre tid än vanligt. Vi jämför flera lugnare vägar.",
+    },
+    {
+      afterMs: 30_000,
+      text: "Det tar ovanligt lång tid att hitta bra alternativ. Kortare resa eller färre undvik-val går ofta snabbare.",
+    },
+  ],
+};
+
 const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
 const routeAvoidOptionWeights: Record<RouteAvoidOption, number> = {
   highSpeed: 5,
@@ -1445,16 +1470,20 @@ export default function Map() {
     );
   };
 
+  const routeLoadingActive = routeLoading || routeCompareLoading;
+  const routeLoadingMode: RouteLoadingMode =
+    routeCompareLoading || activeAvoidCount(routeAvoids) > 0 ? "filtered" : "fastest";
+
   return (
     <>
       <div ref={containerRef} className={styles.map} />
       <div
         className={`${styles.routeLoadingOverlay} ${
-          routeLoading || routeCompareLoading ? styles.routeLoadingOverlayActive : ""
+          routeLoadingActive ? styles.routeLoadingOverlayActive : ""
         }`}
         aria-hidden="true"
       >
-        <RouteLoadingIndicator active={routeLoading || routeCompareLoading} />
+        <RouteLoadingIndicator active={routeLoadingActive} mode={routeLoadingMode} />
       </div>
       {infoOpen && (
         <button
@@ -1818,14 +1847,16 @@ function routeAlternativeCopy(
   };
 }
 
-function RouteLoadingIndicator({ active }: { active: boolean }) {
+function RouteLoadingIndicator({ active, mode }: { active: boolean; mode: RouteLoadingMode }) {
   const [messages, setMessages] = useState(shuffledRouteLoadingMessages);
   const [messageIndex, setMessageIndex] = useState(0);
+  const [hintText, setHintText] = useState<string | null>(null);
 
   useEffect(() => {
     if (!active) return;
     setMessages(shuffledRouteLoadingMessages());
     setMessageIndex(0);
+    setHintText(null);
   }, [active]);
 
   useEffect(() => {
@@ -1835,6 +1866,21 @@ function RouteLoadingIndicator({ active }: { active: boolean }) {
     }, 2200);
     return () => window.clearInterval(id);
   }, [active, messages.length]);
+
+  useEffect(() => {
+    if (!active) {
+      setHintText(null);
+      return;
+    }
+
+    setHintText(null);
+    const timers = routeLoadingHints[mode].map((hint) =>
+      window.setTimeout(() => setHintText(hint.text), hint.afterMs),
+    );
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [active, mode]);
 
   return (
     <div className={styles.routeLoadingIndicator}>
@@ -1854,6 +1900,11 @@ function RouteLoadingIndicator({ active }: { active: boolean }) {
           ))}
         </div>
       </div>
+      {hintText && (
+        <div className={styles.routeLoadingHint}>
+          {hintText}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
-Senaste större arbetslogg: `docs/session-2026-05-08.md`.
+Senaste större arbetslogg: `docs/session-2026-05-09.md`.
 
 ## Produktläge
 
@@ -46,6 +46,7 @@ Ruttplanerarstatus:
 - `Undvik om möjligt` visas som pills för `Höga hastigheter`, `Trafikintensiva vägar`, `Broar`, `Tunnlar`, `Störningar` och `Olycksrisk`. Pills kan väljas innan Från/Till fylls i och ligger kvar genom input/geocode. På mobil ligger sektionen utan egen bakgrund 16 px under inputfälten för att inte täcka kartan. Varje pill har en kort vit tooltip i `m-small`. Undvik-score för höga hastigheter räknar 90+ km/h-exponering från GraphHopper `max_speed` path details när de finns, med NVDB som fallback. Trafikintensiva vägar använder ÅDT som bas och liveflöde som förstärkning där det finns. Broar/tunnlar räknas från GraphHopper `road_environment` path details.
 - Aktiv filterladdning visas som liten spinner i aktiva pills. Det finns ingen separat stor `Jämför alternativ...`-box.
 - Tidsbudget-slidern är borttagen ur UI:t. Utan aktiva filter visas bara snabbaste rutten. Med aktiva filter öppnas kandidatläget och användaren får se alla relevanta alternativ vi kan hitta.
+- Routing-performancebudget: snabbaste rutt ska normalt kännas klar inom 0-4 sekunder och har server-timeout 20 sekunder; filtrerade alternativ ska normalt landa inom 0-12 sekunder, får mjuk info efter 12 sekunder, ovanligt-långsam-info efter 30 sekunder och server-timeout strax före Vercels 60-sekundersgräns. Timeoutcopy ber användaren prova senare, kortare resa eller färre undvik-val.
 - Ruttalternativ visas som scrollande kort i botten av kartan. Varje kort visar titel, tid, distans och en metrikslista för aktiva `Undvik om möjligt`-val. Korten har 16 px padding, 8 px radius och `#555` vid 30% opacitet med 16 px blur. På mobil är korten 280 px breda och ligger 32 px från botten så de inte krockar med kartattributionen. Vald rutt har mörkare bakgrund. Metrikrader använder `m-small`, 15% vit top border, 60% vit vänstertext, 100% vit högertext och `#95FF97` för positiva värden.
 - Alternativlistan sorteras efter aktiva `Undvik om möjligt`-kriterier först. Rutter som matchar filtren ungefär lika bra sorteras därefter på tid och sedan distans. Uppenbart dominerade rutter, alltså sådana som är sämre på aktiva filter utan att vara snabbare, tas bort från listan. Vald rutt är separat state från listordningen. Klick på alternativ i kartan autoscrollar listan till valt kort; klick på alternativ i listan fokuserar kartan på vald rutt.
 - Hover/focus på ett alternativ markerar motsvarande linje på kartan utan att ändra listordningen.
@@ -208,8 +209,7 @@ pnpm web
 
 ## Nästa fokus
 
-- Sätt en routing-performancebudget innan mer optimering: vanliga rutter under 3 sekunder, filtrerade rutter helst under 10-12 sekunder och aldrig över 20 sekunder utan tydlig fallback.
-- Trimma GraphHopper-fanout, särskilt `highSpeed` och `highSpeed+traffic`, utan att tappa minst 3-5 trovärdiga alternativ.
+- Trimma GraphHopper-fanout mot performancebudgeten, särskilt `highSpeed` och `highSpeed+traffic`, utan att tappa minst 3-5 trovärdiga alternativ.
 - Lägg lätt routing-observability: anonymiserad filterkombination, antal kandidater, total route-tid, GraphHopper-timeouts, provider, fallback och antal rutter tillbaka. Logga inte koordinater i klartext.
 - Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer. Spara förväntat beteende per case, särskilt när `Höga hastigheter` kombineras med andra undvik-filter.
 - Följ upp build-hang isolerat om det återkommer. Senaste lokala build passerade.
