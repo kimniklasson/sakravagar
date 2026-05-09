@@ -62,10 +62,12 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 
 ## Nuvarande byggfokus
 
-1. Kalibrera ruttplanerarens filter på verkliga sträckor.
-2. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
-3. Kalibrera GraphHopper penalty zones för olyckshistorik/störningar mot verkliga ruttfall.
-4. Finlira ruttplanerarens UI efter Kims senaste designförslag.
+1. Sätt routing-performancebudget och trimma GraphHopper-fanout utan att tappa trovärdiga alternativ.
+2. Lägg lätt routing-observability utan koordinater i klartext.
+3. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg.
+4. Frontend cleanup utan UX-ändring: bryt ut route state/hooks, route cards, layer loaders och scoring helpers ur de största filerna.
+5. A11y-fixa route suggestions och ta design-/kodkonventionsbeslut för framtida reviews.
+6. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
 
 ## Potentiella framtida datalager
 

@@ -15,6 +15,9 @@ const MIN_SWEDEN_LNG = 9;
 const MAX_SWEDEN_LNG = 25;
 const MIN_SWEDEN_LAT = 54;
 const MAX_SWEDEN_LAT = 70;
+const DEFAULT_RESULT_LIMIT = 5;
+const MIN_RESULT_LIMIT = 1;
+const MAX_RESULT_LIMIT = 8;
 
 export type GeocodeResult = {
   id: string;
@@ -169,6 +172,22 @@ function isCoordinateInSwedenBounds(lng: number, lat: number): boolean {
   );
 }
 
+function parseResultLimit(value: string | null): { limit: number | null; error: string | null } {
+  if (value === null || value.trim() === "") {
+    return { limit: DEFAULT_RESULT_LIMIT, error: null };
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return { limit: null, error: "limit must be a finite number" };
+  }
+
+  return {
+    limit: Math.max(MIN_RESULT_LIMIT, Math.min(MAX_RESULT_LIMIT, Math.floor(parsed))),
+    error: null,
+  };
+}
+
 function mapResult(row: NominatimSearchResult): GeocodeResult | null {
   const lng = Number(row.lon);
   const lat = Number(row.lat);
@@ -261,7 +280,11 @@ export async function GET(req: Request) {
       return jsonResponse({ error: "query too long" }, { status: 400 });
     }
 
-    const limit = Math.max(1, Math.min(8, Number(searchParams.get("limit") ?? 5)));
+    const { limit, error: limitError } = parseResultLimit(searchParams.get("limit"));
+    if (limitError || limit === null) {
+      return jsonResponse({ error: limitError }, { status: 400 });
+    }
+
     let results = await searchNominatim(q, limit);
     const fallbackQuery = fallbackQueryFor(q);
     if (results.length === 0 && fallbackQuery) {

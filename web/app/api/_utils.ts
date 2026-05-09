@@ -32,6 +32,11 @@ export function jsonResponse<T>(
   return NextResponse.json(body, { ...init, headers });
 }
 
+export function serverErrorResponse(label: string, error: unknown) {
+  console.error(label, error);
+  return jsonResponse({ error: "server error" }, { status: 500 });
+}
+
 export function parseBboxParam(
   value: string | null,
   opts: BboxOptions,

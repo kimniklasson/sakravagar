@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse } from "../_utils";
+import { jsonResponse, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ export type SegmentDetail = {
 
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
   const { searchParams } = new URL(req.url);
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
   const { data, error } = await client.rpc("segment_detail", { p_fid: fid });
 
   if (error) {
-    return jsonResponse({ error: error.message }, { status: 500 });
+    return serverErrorResponse("segment detail query failed", error);
   }
   if (!data) {
     return jsonResponse({ error: "segment not found" }, { status: 404 });

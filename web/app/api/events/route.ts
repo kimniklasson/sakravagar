@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam } from "../_utils";
+import { jsonResponse, parseBboxParam, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,13 +20,28 @@ export type EventPoint = {
   last_seen: string;
 };
 
+function normalizeSinceParam(value: string | null): { since: string | null; error: string | null } {
+  if (!value) return { since: null, error: null };
+
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) {
+    return { since: null, error: "since must be a valid date" };
+  }
+
+  return { since: new Date(time).toISOString(), error: null };
+}
+
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
   const { searchParams } = new URL(req.url);
-  const since = searchParams.get("since");
+  const { since, error: sinceError } = normalizeSinceParam(searchParams.get("since"));
+  if (sinceError) {
+    return jsonResponse({ error: sinceError }, { status: 400 });
+  }
+
   const liveOnly = searchParams.get("live") === "1" || searchParams.get("live") === "true";
   const { bbox, error: bboxError } = parseBboxParam(searchParams.get("bbox"), {
     required: true,
@@ -61,7 +76,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await query;
   if (error) {
-    return jsonResponse({ error: error.message }, { status: 500 });
+    return serverErrorResponse("events query failed", error);
   }
 
   const points: EventPoint[] = (data ?? []).map((row) => ({

@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam } from "../_utils";
+import { jsonResponse, parseBboxParam, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ type AdtRow = {
 
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
   const { searchParams } = new URL(req.url);
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
   });
 
   if (error) {
-    return jsonResponse({ error: error.message }, { status: 500 });
+    return serverErrorResponse("adt query failed", error);
   }
 
   const segments: AdtSegment[] = ((data ?? []) as AdtRow[]).map((row) => ({

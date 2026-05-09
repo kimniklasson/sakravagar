@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse } from "../../_utils";
+import { jsonResponse, serverErrorResponse } from "../../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export type EventStats = {
 
 export async function GET() {
   if (!url || !anon) {
-    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
@@ -41,7 +41,7 @@ export async function GET() {
 
   const error = oldestResult.error ?? latestResult.error;
   if (error) {
-    return jsonResponse({ error: error.message }, { status: 500 });
+    return serverErrorResponse("event stats query failed", error);
   }
 
   const oldestFirstSeen = oldestResult.data?.first_seen ?? null;

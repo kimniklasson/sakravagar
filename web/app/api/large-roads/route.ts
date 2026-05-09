@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam } from "../_utils";
+import { jsonResponse, parseBboxParam, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ type LargeRoadRow = {
 
 export async function GET(req: Request) {
   if (!url || !anon) {
-    return jsonResponse({ error: "supabase env missing" }, { status: 500 });
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
   const { searchParams } = new URL(req.url);
@@ -61,7 +61,7 @@ export async function GET(req: Request) {
       .range(from, to);
 
     if (error) {
-      return jsonResponse({ error: error.message }, { status: 500 });
+      return serverErrorResponse("large roads query failed", error);
     }
 
     const page = (data ?? []) as LargeRoadRow[];

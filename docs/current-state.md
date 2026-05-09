@@ -1,8 +1,8 @@
-# Current state — 2026-05-07
+# Current state — 2026-05-09
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
-Senaste större arbetslogg: `docs/session-2026-05-07.md`.
+Senaste större arbetslogg: `docs/session-2026-05-08.md`.
 
 ## Produktläge
 
@@ -208,6 +208,13 @@ pnpm web
 
 ## Nästa fokus
 
-- Testa och kalibrera routeplanner-filter på fler verkliga sträckor. Kända case: Floda -> Rönnäng ska byta till lugnare kandidat när `Höga hastigheter` slås på.
-- Kalibrera `accidentHistory` och `disturbances` penalty zones i GraphHopper och följ upp med manuella smoke tests på kända sträckor.
+- Commit/pusha den senaste backend/security-härdningen om den ser bra ut: generiska Supabase-serverfel, validerad `events?since=` och validerad `geocode?limit=`.
+- Sätt en routing-performancebudget innan mer optimering: vanliga rutter under 3 sekunder, filtrerade rutter helst under 10-12 sekunder och aldrig över 20 sekunder utan tydlig fallback.
+- Trimma GraphHopper-fanout, särskilt `highSpeed` och `highSpeed+traffic`, utan att tappa minst 3-5 trovärdiga alternativ.
+- Lägg lätt routing-observability: anonymiserad filterkombination, antal kandidater, total route-tid, GraphHopper-timeouts, provider, fallback och antal rutter tillbaka. Logga inte koordinater i klartext.
+- Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer. Spara förväntat beteende per case, särskilt när `Höga hastigheter` kombineras med andra undvik-filter.
+- Följ upp build-hang isolerat om det återkommer. Senaste lokala build passerade.
+- Frontend cleanup utan UX-ändring: dela upp `Map.tsx`, `layers.ts`, `Map.module.css` och `/api/route` i mindre moduler via rena extraktioner.
+- A11y-fixa route suggestions till korrekt combobox/listbox/option och separera InfoBox-interaktionen efter produktbeslut.
+- Ta design-/kodkonventionsbeslut om inline CSS custom properties och eventuell negativ letter-spacing.
 - När olyckshistoriken mognat: kalibrera riskskalan om från preliminära värden till mer stabila brytpunkter.
