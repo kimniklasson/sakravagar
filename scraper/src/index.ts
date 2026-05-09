@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   const skippedTrafficFlows = trafficFlows.length - trafficFlowRows.length;
 
   const client = makeClient();
-  const [{ attempted, error }, disturbanceResult, trafficFlowResult] = await Promise.all([
+  const [eventResult, disturbanceResult, trafficFlowResult] = await Promise.all([
     upsertEvents(client, rows),
     upsertDisturbances(client, disturbanceRows),
     upsertTrafficFlows(client, trafficFlowRows),
@@ -36,21 +36,24 @@ async function main(): Promise<void> {
   const elapsed = Date.now() - start;
   const summary = {
     fetched: deviations.length,
-    upserted: attempted,
+    upserted: eventResult.attempted,
+    upsert_batches: eventResult.batches,
     skipped_no_coord: skipped,
     disturbances_fetched: disturbances.length,
     disturbances_upserted: disturbanceResult.attempted,
+    disturbances_upsert_batches: disturbanceResult.batches,
     disturbances_skipped_no_coord: skippedDisturbances,
     traffic_flow_fetched: trafficFlows.length,
     traffic_flow_upserted: trafficFlowResult.attempted,
+    traffic_flow_upsert_batches: trafficFlowResult.batches,
     traffic_flow_skipped_no_coord: skippedTrafficFlows,
     elapsed_ms: elapsed,
   };
 
-  if (error || disturbanceResult.error || trafficFlowResult.error) {
+  if (eventResult.error || disturbanceResult.error || trafficFlowResult.error) {
     console.error(
       "[scraper] upsert error:",
-      error?.message ?? disturbanceResult.error?.message ?? trafficFlowResult.error?.message,
+      eventResult.error?.message ?? disturbanceResult.error?.message ?? trafficFlowResult.error?.message,
       summary,
     );
     process.exit(1);
@@ -68,12 +71,15 @@ async function main(): Promise<void> {
         "",
         `- fetched: **${summary.fetched}**`,
         `- upserted: **${summary.upserted}**`,
+        `- upsert batches: ${summary.upsert_batches}`,
         `- skipped (no coord): ${summary.skipped_no_coord}`,
         `- disturbances fetched: **${summary.disturbances_fetched}**`,
         `- disturbances upserted: **${summary.disturbances_upserted}**`,
+        `- disturbances upsert batches: ${summary.disturbances_upsert_batches}`,
         `- disturbances skipped (no coord): ${summary.disturbances_skipped_no_coord}`,
         `- traffic flow fetched: **${summary.traffic_flow_fetched}**`,
         `- traffic flow upserted: **${summary.traffic_flow_upserted}**`,
+        `- traffic flow upsert batches: ${summary.traffic_flow_upsert_batches}`,
         `- traffic flow skipped (no coord): ${summary.traffic_flow_skipped_no_coord}`,
         `- elapsed: ${summary.elapsed_ms} ms`,
         "",

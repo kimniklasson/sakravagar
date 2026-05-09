@@ -124,6 +124,8 @@ GraphHopper-kandidater:
 
 Olyckshistorik, trafikintensiva vägar, störningar, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Bro-/tunnelexponering räknas från GraphHopper `road_environment` path details, medan övriga filter även poängsätts efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
 
+Fanout hålls nere med några budgetsäkra begränsningar: plain `highSpeed + trafficIntensity` hoppar över en redundant calm-kandidat, den extra diversifierade `highSpeed`-kandidaten används bara på längre highSpeed-only-rutter och rena `trafficIntensity`-kombinationer skickar max cirka fem rutter vidare till scoring/UI. För längre rutter med `highSpeed` kan API:t bygga hybridkandidater från redan hämtade GraphHopper-rutter och räkna om några låg-hastighets-via-punkter från alternativa korridorer med den hårda calm-modellen. När `highSpeed` kombineras med andra filter tas en extra highSpeed-backbone med, så tidigare lugna korridorer behålls och de nya filtren adderar kompromissalternativ i stället för att ersätta dem. Genererade via-/hybridkandidater som gör en tydlig avstickare och kommer tillbaka nära samma punkt sållas bort, och highSpeed-svaret prioriterar ungefär tre helt lugna alternativ för highSpeed-only eller upp till fem lugna alternativ när flera filter är aktiva, plus ett litet antal snabbare referenser.
+
 Performancebudget:
 
 - Snabbaste rutt/icke-filtrerad routing ska normalt kännas klar inom 0-4 sekunder och timeoutar server-side efter 20 sekunder.
@@ -137,6 +139,13 @@ Frontend session-cache:
 - Cache key bygger på route-koordinater inklusive via-punkter, aktiva undvik-filter, tidsbudget och antal alternativ.
 - TTL är kort för livepåverkade filter: `Störningar` 2 min, `Trafikintensiva vägar` 5 min, `Olycksrisk` 15 min och övriga statiska kombinationer 60 min.
 - Syftet är snabba filter-toggles i samma session, inte permanent server-cache.
+
+Observability:
+
+- `/api/route` skriver en coordinate-safe loggrad per route-anrop.
+- Loggen innehåller aktiva filter, antal koordinatstopp, alternativ-count, tidsbudget, preview, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka.
+- Den loggar inte koordinater, adresser eller route-geometrier.
+- Syftet är att hitta dyra filterkombinationer och trimma GraphHopper-fanout med data.
 
 ## Segment
 

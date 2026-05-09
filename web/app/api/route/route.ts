@@ -133,9 +133,26 @@ type RouteRequest = {
 
 type RouteProvider = "graphhopper" | "osrm";
 
+type RouteFetchTelemetry = {
+  providerRequestCount: number;
+  graphHopperRequestCount: number;
+  graphHopperFulfilledCount: number;
+  graphHopperRejectedCount: number;
+  graphHopperTimeoutCount: number;
+  genericRequestCount: number;
+  preferenceRequestCount: number;
+  providerRouteCount: number;
+  hybridRouteCount: number;
+  routeCountBeforeBudget: number;
+  budgetedRouteCount: number;
+  returnedRouteCount: number;
+  fallback: boolean;
+};
+
 type RouteFetchResult = {
   provider: RouteProvider;
   routes: OsrmRoute[];
+  telemetry: RouteFetchTelemetry;
 };
 
 type RiskRow = {
@@ -255,6 +272,30 @@ const HYBRID_ROUTE_MAX_REFERENCE_DISTANCE_METERS = 100_000;
 const HYBRID_ROUTE_CONNECTOR_SPEED_MPS = 10;
 const ROUTE_SEMANTIC_DUPLICATE_HIGH_SPEED_DIFF_METERS = 700;
 const ROUTE_SEMANTIC_DUPLICATE_ENVIRONMENT_DIFF_METERS = 120;
+const ROUTE_PRESENTATION_DUPLICATE_DISTANCE_METERS = 2_500;
+const ROUTE_PRESENTATION_DUPLICATE_SAMPLE_DISTANCE_METERS = 180;
+const ROUTE_PRESENTATION_DUPLICATE_SHARE = 0.9;
+const ROUTE_PRESENTATION_CONTAINED_MAX_EXTRA_METERS = 22_000;
+const ROUTE_PRESENTATION_CONTAINED_SHORTER_SHARE = 0.92;
+const ROUTE_PRESENTATION_CONTAINED_LONGER_SHARE = 0.72;
+const ROUTE_HIGH_SPEED_CALM_WINDOW_METERS = 6_000;
+const ROUTE_HIGH_SPEED_MEANINGFUL_FACTOR = 0.65;
+const ROUTE_HIGH_SPEED_CALM_RETURN_LIMIT = 3;
+const ROUTE_HIGH_SPEED_COMBINED_CALM_RETURN_LIMIT = 5;
+const ROUTE_HIGH_SPEED_MEANINGFUL_RETURN_LIMIT = 1;
+const ROUTE_HIGH_SPEED_COMBINED_MEANINGFUL_RETURN_LIMIT = 2;
+const ROUTE_HIGH_SPEED_COMPARISON_LIMIT = 2;
+const ROUTE_HIGH_SPEED_VIA_MAX_POINTS = 4;
+const ROUTE_HIGH_SPEED_VIA_FRACTIONS = [0.22, 0.34, 0.46, 0.58] as const;
+const ROUTE_HIGH_SPEED_VIA_MIN_ENDPOINT_METERS = 8_000;
+const ROUTE_HIGH_SPEED_VIA_MIN_SEPARATION_METERS = 3_500;
+const ROUTE_HIGH_SPEED_VIA_MAX_DISTANCE_TO_REFERENCE_METERS = 1_200;
+const ROUTE_GENERATED_SPUR_MAX_SAMPLES = 180;
+const ROUTE_GENERATED_SPUR_MIN_LOOP_METERS = 1_200;
+const ROUTE_GENERATED_SPUR_MAX_LOOP_METERS = 24_000;
+const ROUTE_GENERATED_SPUR_MAX_REJOIN_METERS = 300;
+const ROUTE_GENERATED_SPUR_MIN_RATIO = 7;
+const ROUTE_GENERATED_SPUR_ENDPOINT_BUFFER_METERS = 1_200;
 
 const routeAvoidOptions = ["accidentHistory", "highSpeed", "trafficIntensity", "disturbances", "bridges", "tunnels"] as const;
 
@@ -308,6 +349,55 @@ function isRouteTimeoutError(error: unknown): boolean {
     error instanceof RouteDeadlineError ||
     (error instanceof Error && error.message.toLowerCase().includes("timed out"))
   );
+}
+
+function emptyRouteFetchTelemetry(
+  fallback: boolean,
+  overrides: Partial<RouteFetchTelemetry> = {},
+): RouteFetchTelemetry {
+  return {
+    providerRequestCount: 0,
+    graphHopperRequestCount: 0,
+    graphHopperFulfilledCount: 0,
+    graphHopperRejectedCount: 0,
+    graphHopperTimeoutCount: 0,
+    genericRequestCount: 0,
+    preferenceRequestCount: 0,
+    providerRouteCount: 0,
+    hybridRouteCount: 0,
+    routeCountBeforeBudget: 0,
+    budgetedRouteCount: 0,
+    returnedRouteCount: 0,
+    fallback,
+    ...overrides,
+  };
+}
+
+function countRejectedTimeouts(results: PromiseSettledResult<OsrmRoute[]>[]): number {
+  return results.filter((result) => result.status === "rejected" && isRouteTimeoutError(result.reason)).length;
+}
+
+function routeLogPayloadBase({
+  avoid,
+  alternatives,
+  coordinateCount,
+  maxExtraMinutes,
+  preview,
+}: {
+  avoid: RouteAvoidState;
+  alternatives: number;
+  coordinateCount: number;
+  maxExtraMinutes: number | null;
+  preview: boolean;
+}) {
+  const activeAvoids = activeAvoidOptions(avoid);
+  return {
+    activeAvoids: activeAvoids.length ? activeAvoids.join(",") : "none",
+    alternatives,
+    coordinateCount,
+    maxExtraMinutes: maxExtraMinutes ?? "unlimited",
+    preview,
+  };
 }
 
 function isCoordinate(value: unknown): value is [number, number] {
@@ -666,6 +756,84 @@ function dedupeRoutes(routes: OsrmRoute[]): OsrmRoute[] {
   return deduped;
 }
 
+function routePresentationSortCost(route: OsrmRoute, activeOptions: RouteAvoidOption[]): number {
+  return activeOptions.length ? routeAvoidDetailSortCost(route, activeOptions) : 0;
+}
+
+function compareRoutesForPresentation(
+  a: OsrmRoute,
+  b: OsrmRoute,
+  activeOptions: RouteAvoidOption[],
+): number {
+  const avoidCostA = routePresentationSortCost(a, activeOptions);
+  const avoidCostB = routePresentationSortCost(b, activeOptions);
+  if (Math.abs(avoidCostA - avoidCostB) > 0.002) return avoidCostA - avoidCostB;
+  if (Math.abs(a.duration - b.duration) > 30) return a.duration - b.duration;
+  if (Math.abs(a.distance - b.distance) > 50) return a.distance - b.distance;
+  return 0;
+}
+
+function routeNearShare(
+  samples: GeoJSON.Position[],
+  comparisonLine: GeoJSON.Position[],
+  originLat: number,
+): number {
+  if (!samples.length) return 0;
+  const nearCount = samples.filter((point) => (
+    distancePointToLineMeters(point, comparisonLine, originLat) <= ROUTE_PRESENTATION_DUPLICATE_SAMPLE_DISTANCE_METERS
+  )).length;
+  return nearCount / samples.length;
+}
+
+function routesArePresentationDuplicates(a: OsrmRoute, b: OsrmRoute): boolean {
+  const aLine = routeMatchLine(a);
+  const bLine = routeMatchLine(b);
+  if (aLine.length < 2 || bLine.length < 2) return false;
+
+  const originLat = (routeOriginLat(a) + routeOriginLat(b)) / 2;
+  const aSamples = sampleLineMax(aLine, 48);
+  const bSamples = sampleLineMax(bLine, 48);
+  const aShare = routeNearShare(aSamples, bLine, originLat);
+  const bShare = routeNearShare(bSamples, aLine, originLat);
+  const distanceDiff = Math.abs(a.distance - b.distance);
+
+  const geometricallyNear = (
+    distanceDiff <= ROUTE_PRESENTATION_DUPLICATE_DISTANCE_METERS &&
+    aShare >= ROUTE_PRESENTATION_DUPLICATE_SHARE &&
+    bShare >= ROUTE_PRESENTATION_DUPLICATE_SHARE
+  );
+  const shorterShare = a.distance <= b.distance ? aShare : bShare;
+  const longerShare = a.distance <= b.distance ? bShare : aShare;
+  const containedNear = (
+    distanceDiff <= ROUTE_PRESENTATION_CONTAINED_MAX_EXTRA_METERS &&
+    shorterShare >= ROUTE_PRESENTATION_CONTAINED_SHORTER_SHARE &&
+    longerShare >= ROUTE_PRESENTATION_CONTAINED_LONGER_SHARE
+  );
+
+  if (!geometricallyNear && !containedNear) return false;
+  return !routesHaveMeaningfullyDifferentAvoidDetails(a, b);
+}
+
+function dedupeRoutesForPresentation(
+  routes: OsrmRoute[],
+  activeOptions: RouteAvoidOption[],
+): OsrmRoute[] {
+  const deduped: OsrmRoute[] = [];
+  for (const route of routes) {
+    const duplicateIndex = deduped.findIndex((candidate) => routesArePresentationDuplicates(route, candidate));
+    if (duplicateIndex === -1) {
+      deduped.push(route);
+      continue;
+    }
+
+    const duplicate = deduped[duplicateIndex];
+    if (duplicate && compareRoutesForPresentation(route, duplicate, activeOptions) < 0) {
+      deduped[duplicateIndex] = route;
+    }
+  }
+  return deduped;
+}
+
 type RouteDetailProperty = "maxSpeedDetails" | "roadEnvironmentDetails";
 
 type HybridSegmentSource = {
@@ -690,6 +858,67 @@ function routeCumulativeDistances(route: OsrmRoute): number[] {
       (start && end ? distanceBetweenCoordinatesMeters(start, end, originLat) : 0);
   }
   return cumulative;
+}
+
+function routeGeneratedByForcedCorridor(route: OsrmRoute): boolean {
+  const source = route.source ?? "";
+  return source.startsWith("hybrid-") || source.startsWith("avoid-high-speed-via-");
+}
+
+function routeSpurSampleIndexes(cumulative: number[]): number[] {
+  const total = cumulative.at(-1) ?? 0;
+  const candidates: number[] = [];
+
+  for (let index = 1; index < cumulative.length - 1; index += 1) {
+    const fromStart = cumulative[index] ?? 0;
+    if (fromStart < ROUTE_GENERATED_SPUR_ENDPOINT_BUFFER_METERS) continue;
+    if (total - fromStart < ROUTE_GENERATED_SPUR_ENDPOINT_BUFFER_METERS) continue;
+    candidates.push(index);
+  }
+
+  if (candidates.length <= ROUTE_GENERATED_SPUR_MAX_SAMPLES) return candidates;
+  const step = candidates.length / ROUTE_GENERATED_SPUR_MAX_SAMPLES;
+  const samples: number[] = [];
+  for (let index = 0; index < ROUTE_GENERATED_SPUR_MAX_SAMPLES; index += 1) {
+    const sample = candidates[Math.floor(index * step)];
+    if (sample !== undefined) samples.push(sample);
+  }
+  return samples;
+}
+
+function routeHasOutAndBackSpur(route: OsrmRoute): boolean {
+  const coords = route.geometry.coordinates;
+  if (coords.length < 8) return false;
+
+  const cumulative = routeCumulativeDistances(route);
+  const samples = routeSpurSampleIndexes(cumulative);
+  if (samples.length < 3) return false;
+
+  const originLat = routeOriginLat(route);
+  for (let startIndex = 0; startIndex < samples.length - 1; startIndex += 1) {
+    const fromIndex = samples[startIndex];
+    if (fromIndex === undefined) continue;
+    const fromCoord = coords[fromIndex];
+    const fromDistance = cumulative[fromIndex] ?? 0;
+    if (!fromCoord) continue;
+
+    for (let endIndex = startIndex + 1; endIndex < samples.length; endIndex += 1) {
+      const toIndex = samples[endIndex];
+      if (toIndex === undefined) continue;
+      const loopDistance = (cumulative[toIndex] ?? 0) - fromDistance;
+      if (loopDistance < ROUTE_GENERATED_SPUR_MIN_LOOP_METERS) continue;
+      if (loopDistance > ROUTE_GENERATED_SPUR_MAX_LOOP_METERS) break;
+
+      const toCoord = coords[toIndex];
+      if (!toCoord) continue;
+      const rejoinDistance = distanceBetweenCoordinatesMeters(fromCoord, toCoord, originLat);
+      if (rejoinDistance > ROUTE_GENERATED_SPUR_MAX_REJOIN_METERS) continue;
+      if (loopDistance / Math.max(rejoinDistance, 40) < ROUTE_GENERATED_SPUR_MIN_RATIO) continue;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function hybridRouteSampleIndexes(cumulative: number[]): number[] {
@@ -860,7 +1089,7 @@ function buildHybridRoute(
 }
 
 function buildHybridRoutes(routes: OsrmRoute[], activeOptions: RouteAvoidOption[]): OsrmRoute[] {
-  if (activeOptions.length < 2) return [];
+  if (activeOptions.length < 2 && !activeOptions.includes("highSpeed")) return [];
   const sourceRoutes = dedupeRoutes(routes)
     .slice(0, HYBRID_ROUTE_MAX_SOURCE_ROUTES);
   const hybrids: OsrmRoute[] = [];
@@ -898,6 +1127,104 @@ function buildHybridRoutes(routes: OsrmRoute[], activeOptions: RouteAvoidOption[
       return a.distance - b.distance;
     })
     .slice(0, HYBRID_ROUTE_MAX_CANDIDATES);
+}
+
+function routeHighSpeedExposureForSelection(route: OsrmRoute): number {
+  return routeHighSpeedDetailExposureMeters(route) ?? route.distance;
+}
+
+function compareHighSpeedAvoidanceRoutes(a: OsrmRoute, b: OsrmRoute): number {
+  const exposureA = routeHighSpeedExposureForSelection(a);
+  const exposureB = routeHighSpeedExposureForSelection(b);
+  if (Math.abs(exposureA - exposureB) > 500) return exposureA - exposureB;
+  if (Math.abs(a.duration - b.duration) > 30) return a.duration - b.duration;
+  return a.distance - b.distance;
+}
+
+function compareFastestRoutes(a: OsrmRoute, b: OsrmRoute): number {
+  if (Math.abs(a.duration - b.duration) > 30) return a.duration - b.duration;
+  return a.distance - b.distance;
+}
+
+function addRouteForReturn(routes: OsrmRoute[], route: OsrmRoute | undefined): boolean {
+  if (!route || routes.includes(route)) return false;
+  routes.push(route);
+  return true;
+}
+
+function selectHighSpeedRoutesForReturn(
+  routes: OsrmRoute[],
+  limit: number,
+  activeOptions: RouteAvoidOption[],
+): OsrmRoute[] {
+  const baseline = routes[0];
+  if (!baseline) return routes.slice(0, limit);
+
+  const selectableRoutes = routes.filter((route, index) => (
+    index === 0 ||
+    !routeGeneratedByForcedCorridor(route) ||
+    !routeHasOutAndBackSpur(route)
+  ));
+  const bestExposure = Math.min(...selectableRoutes.map(routeHighSpeedExposureForSelection));
+  const baselineExposure = routeHighSpeedExposureForSelection(baseline);
+  const calmThreshold = bestExposure + ROUTE_HIGH_SPEED_CALM_WINDOW_METERS;
+  const meaningfulThreshold = Math.max(calmThreshold, baselineExposure * ROUTE_HIGH_SPEED_MEANINGFUL_FACTOR);
+  const hasAdditionalHighSpeedFilters = activeOptions.some((option) => option !== "highSpeed");
+  const calmReturnLimit = hasAdditionalHighSpeedFilters
+    ? ROUTE_HIGH_SPEED_COMBINED_CALM_RETURN_LIMIT
+    : ROUTE_HIGH_SPEED_CALM_RETURN_LIMIT;
+  const meaningfulReturnLimit = hasAdditionalHighSpeedFilters
+    ? ROUTE_HIGH_SPEED_COMBINED_MEANINGFUL_RETURN_LIMIT
+    : ROUTE_HIGH_SPEED_MEANINGFUL_RETURN_LIMIT;
+
+  const calmRoutes = selectableRoutes
+    .filter((route) => routeHighSpeedExposureForSelection(route) <= calmThreshold)
+    .sort(compareHighSpeedAvoidanceRoutes);
+  const meaningfulRoutes = selectableRoutes
+    .filter((route) => {
+      const exposure = routeHighSpeedExposureForSelection(route);
+      return exposure > calmThreshold && exposure <= meaningfulThreshold;
+    })
+    .sort(compareHighSpeedAvoidanceRoutes);
+  const comparisonRoutes = selectableRoutes
+    .filter((route) => {
+      const exposure = routeHighSpeedExposureForSelection(route);
+      return exposure > meaningfulThreshold;
+    })
+    .sort((a, b) => {
+      const durationDiff = compareFastestRoutes(a, b);
+      if (durationDiff !== 0) return durationDiff;
+      return compareHighSpeedAvoidanceRoutes(a, b);
+    });
+
+  const selected: OsrmRoute[] = [];
+  let highSpeedComparisonCount = 0;
+  addRouteForReturn(selected, baseline);
+  if (routeHighSpeedExposureForSelection(baseline) > calmThreshold) {
+    highSpeedComparisonCount = 1;
+  }
+
+  let calmRouteCount = 0;
+  for (const route of calmRoutes) {
+    if (selected.length >= limit) break;
+    if (calmRouteCount >= calmReturnLimit) break;
+    if (addRouteForReturn(selected, route)) calmRouteCount += 1;
+  }
+
+  let meaningfulRouteCount = 0;
+  for (const route of meaningfulRoutes) {
+    if (selected.length >= limit) break;
+    if (meaningfulRouteCount >= meaningfulReturnLimit) break;
+    if (addRouteForReturn(selected, route)) meaningfulRouteCount += 1;
+  }
+
+  for (const route of comparisonRoutes) {
+    if (selected.length >= limit) break;
+    if (highSpeedComparisonCount >= ROUTE_HIGH_SPEED_COMPARISON_LIMIT) break;
+    if (addRouteForReturn(selected, route)) highSpeedComparisonCount += 1;
+  }
+
+  return selected.slice(0, limit);
 }
 
 function project([lng, lat]: GeoJSON.Position, originLat: number): [number, number] {
@@ -1091,6 +1418,90 @@ function speedLimitFromDetail(value: string | number | null): number | null {
   if (!match) return null;
   const speed = Number(match[0]);
   return Number.isFinite(speed) ? speed : null;
+}
+
+function routeSegmentSpeedLimit(route: OsrmRoute, segmentIndex: number): number | null {
+  const details = route.maxSpeedDetails;
+  if (!details) return null;
+
+  for (const [fromIndex, toIndex, value] of details) {
+    if (segmentIndex >= Math.floor(fromIndex) && segmentIndex < Math.ceil(toIndex)) {
+      return speedLimitFromDetail(value);
+    }
+  }
+
+  return null;
+}
+
+function routeLowSpeedPointNearFraction(
+  route: OsrmRoute,
+  fraction: number,
+): [number, number] | null {
+  const coords = route.geometry.coordinates;
+  if (coords.length < 3) return null;
+
+  const cumulative = routeCumulativeDistances(route);
+  const total = cumulative.at(-1) ?? route.distance;
+  const target = total * fraction;
+  let best: { coord: [number, number]; distanceFromTarget: number } | null = null;
+
+  for (let index = 1; index < coords.length - 1; index += 1) {
+    const distanceFromStart = cumulative[index] ?? 0;
+    if (distanceFromStart < ROUTE_HIGH_SPEED_VIA_MIN_ENDPOINT_METERS) continue;
+    if (total - distanceFromStart < ROUTE_HIGH_SPEED_VIA_MIN_ENDPOINT_METERS) continue;
+
+    const speed = routeSegmentSpeedLimit(route, index - 1);
+    if (speed !== null && speed >= 90) continue;
+
+    const coord = toLngLat(coords[index]);
+    if (!coord) continue;
+
+    const distanceFromTarget = Math.abs(distanceFromStart - target);
+    if (!best || distanceFromTarget < best.distanceFromTarget) {
+      best = { coord, distanceFromTarget };
+    }
+  }
+
+  return best?.coord ?? null;
+}
+
+function pointFarEnoughFromRoutes(
+  point: [number, number],
+  routes: OsrmRoute[],
+): boolean {
+  if (!routes.length) return true;
+  const originLat = point[1];
+  return routes.every((route) => (
+    distancePointToLineMeters(point, routeMatchLine(route), originLat) >=
+      ROUTE_HIGH_SPEED_VIA_MAX_DISTANCE_TO_REFERENCE_METERS
+  ));
+}
+
+function selectHighSpeedViaPoints(
+  routes: OsrmRoute[],
+  referenceRoutes: OsrmRoute[],
+): [number, number][] {
+  const selected: [number, number][] = [];
+
+  for (const route of routes) {
+    if (selected.length >= ROUTE_HIGH_SPEED_VIA_MAX_POINTS) break;
+    for (const fraction of ROUTE_HIGH_SPEED_VIA_FRACTIONS) {
+      if (selected.length >= ROUTE_HIGH_SPEED_VIA_MAX_POINTS) break;
+      const point = routeLowSpeedPointNearFraction(route, fraction);
+      if (!point) continue;
+      if (!pointFarEnoughFromRoutes(point, referenceRoutes)) continue;
+
+      const originLat = point[1];
+      const tooCloseToSelected = selected.some((candidate) => (
+        distanceBetweenCoordinatesMeters(point, candidate, originLat) <
+          ROUTE_HIGH_SPEED_VIA_MIN_SEPARATION_METERS
+      ));
+      if (tooCloseToSelected) continue;
+      selected.push(point);
+    }
+  }
+
+  return selected;
 }
 
 function highSpeedMetricFromDetails(route: OsrmRoute): RouteMetric | null {
@@ -1885,6 +2296,7 @@ async function fetchGraphHopperRoute(
     customModel?: GraphHopperCustomModel;
     alternativeRoutes?: number;
     maxWeightFactor?: number;
+    maxShareFactor?: number;
     timeoutMs?: number;
   },
 ): Promise<OsrmRoute[]> {
@@ -1910,7 +2322,8 @@ async function fetchGraphHopperRoute(
     body.algorithm = "alternative_route";
     body["alternative_route.max_paths"] = Math.max(2, Math.min(8, opts.alternativeRoutes));
     body["alternative_route.max_weight_factor"] = opts.maxWeightFactor ?? 1.45;
-    body["alternative_route.max_share_factor"] = opts.maxWeightFactor && opts.maxWeightFactor > 2.5 ? 0.82 : 0.65;
+    body["alternative_route.max_share_factor"] = opts.maxShareFactor
+      ?? (opts.maxWeightFactor && opts.maxWeightFactor > 2.5 ? 0.82 : 0.65);
   }
 
   const headers: HeadersInit = {
@@ -1969,15 +2382,37 @@ async function fetchProviderRoutes(
 ): Promise<RouteFetchResult> {
   const activeOptions = activeAvoidOptions(avoid);
   if (!GRAPHHOPPER_BASE_URL) {
+    const routes = await fetchOsrmRoutes(coordinates, activeOptions.length > 0 ? alternatives : 0);
     return {
       provider: "osrm",
-      routes: await fetchOsrmRoutes(coordinates, activeOptions.length > 0 ? alternatives : 0),
+      routes,
+      telemetry: emptyRouteFetchTelemetry(true, {
+        providerRequestCount: 1,
+        providerRouteCount: routes.length,
+        routeCountBeforeBudget: routes.length,
+        budgetedRouteCount: routes.length,
+        returnedRouteCount: routes.length,
+      }),
     };
   }
 
   const fastestRoutes = await fetchGraphHopperRoute(coordinates, { source: "fastest" });
   const baseline = fastestRoutes[0];
-  if (!baseline) return { provider: "graphhopper", routes: fastestRoutes };
+  if (!baseline) {
+    return {
+      provider: "graphhopper",
+      routes: fastestRoutes,
+      telemetry: emptyRouteFetchTelemetry(false, {
+        providerRequestCount: 1,
+        graphHopperRequestCount: 1,
+        graphHopperFulfilledCount: 1,
+        providerRouteCount: fastestRoutes.length,
+        routeCountBeforeBudget: fastestRoutes.length,
+        budgetedRouteCount: fastestRoutes.length,
+        returnedRouteCount: fastestRoutes.length,
+      }),
+    };
+  }
   const maxWeightFactor = graphHopperMaxWeightFactor(baseline, maxExtraMinutes);
   if (activeOptions.length === 0) {
     const noFilterRequests = alternatives > 0
@@ -2001,6 +2436,18 @@ async function fetchProviderRoutes(
     return {
       provider: "graphhopper",
       routes: noFilterRoutes.slice(0, 1),
+      telemetry: emptyRouteFetchTelemetry(false, {
+        providerRequestCount: 1 + noFilterRequests.length,
+        graphHopperRequestCount: 1 + noFilterRequests.length,
+        graphHopperFulfilledCount: 1 + noFilterResults.filter((result) => result.status === "fulfilled").length,
+        graphHopperRejectedCount: noFilterResults.filter((result) => result.status === "rejected").length,
+        graphHopperTimeoutCount: countRejectedTimeouts(noFilterResults),
+        genericRequestCount: noFilterRequests.length,
+        providerRouteCount: noFilterRoutes.length,
+        routeCountBeforeBudget: noFilterRoutes.length,
+        budgetedRouteCount: noFilterRoutes.length,
+        returnedRouteCount: Math.min(1, noFilterRoutes.length),
+      }),
     };
   }
 
@@ -2012,6 +2459,8 @@ async function fetchProviderRoutes(
     !avoid.disturbances &&
     !avoid.bridges &&
     !avoid.tunnels;
+  const longHighSpeedSearch = avoid.highSpeed && baseline.distance >= 60_000;
+  const longHighSpeedOnly = highSpeedOnly && longHighSpeedSearch;
   const pathCount = trafficIntensityActive
     ? Math.max(2, Math.min(3, alternatives + 1))
     : maxExtraMinutes === null
@@ -2060,17 +2509,33 @@ async function fetchProviderRoutes(
       }),
     );
 
-    if (!avoid.trafficIntensity && !highSpeedOnly) {
+    if (!avoid.trafficIntensity) {
       preferenceRequests.push(
         fetchGraphHopperRoute(coordinates, {
           source: `avoid-${source}-alternatives`,
           customModel: preferenceModel,
-          alternativeRoutes: pathCount,
-          maxWeightFactor: alternativeMaxWeightFactor,
+          alternativeRoutes: highSpeedOnly ? Math.max(5, alternatives + 3) : pathCount,
+          maxWeightFactor: highSpeedOnly
+            ? Math.max(alternativeMaxWeightFactor, 2.8)
+            : alternativeMaxWeightFactor,
+          maxShareFactor: highSpeedOnly ? 0.65 : undefined,
           timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
         }),
       );
     }
+  }
+
+  if (longHighSpeedSearch && !highSpeedOnly) {
+    preferenceRequests.push(
+      fetchGraphHopperRoute(coordinates, {
+        source: "avoid-high-speed-backbone-alternatives",
+        customModel: calmRouteCustomModel,
+        alternativeRoutes: Math.max(5, alternatives + 3),
+        maxWeightFactor: Math.max(alternativeMaxWeightFactor, 2.8),
+        maxShareFactor: 0.65,
+        timeoutMs: GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS,
+      }),
+    );
   }
 
   if (avoid.highSpeed) {
@@ -2177,7 +2642,10 @@ async function fetchProviderRoutes(
     }
   }
 
-  if (avoid.highSpeed && avoid.trafficIntensity) {
+  // Plain highSpeed+traffic already gets a high-speed backbone plus a separate
+  // traffic candidate above. Only add this combined balance candidate when
+  // bridge/tunnel filters also need to travel with the high-speed model.
+  if (avoid.highSpeed && avoid.trafficIntensity && (avoid.bridges || avoid.tunnels)) {
     const highSpeedBalanceModel = mergeCustomModels(
       calmRouteCustomModel,
       avoid.bridges ? avoidBridgeCustomModel : undefined,
@@ -2194,7 +2662,7 @@ async function fetchProviderRoutes(
     }
   }
 
-  if (avoid.highSpeed && !avoid.disturbances && !avoid.trafficIntensity) {
+  if (avoid.highSpeed && !avoid.disturbances && !avoid.trafficIntensity && longHighSpeedOnly) {
     const diverseModel = await buildRoutePreferenceCustomModel(fastestRoutes, {
       ...avoid,
       disturbances: true,
@@ -2213,14 +2681,48 @@ async function fetchProviderRoutes(
     Promise.allSettled(preferenceRequests),
     Promise.allSettled(genericAlternativeRequests),
   ]);
-  const providerRoutes = [
+  const initialProviderRoutes = [
     ...fastestRoutes,
     ...preferenceResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
     ...genericAlternativeResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
   ];
+  const highSpeedViaRequests: Array<Promise<OsrmRoute[]>> = [];
+
+  if (longHighSpeedSearch && coordinates.length === 2) {
+    const lowSpeedReferenceRoutes = initialProviderRoutes
+      .filter((route) => routeHighSpeedExposureForSelection(route) <= ROUTE_HIGH_SPEED_CALM_WINDOW_METERS);
+    const viaSourceRoutes = dedupeRoutes(initialProviderRoutes)
+      .filter((route) => routeHighSpeedExposureForSelection(route) > ROUTE_HIGH_SPEED_CALM_WINDOW_METERS)
+      .sort((a, b) => {
+        const durationDiff = compareFastestRoutes(a, b);
+        if (durationDiff !== 0) return durationDiff;
+        return compareHighSpeedAvoidanceRoutes(a, b);
+      });
+    const start = coordinates[0];
+    const end = coordinates.at(-1);
+    if (start && end) {
+      const viaPoints = selectHighSpeedViaPoints(viaSourceRoutes, lowSpeedReferenceRoutes);
+      highSpeedViaRequests.push(
+        ...viaPoints.map((viaPoint, index) => (
+          fetchGraphHopperRoute([start, viaPoint, end], {
+            source: `avoid-high-speed-via-${index + 1}`,
+            customModel: calmRouteCustomModel,
+            timeoutMs: GRAPHHOPPER_ROUTE_TIMEOUT_MS,
+          })
+        )),
+      );
+    }
+  }
+
+  const highSpeedViaResults = await Promise.allSettled(highSpeedViaRequests);
+  const providerRoutes = [
+    ...initialProviderRoutes,
+    ...highSpeedViaResults.flatMap((result) => result.status === "fulfilled" ? result.value : []),
+  ];
+  const hybridRoutes = buildHybridRoutes(providerRoutes, activeOptions);
   const routes = [
     ...providerRoutes,
-    ...buildHybridRoutes(providerRoutes, activeOptions),
+    ...hybridRoutes,
   ];
 
   if (!routes.length) {
@@ -2229,7 +2731,8 @@ async function fetchProviderRoutes(
     throw reason instanceof Error ? reason : new Error("route provider failed");
   }
 
-  const budgetedRoutes = dedupeRoutes(routes).filter((route, index) => {
+  const presentationRoutes = dedupeRoutesForPresentation(dedupeRoutes(routes), activeOptions);
+  const budgetedRoutes = presentationRoutes.filter((route, index) => {
     if (index === 0) return true;
     return isRouteWithinMaxExtra(route, baseline, maxExtraMinutes);
   });
@@ -2244,11 +2747,36 @@ async function fetchProviderRoutes(
       ]
     : budgetedRoutes;
   const limit = activeOptions.length > 0
-    ? maxExtraMinutes === null
-      ? Math.max(10, alternatives + 7)
-      : Math.max(4, alternatives + 3)
+    ? trafficIntensityActive
+      ? avoid.highSpeed
+        ? Math.max(7, alternatives + 4)
+        : Math.max(5, alternatives + 2)
+      : maxExtraMinutes === null
+        ? Math.max(10, alternatives + 7)
+        : Math.max(4, alternatives + 3)
     : 1;
-  return { provider: "graphhopper", routes: orderedBudgetedRoutes.slice(0, limit) };
+  const returnedRoutes = avoid.highSpeed
+    ? selectHighSpeedRoutesForReturn(orderedBudgetedRoutes, limit, activeOptions)
+    : orderedBudgetedRoutes.slice(0, limit);
+  const settledResults = [...preferenceResults, ...genericAlternativeResults, ...highSpeedViaResults];
+  return {
+    provider: "graphhopper",
+    routes: returnedRoutes,
+    telemetry: emptyRouteFetchTelemetry(false, {
+      providerRequestCount: 1 + preferenceRequests.length + genericAlternativeRequests.length + highSpeedViaRequests.length,
+      graphHopperRequestCount: 1 + preferenceRequests.length + genericAlternativeRequests.length + highSpeedViaRequests.length,
+      graphHopperFulfilledCount: 1 + settledResults.filter((result) => result.status === "fulfilled").length,
+      graphHopperRejectedCount: settledResults.filter((result) => result.status === "rejected").length,
+      graphHopperTimeoutCount: countRejectedTimeouts(settledResults),
+      genericRequestCount: genericAlternativeRequests.length,
+      preferenceRequestCount: preferenceRequests.length + highSpeedViaRequests.length,
+      providerRouteCount: providerRoutes.length,
+      hybridRouteCount: hybridRoutes.length,
+      routeCountBeforeBudget: routes.length,
+      budgetedRouteCount: orderedBudgetedRoutes.length,
+      returnedRouteCount: returnedRoutes.length,
+    }),
+  };
 }
 
 export async function POST(req: Request) {
@@ -2281,17 +2809,29 @@ export async function POST(req: Request) {
     typeof body.maxExtraMinutes === "number" && Number.isFinite(body.maxExtraMinutes)
       ? Math.max(0, body.maxExtraMinutes)
       : null;
+  const startedAt = Date.now();
+  const logBase = routeLogPayloadBase({
+    avoid,
+    alternatives,
+    coordinateCount: coordinates.length,
+    maxExtraMinutes,
+    preview,
+  });
 
   try {
     const timeoutMs = routeRequestTimeoutMs(preview, alternatives, avoid);
     const result = await withRouteDeadline((async () => {
+      const providerStartedAt = Date.now();
       const routeResult = preview
         ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
         : alternatives === 0
           ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
           : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
+      const providerMs = Date.now() - providerStartedAt;
       const providerRoutes = routeResult.routes;
+      const scoringStartedAt = Date.now();
       const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid);
+      const scoringMs = Date.now() - scoringStartedAt;
       const routes: RouteLine[] = providerRoutes.map((route, index) => ({
         id: `route-${index + 1}`,
         source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
@@ -2319,12 +2859,35 @@ export async function POST(req: Request) {
         annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
       }));
 
-      return { routes, avoid, maxExtraMinutes, provider: routeResult.provider };
+      return {
+        response: { routes, avoid, maxExtraMinutes, provider: routeResult.provider },
+        providerMs,
+        scoringMs,
+        telemetry: routeResult.telemetry,
+      };
     })(), timeoutMs);
 
-    return jsonResponse(result, { cacheSeconds: 300 });
+    console.info("route observability", {
+      ...logBase,
+      status: "ok",
+      provider: result.response.provider,
+      totalMs: Date.now() - startedAt,
+      providerMs: result.providerMs,
+      scoringMs: result.scoringMs,
+      timeoutMs,
+      routesReturned: result.response.routes.length,
+      ...result.telemetry,
+    });
+
+    return jsonResponse(result.response, { cacheSeconds: 300 });
   } catch (err) {
     console.error("routing failed", err);
+    console.warn("route observability", {
+      ...logBase,
+      status: isRouteTimeoutError(err) ? "timeout" : "error",
+      totalMs: Date.now() - startedAt,
+      timeout: isRouteTimeoutError(err),
+    });
     if (isRouteTimeoutError(err)) {
       return jsonResponse({ error: routeTimeoutMessage() }, { status: 504 });
     }

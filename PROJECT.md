@@ -62,11 +62,11 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 
 ## Nuvarande byggfokus
 
-1. Trimma GraphHopper-fanout mot routing-performancebudgeten utan att tappa trovärdiga alternativ.
-2. Lägg lätt routing-observability utan koordinater i klartext.
-3. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg.
-4. Frontend cleanup utan UX-ändring: bryt ut route state/hooks, route cards, layer loaders och scoring helpers ur de största filerna.
-5. A11y-fixa route suggestions och ta design-/kodkonventionsbeslut för framtida reviews.
+1. Frontend cleanup utan UX-ändring: `Map.tsx` är delvis uppdelad i mindre route-/UI-moduler. Kvar som möjliga rena extraktioner: `layers.ts`, `Map.module.css`, mer route state/hook-logik och `/api/route`.
+2. A11y avvaktar: route suggestions, InfoBox/fokus och övriga UX-/designnära tillgänglighetsfixar ska tas senare efter bekräftade produktbeslut.
+3. Route-card UX senare: ruttfeedback/betyg för kalibreringsunderlag och delningskontroller för app-URL samt Google Maps-länk.
+4. Följ upp GraphHopper-fanout i prod-loggar när fler verkliga sträckor testas, särskilt `highSpeed`, `trafficIntensity` och kombinationer.
+5. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg.
 6. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
 
 ## Potentiella framtida datalager

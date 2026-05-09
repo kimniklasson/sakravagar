@@ -15,6 +15,9 @@ const TRAFIKVERKET_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json";
 const SITUATION_QUERY_LIMIT = 10_000;
 const TRAFIKVERKET_REQUEST_TIMEOUT_MS = 20_000;
 const TRAFIKVERKET_TRAFFIC_FLOW_TIMEOUT_MS = 25_000;
+const EVENTS_UPSERT_BATCH_SIZE = 500;
+const DISTURBANCES_UPSERT_BATCH_SIZE = 250;
+const TRAFFIC_FLOW_UPSERT_BATCH_SIZE = 500;
 
 type Deviation = {
   Id: string;
@@ -82,9 +85,41 @@ type TrafficFlowUpsertRow = {
   raw: unknown;
 };
 
+type UpsertBatchSummary = {
+  attempted: number;
+  batches: number;
+};
+
 function normalizeSecret(value: string | null): string {
   const trimmed = (value ?? "").trim();
   return trimmed.startsWith("Bearer ") ? trimmed.slice("Bearer ".length).trim() : trimmed;
+}
+
+function chunks<T>(rows: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) {
+    result.push(rows.slice(index, index + size));
+  }
+  return result;
+}
+
+async function upsertInBatches<T>(
+  client: ReturnType<typeof createClient>,
+  table: string,
+  rows: T[],
+  batchSize: number,
+): Promise<UpsertBatchSummary> {
+  let attempted = 0;
+  let batches = 0;
+  for (const batch of chunks(rows, batchSize)) {
+    const { error } = await client
+      .from(table)
+      .upsert(batch, { onConflict: "id", ignoreDuplicates: false });
+    if (error) throw new Error(`${table} upsert: ${error.message}`);
+    attempted += batch.length;
+    batches += 1;
+  }
+  return { attempted, batches };
 }
 
 function buildQuery(apiKey: string, messageType?: string): string {
@@ -283,43 +318,38 @@ Deno.serve(async (req: Request) => {
       auth: { persistSession: false },
     });
 
-    let upserted = 0;
-    if (rows.length > 0) {
-      const { error } = await client
-        .from("events")
-        .upsert(rows, { onConflict: "id", ignoreDuplicates: false });
-      if (error) throw new Error(`upsert: ${error.message}`);
-      upserted = rows.length;
-    }
-
-    let disturbancesUpserted = 0;
-    if (disturbanceRows.length > 0) {
-      const { error } = await client
-        .from("disturbances")
-        .upsert(disturbanceRows, { onConflict: "id", ignoreDuplicates: false });
-      if (error) throw new Error(`disturbance upsert: ${error.message}`);
-      disturbancesUpserted = disturbanceRows.length;
-    }
-
-    let trafficFlowUpserted = 0;
-    if (trafficFlowRows.length > 0) {
-      const { error } = await client
-        .from("traffic_flow_measurements")
-        .upsert(trafficFlowRows, { onConflict: "id", ignoreDuplicates: false });
-      if (error) throw new Error(`traffic flow upsert: ${error.message}`);
-      trafficFlowUpserted = trafficFlowRows.length;
-    }
+    const eventsResult = await upsertInBatches(
+      client,
+      "events",
+      rows,
+      EVENTS_UPSERT_BATCH_SIZE,
+    );
+    const disturbanceResult = await upsertInBatches(
+      client,
+      "disturbances",
+      disturbanceRows,
+      DISTURBANCES_UPSERT_BATCH_SIZE,
+    );
+    const trafficFlowResult = await upsertInBatches(
+      client,
+      "traffic_flow_measurements",
+      trafficFlowRows,
+      TRAFFIC_FLOW_UPSERT_BATCH_SIZE,
+    );
 
     const summary = {
       ok: true,
       fetched: deviations.length,
-      upserted,
+      upserted: eventsResult.attempted,
+      upsert_batches: eventsResult.batches,
       skipped_no_coord: deviations.length - rows.length,
       disturbances_fetched: disturbances.length,
-      disturbances_upserted: disturbancesUpserted,
+      disturbances_upserted: disturbanceResult.attempted,
+      disturbances_upsert_batches: disturbanceResult.batches,
       disturbances_skipped_no_coord: disturbances.length - disturbanceRows.length,
       traffic_flow_fetched: trafficFlows.length,
-      traffic_flow_upserted: trafficFlowUpserted,
+      traffic_flow_upserted: trafficFlowResult.attempted,
+      traffic_flow_upsert_batches: trafficFlowResult.batches,
       traffic_flow_skipped_no_coord: trafficFlows.length - trafficFlowRows.length,
       elapsed_ms: Date.now() - start,
     };

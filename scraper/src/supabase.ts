@@ -46,8 +46,41 @@ export type TrafficFlowUpsertRow = {
 
 export type UpsertResult = {
   attempted: number;
+  batches: number;
   error: Error | null;
 };
+
+const EVENTS_UPSERT_BATCH_SIZE = 500;
+const DISTURBANCES_UPSERT_BATCH_SIZE = 250;
+const TRAFFIC_FLOW_UPSERT_BATCH_SIZE = 500;
+
+function chunks<T>(rows: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) {
+    result.push(rows.slice(index, index + size));
+  }
+  return result;
+}
+
+async function upsertInBatches<T>(
+  client: SupabaseClient,
+  table: string,
+  rows: T[],
+  batchSize: number
+): Promise<UpsertResult> {
+  let attempted = 0;
+  let batches = 0;
+  for (const batch of chunks(rows, batchSize)) {
+    const { error } = await client.from(table).upsert(batch, {
+      onConflict: "id",
+      ignoreDuplicates: false,
+    });
+    if (error) return { attempted, batches, error: new Error(error.message) };
+    attempted += batch.length;
+    batches += 1;
+  }
+  return { attempted, batches, error: null };
+}
 
 // first_seen utelämnas medvetet — defaultvärdet `now()` sätts vid insert
 // och lämnas orörd vid update (eftersom kolumnen inte finns i payload).
@@ -55,40 +88,24 @@ export async function upsertEvents(
   client: SupabaseClient,
   rows: UpsertRow[]
 ): Promise<UpsertResult> {
-  if (rows.length === 0) return { attempted: 0, error: null };
-
-  const { error } = await client.from("events").upsert(rows, {
-    onConflict: "id",
-    ignoreDuplicates: false,
-  });
-
-  return { attempted: rows.length, error: error ? new Error(error.message) : null };
+  return upsertInBatches(client, "events", rows, EVENTS_UPSERT_BATCH_SIZE);
 }
 
 export async function upsertDisturbances(
   client: SupabaseClient,
   rows: DisturbanceUpsertRow[]
 ): Promise<UpsertResult> {
-  if (rows.length === 0) return { attempted: 0, error: null };
-
-  const { error } = await client.from("disturbances").upsert(rows, {
-    onConflict: "id",
-    ignoreDuplicates: false,
-  });
-
-  return { attempted: rows.length, error: error ? new Error(error.message) : null };
+  return upsertInBatches(client, "disturbances", rows, DISTURBANCES_UPSERT_BATCH_SIZE);
 }
 
 export async function upsertTrafficFlows(
   client: SupabaseClient,
   rows: TrafficFlowUpsertRow[]
 ): Promise<UpsertResult> {
-  if (rows.length === 0) return { attempted: 0, error: null };
-
-  const { error } = await client.from("traffic_flow_measurements").upsert(rows, {
-    onConflict: "id",
-    ignoreDuplicates: false,
-  });
-
-  return { attempted: rows.length, error: error ? new Error(error.message) : null };
+  return upsertInBatches(
+    client,
+    "traffic_flow_measurements",
+    rows,
+    TRAFFIC_FLOW_UPSERT_BATCH_SIZE
+  );
 }
