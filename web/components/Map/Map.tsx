@@ -35,6 +35,7 @@ type RouteStopSource = "manual" | "gps";
 type RouteAvoidOption = "accidentHistory" | "highSpeed" | "trafficIntensity" | "disturbances" | "bridges" | "tunnels";
 type RouteAvoidState = Record<RouteAvoidOption, boolean>;
 type RouteTimeBudget = number | "unlimited";
+type RouteProvider = "graphhopper" | "osrm";
 type RouteStop = {
   id: string;
   label: string;
@@ -46,6 +47,11 @@ type RouteDragPlan = {
   stops: RouteStop[];
   coordinates: [number, number][];
   fallbackCoordinates: [number, number][];
+};
+type RouteCacheEntry = {
+  routes: RouteLine[];
+  provider?: RouteProvider;
+  createdAt: number;
 };
 type HelpSectionId = "risk" | "adt" | "trafficFlow" | "disturbances" | "largeRoads";
 type HelpLegendSwatch = {
@@ -171,11 +177,70 @@ const routeDurationTieSeconds = 30;
 const routeDistanceTieMeters = 50;
 const routeHighSpeedAvoidedMeters = 50;
 const routeHighSpeedNearAvoidedMeters = 500;
+const routeCacheMaxEntries = 24;
+const routeStaticCacheTtlMs = 60 * 60 * 1000;
+const routeAccidentHistoryCacheTtlMs = 15 * 60 * 1000;
+const routeTrafficIntensityCacheTtlMs = 5 * 60 * 1000;
+const routeDisturbanceCacheTtlMs = 2 * 60 * 1000;
 const mobileInfoBoxQuery = "(max-width: 767px)";
 const customRouteStopIdPrefix = "via-";
 
 function isMobileViewport(): boolean {
   return typeof window !== "undefined" && window.matchMedia(mobileInfoBoxQuery).matches;
+}
+
+function normalizedRouteCoordinateKey([lng, lat]: [number, number]): string {
+  return `${lng.toFixed(5)},${lat.toFixed(5)}`;
+}
+
+function routeAvoidCacheKey(avoid: RouteAvoidState): string {
+  return (Object.keys(initialRouteAvoids) as RouteAvoidOption[])
+    .filter((option) => avoid[option])
+    .sort()
+    .join(",") || "none";
+}
+
+function routeCacheKey({
+  coordinates,
+  alternatives,
+  avoids,
+  timeBudget,
+}: {
+  coordinates: [number, number][];
+  alternatives: number;
+  avoids: RouteAvoidState;
+  timeBudget: RouteTimeBudget;
+}): string {
+  return [
+    coordinates.map(normalizedRouteCoordinateKey).join("|"),
+    `alt:${alternatives}`,
+    `avoid:${routeAvoidCacheKey(avoids)}`,
+    `budget:${timeBudget}`,
+  ].join(";");
+}
+
+function routeCacheTtlMs(avoid: RouteAvoidState): number {
+  if (avoid.disturbances) return routeDisturbanceCacheTtlMs;
+  if (avoid.trafficIntensity) return routeTrafficIntensityCacheTtlMs;
+  if (avoid.accidentHistory) return routeAccidentHistoryCacheTtlMs;
+  return routeStaticCacheTtlMs;
+}
+
+function isFreshRouteCacheEntry(entry: RouteCacheEntry, avoid: RouteAvoidState, nowMs = Date.now()): boolean {
+  return nowMs - entry.createdAt <= routeCacheTtlMs(avoid);
+}
+
+function rememberRouteCacheEntry(
+  cache: Map<string, RouteCacheEntry>,
+  key: string,
+  entry: RouteCacheEntry,
+) {
+  cache.set(key, entry);
+  if (cache.size <= routeCacheMaxEntries) return;
+
+  const oldestKey = [...cache.entries()]
+    .sort((a, b) => a[1].createdAt - b[1].createdAt)[0]?.[0];
+  if (oldestKey) cache.delete(oldestKey);
 }
 
 function isCustomRouteStop(stop: RouteStop): boolean {
@@ -541,6 +606,7 @@ export default function Map() {
   const routeDragPreviewInFlightRef = useRef(false);
   const routeDragPreviewRequestedKeyRef = useRef<string | null>(null);
   const routeControlsRef = useRef<HTMLDivElement | null>(null);
+  const routeResponseCacheRef = useRef<globalThis.Map<string, RouteCacheEntry>>(new globalThis.Map());
   const routeLinesRef = useRef<RouteLine[]>([]);
   const selectedRouteIdRef = useRef<string | null>(null);
   const customRouteMarkersRef = useRef<maplibregl.Marker[]>([]);
@@ -1081,12 +1147,32 @@ export default function Map() {
       });
       setGeocodeResultsByStop({});
 
+      const alternatives = opts.alternatives ?? 3;
+      const cacheKey = routeCacheKey({
+        coordinates: routeCoordinates,
+        alternatives,
+        avoids,
+        timeBudget,
+      });
+      const cached = routeResponseCacheRef.current.get(cacheKey);
+      if (cached) {
+        if (isFreshRouteCacheEntry(cached, avoids)) {
+          setRouteCandidates(cached.routes);
+          applyRouteSelection(cached.routes, avoids, timeBudget, { focus: !opts.compare });
+          if (cached.provider === "osrm" && activeAvoidCount(avoids) > 0) {
+            setRouteNoticeText("Lokal routing använder OSRM och kan bara jämföra ett fåtal standardalternativ.");
+          }
+          return;
+        }
+        routeResponseCacheRef.current.delete(cacheKey);
+      }
+
       const res = await fetch("/api/route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           coordinates: routeCoordinates,
-          alternatives: opts.alternatives ?? 3,
+          alternatives,
           avoid: avoids,
           maxExtraMinutes: timeBudget === "unlimited" ? null : timeBudget,
         }),
@@ -1097,10 +1183,15 @@ export default function Map() {
       }
       const { routes, provider } = (await res.json()) as {
         routes: RouteLine[];
-        provider?: "graphhopper" | "osrm";
+        provider?: RouteProvider;
       };
       if (!routes.length) throw new Error("Kunde inte hitta en rutt.");
 
+      rememberRouteCacheEntry(routeResponseCacheRef.current, cacheKey, {
+        routes,
+        provider,
+        createdAt: Date.now(),
+      });
       setRouteCandidates(routes);
       applyRouteSelection(routes, avoids, timeBudget, { focus: !opts.compare });
       if (provider === "osrm" && activeAvoidCount(avoids) > 0) {

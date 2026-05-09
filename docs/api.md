@@ -131,6 +131,13 @@ Performancebudget:
 - `/api/route` sätter `maxDuration = 60` så appens egna timeout hinner svara före Vercels hårda gräns.
 - Timeoutfel returnerar 504 med användarcopy som föreslår att prova senare, kortare resa eller färre undvik-val.
 
+Frontend session-cache:
+
+- `Map.tsx` cachar `/api/route`-svar i minnet per browser-session.
+- Cache key bygger på route-koordinater inklusive via-punkter, aktiva undvik-filter, tidsbudget och antal alternativ.
+- TTL är kort för livepåverkade filter: `Störningar` 2 min, `Trafikintensiva vägar` 5 min, `Olycksrisk` 15 min och övriga statiska kombinationer 60 min.
+- Syftet är snabba filter-toggles i samma session, inte permanent server-cache.
+
 ## Segment
 
 `GET /api/segment`
