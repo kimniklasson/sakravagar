@@ -1,8 +1,8 @@
-# Current state — 2026-05-09
+# Current state — 2026-05-10
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidén och `docs/decisions.md` för långlivade vägval.
 
-Senaste större arbetslogg: `docs/session-2026-05-09.md`.
+Senaste större arbetslogg: `docs/session-2026-05-10.md`.
 
 ## Produktläge
 
@@ -49,6 +49,11 @@ Ruttplanerarstatus:
 - Routing-performancebudget: snabbaste rutt ska normalt kännas klar inom 0-4 sekunder och har server-timeout 20 sekunder; filtrerade alternativ ska normalt landa inom 0-12 sekunder, får mjuk info efter 12 sekunder, ovanligt-långsam-info efter 30 sekunder och server-timeout strax före Vercels 60-sekundersgräns. Timeoutcopy ber användaren prova senare, kortare resa eller färre undvik-val.
 - Routeplanner har en frontend session-cache för `/api/route`-svar keyed på koordinater/via-punkter, aktiva undvik-filter, tidsbudget och antal alternativ. Den används för snabba filter-toggles, t.ex. när användaren går från `Höga hastigheter` till `Höga hastigheter + Trafikintensiva vägar` och tillbaka. TTL är konservativ: statiska filter 60 min, `Olycksrisk` 15 min, `Trafikintensiva vägar` 5 min och `Störningar` 2 min. Ingen permanent/server-cache finns ännu.
 - Ruttalternativ visas som scrollande kort i botten av kartan. Varje kort visar titel, tid, distans och en metrikslista för aktiva `Undvik om möjligt`-val. Korten har 16 px padding, 8 px radius och `#555` vid 30% opacitet med 16 px blur. På mobil är korten 280 px breda och ligger 32 px från botten så de inte krockar med kartattributionen. Vald rutt har mörkare bakgrund. Metrikrader använder `m-small`, 15% vit top border, 60% vit vänstertext, 100% vit högertext och `#95FF97` för positiva värden.
+- Ruttkortens actionrad ligger 16 px under metrikerna. `Kopiera URL` och `Visa i Google Maps` ligger vänsterställda med 2 px mellan sig; tumme ner/upp ligger högerställda med 2 px mellan sig. Ikonknappar har 10% vit bakgrund, 4 px radius, 4 px padding och 60% vit ikon. Textknappen har 10% vit bakgrund, 4 px radius, 8 px padding, 60% vit text och small-stil. Hover ökar bakgrund till 20% och text/ikon till 100% vit med tooltip.
+- Ruttkortstrayn släpper igenom pekare där det inte finns kort (`pointer-events: none` på trayen och `pointer-events: auto` på korten), så kartan går att dra även till höger om ett ensamt kort. Textmarkering är avstängd i trayen.
+- `Kopiera URL` skapar en public route snapshot via `POST /api/route-shares`, kopierar `/r/[slug]` till clipboard, visar tooltip `Kopierad` och markerar knappen grön. Delningslänkar har 1 års TTL. När en länk har gått ut visar `/r/[slug]` ett tydligt `Länken har gått ut`-state.
+- `Visa i Google Maps` öppnar Google Maps directions i ny flik/fönster med origin, destination, driving-läge och tre waypoints från vald rutt så Google Maps styrs mot samma korridor.
+- Tumme upp/ner sparar röst direkt via `POST /api/route-feedback` och markerar ikonen grön/röd. Textfeedback är separat: popovern öppnas via portal till `document.body`, fokuserar input direkt, tillåter 200 tecken, kan stängas utan att rösten tas bort och uppdaterar samma feedbackrad via `PATCH /api/route-feedback`. Klick på samma tumme igen tar bort rösten via `DELETE /api/route-feedback?id=...`. Feedbacken sparas med privat route snapshot och ska användas som batchunderlag för routingkalibrering, inte som direkt ranking-signal.
 - Alternativlistan sorteras efter aktiva `Undvik om möjligt`-kriterier först. Rutter som matchar filtren ungefär lika bra sorteras därefter på tid och sedan distans. Uppenbart dominerade rutter, alltså sådana som är sämre på aktiva filter utan att vara snabbare, tas bort från listan. Vald rutt är separat state från listordningen. Klick på alternativ i kartan autoscrollar listan till valt kort; klick på alternativ i listan fokuserar kartan på vald rutt.
 - Hover/focus på ett alternativ markerar motsvarande linje på kartan utan att ändra listordningen.
 - Bottenfade i alternativlistan visas bara när listan faktiskt har overflow.
@@ -59,7 +64,7 @@ Ruttplanerarstatus:
 - GraphHopper-kandidater: utan aktiva filter hämtas snabbaste GraphHopper-rutten plus GraphHopper `alternative_route`, men returnerar bara den snabbaste kandidaten till UI:t. Med aktiva filter hämtas snabbaste baseline + GraphHopper `alternative_route`, och faktisk snabbaste kandidat läggs först i API-svaret så baseline är konsekvent även när filter slås på. Om `highSpeed` är aktiv används en hård "calm" custom model och en mjukare balanserad modell med lägre prioritet för `MOTORWAY`, `TRUNK`, `max_speed >= 100` och `max_speed >= 90`; den straffar inte längre 80-vägar eller `PRIMARY` generellt, eftersom en vanlig 70-/80-väg inte ska räknas som hög hastighet bara på grund av vägklass. Om `bridges` eller `tunnels` är aktiva sänks prioriteten för `road_environment == BRIDGE` respektive `road_environment == TUNNEL`. När flera kärnrädslefilter kombineras hämtas även extra singelkandidater för varje aktivt kärnfilter (`highSpeed`, `trafficIntensity`, `bridges`, `tunnels`) separat, så en bra låg-hastighets-, lågtrafik-, låg-bro- eller låg-tunnelrutt inte försvinner bara för att den kombinerade modellen missar den. När sekundära filter (`disturbances` eller `accidentHistory`) kombineras med kärnrädslefilter hämtas även en extra core-kandidat utan de sekundära filtren, så en bra kärnfilterrutt inte försvinner bara för att den har fler störningar eller högre olyckshistorik. highSpeed får bara den diversifierade custom-kandidaten via aktiva störningszoner på längre highSpeed-only-rutter, eftersom den är dyr och redundant på kortare/lokala sökningar. Längre highSpeed-sökningar kan få hybridkandidater byggda från redan hämtade GraphHopper-rutter och via-kandidater från låg-hastighetspunkter i alternativa korridorer, så flera olika "undviker höga hastigheter"-förslag kan visas medan snabbare vägar bara fungerar som referenser. När `highSpeed` kombineras med andra filter tas en extra highSpeed-backbone med, så lugna korridorer från highSpeed-only finns kvar och de nya filtren adderar kompromissalternativ. Genererade via-/hybridkandidater med tydlig ut-och-tillbaka-avstickare sållas bort, och highSpeed-returen begränsas till de bästa lugna alternativen plus ett fåtal jämförelser med snabbare väg. Plain `highSpeed + trafficIntensity` hoppar över en tidigare redundant calm-kandidat, rena trafficIntensity-kombinationer skickar max cirka fem rutter vidare till scoring/UI och highSpeed+traffic kan returnera cirka sju rutter. Ett experiment med fria sidoförskjutna korridorprober backades ut eftersom det kunde skapa dead-end/vändningsrutter. Nästa parallellvägsstrategi bör utgå från faktiska vägsegment. Vid tidsbudget `∞` öppnas GraphHopper-sökningen upp med högre `max_weight_factor`, fler `alternative_route`-paths och större kandidatlimit. Om `accidentHistory` eller `disturbances` är aktiva byggs dynamiska custom areas/penalty zones från risksegment och aktiva störningspunkter i baseline-korridoren, och dessa läggs in i GraphHoppers `priority`-modell. Custom model kräver `ch.disable: true`. OSRM används bara om GraphHopper-env saknas; då visas notice i UI:t när undvik-filter är aktiva eftersom OSRM bara kan jämföra ett fåtal standardalternativ.
 - Filterranking i UI:t väljer rekommenderad/markerad rutt efter viktad avoid-score och låter samma prioritering styra vänster-till-höger-ordningen i kortlistan. `Höga hastigheter` och `Trafikintensiva vägar` väger tyngst, broar/tunnlar därefter, medan `Störningar` och `Olycksrisk` är sekundära signaler. Extra restid läggs in som mjuk friktion så en marginellt lugnare rutt inte kan vinna med orimlig omväg. När filtermatchningen är ungefär lika används tid och sedan distans som tie-breakers.
 - Layout desktop: info och ruttplanerare ligger i vänsterstacken, standardbredd 360 px. Lagerkontrollerna är en kompakt ikonrad uppe till höger, och zoom/location ligger nere till höger. Mobil har en fast knappstack nere till höger: layers/help/location, 24 px från höger och botten och frikopplad från ruttkorten. MapLibre-attribution visas permanent nere till vänster. Den gamla röda liveboxen och tidsfönsterboxen är borttagna.
-- Nya assets ligger i `web/public/icons/myposition.svg`, `mydestination.svg`, `search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`, `help.svg`, `accidents.svg`, `flow.svg`, `live.svg`, `disturbances.svg`, `speed.svg`, `layers.svg`. Location/zoom återanvänder inline-ikonerna i `MapIcons.tsx`.
+- Nya assets ligger i `web/public/icons/myposition.svg`, `mydestination.svg`, `search.svg`, `draghandles.svg`, `close-circle.svg`, `varning.svg`, `help.svg`, `accidents.svg`, `flow.svg`, `live.svg`, `disturbances.svg`, `speed.svg`, `layers.svg`, `copy.svg`, `thumbdown.svg` och `thumbup.svg`. Location/zoom återanvänder inline-ikonerna i `MapIcons.tsx`.
 - `type-small-x` finns i `web/styles/globals.css` för små texter utan versaler och med `letter-spacing: 0`.
 
 Kvar för ruttplaneraren:
@@ -68,7 +73,8 @@ Kvar för ruttplaneraren:
 - GraphHopper custom models påverkar nu vägkostnaden för höghastighet, olyckshistorik och aktiva störningar. Olyckshistorik/störningar rankas fortfarande efteråt också, så UI:t kan välja bästa kandidat inom tidsbudget.
 - Nästa routingsteg: kalibrera penalty zone-storlek, maxantal och multipliers mot verkliga ruttfall så omvägarna blir tydliga utan att kännas överdrivna.
 - Kalibrera factor-scores och tidsbudget-default på verkliga exempel.
-- Finlira routeplanner-UI efter lokal testning av nya alternativkort.
+- Kör `0028_route_feedback_update_delete.sql` i Supabase innan live-test av textuppdatering och toggle-bort av tumme om den inte redan är körd.
+- Följ upp verklig ruttfeedback när det finns tillräckligt många rader och använd den för gemensam routingkalibrering.
 - Senare: tydligare swap-knapp för bara Från/Till.
 
 ## Arkitektur
@@ -148,6 +154,8 @@ Renderprinciper:
 - `web/app/api/traffic-flow/route.ts` — aktiva TrafficFlow-segment.
 - `web/app/api/geocode/route.ts` — Nominatim-proxy för search/reverse, Sverige-bounds, svensk `Accept-Language`, kortetiketter och lokal resultatrankning.
 - `web/app/api/route/route.ts` — routingproxy. Använder GraphHopper om `GRAPHHOPPER_BASE_URL` finns, annars OSRM. Returnerar ruttkandidater och `avoidScores`.
+- `web/app/api/route-shares/route.ts` — skapar och läser public route snapshots för `/r/[slug]`. Utgångna länkar returnerar `410`.
+- `web/app/api/route-feedback/route.ts` — skapar ruttfeedback, uppdaterar kommentar och tar bort feedbackröst.
 - `web/app/api/segment/route.ts` — `segment_detail(p_fid)` för popup.
 - `web/app/api/_utils.ts` — bbox-validering och JSON/cache-headers.
 
@@ -166,6 +174,8 @@ Alla tunga bbox-rutter ska ha både API-side area guard och SQL-side limit.
 - `0020_live_traffic_flow.sql` till `0022_stabilize_flow_segments.sql` — TrafficFlow och stabila segmentlinjer.
 - `0023_security_limits_dedup.sql` — publika grants, server-limits och dedupad risk-MV.
 - `0025_high_speed_badges_80.sql` — kartlagret Höga hastigheter utökat från 90+ till 80+.
+- `0027_route_sharing_feedback.sql` — `route_snapshots`, `route_feedback` samt RPC:er för delningslänkar och första feedbackskapande.
+- `0028_route_feedback_update_delete.sql` — RPC:er för att uppdatera feedbackkommentar och ta bort feedbackröst.
 
 ## Gotchas
 
@@ -214,8 +224,7 @@ pnpm web
 - Frontend cleanup utan UX-ändring: `Map.tsx` är delvis uppdelad i `routeModel`, `RoutePlannerBox`, `RouteAlternativesTray`, `RouteLoadingIndicator`, `HelpPanel` och `MapIcons`. Kvar som möjliga rena extraktioner: `layers.ts`, `Map.module.css`, mer route state/hook-logik och `/api/route`.
 - A11y avvaktar: route suggestions till korrekt combobox/listbox/option, InfoBox/fokus och övriga UX-/designnära tillgänglighetsfixar ska tas senare efter bekräftade produktbeslut.
 - Scraper/Edge Function: störnings-upsert timeoutade när många `disturbances` kom i ett enda statement. Fixen är att skriva events, disturbances och traffic_flow i mindre batchar och logga batch-counts.
-- Route-card UX senare: lägg till lätt ruttfeedback/betyg som kalibreringsunderlag, inte som direkt ranking-signal. Första versionen bör ha tumme upp/ner per rutt, snabborsaker vid negativ feedback (`Onödig avstickare`, `För mycket snabb väg`, `För lång omväg`, `För lika annan rutt`, `Saknar bättre alternativ`) och eventuell sökningsfeedback på hela resultatlistan. Spara filterkombination, route source, rank, tid/distans, exponeringar och antal presenterade rutter, men inte råa koordinater/adresser/geometrier.
-- Route-card delning senare: designa delningskontroller för app-URL till samma rutt/sökning samt länk ut till Google Maps för den valda rutten eller start/slut. Utred om app-URL ska bära adresser/koordinater explicit eller en anonym query-id/hash.
+- Route-card UX senare: överväg snabborsaker vid negativ feedback (`Onödig avstickare`, `För mycket snabb väg`, `För lång omväg`, `För lika annan rutt`, `Saknar bättre alternativ`) och eventuell sökningsfeedback på hela resultatlistan när fritextfeedbacken har börjat visa återkommande mönster.
 - Följ upp GraphHopper-fanout i prod-loggar när fler verkliga sträckor testas, särskilt `highSpeed`, `trafficIntensity` och kombinationer med bro/tunnel.
 - Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer. Spara förväntat beteende per case, särskilt när `Höga hastigheter` kombineras med andra undvik-filter.
 - Följ upp build-hang isolerat om det återkommer. Senaste lokala build passerade.

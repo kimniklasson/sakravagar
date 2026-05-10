@@ -51,7 +51,7 @@ Om vi senare vill extrahera ett fält vi inte tänkt på slipper vi scrapa om ga
 
 ## Framtida migrations
 
-Numrera i ordning: `0025_*.sql`, `0026_*.sql` osv. En ADR-post i `docs/decisions.md` om valet är icke-trivialt.
+Numrera i ordning efter senaste filen i `migrations/`. En ADR-post i `docs/decisions.md` om valet är icke-trivialt.
 
 ## Viktiga migrations
 
@@ -65,6 +65,8 @@ Numrera i ordning: `0025_*.sql`, `0026_*.sql` osv. En ADR-post i `docs/decisions
 - `0023_security_limits_dedup.sql` — publika grants, limits och dedupad risk-MV.
 - `0024_security_invoker_public_views.sql` — security-invoker på publika vyer skapade efter `0003`.
 - `0025_high_speed_badges_80.sql` — utökar kartlagret Höga hastigheter från 90+ till 80+ efter omimport.
+- `0027_route_sharing_feedback.sql` — skapar `route_snapshots`, `route_feedback` och RPC:er för delade ruttlänkar och feedbackskapande.
+- `0028_route_feedback_update_delete.sql` — lägger till RPC:er för att uppdatera feedbackkommentar och ta bort feedbackröst.
 
 ## Dataregler
 

@@ -147,6 +147,46 @@ Observability:
 - Den loggar inte koordinater, adresser eller route-geometrier.
 - Syftet är att hitta dyra filterkombinationer och trimma GraphHopper-fanout med data.
 
+## Route shares
+
+`POST /api/route-shares`
+
+Skapar en public route snapshot för vald rutt och returnerar:
+
+- `slug`
+- `url`
+- `expiresAt`
+
+Snapshoten används för delningslänkar till `/r/[slug]`. Payloaden innehåller stopp, aktiva filter, vald rutt, provider, vald rank och antal presenterade rutter. Route-geometri och annotations kompaktas innan lagring för att hålla snapshoten rimlig.
+
+`GET /api/route-shares?slug=...`
+
+Läser en public snapshot för delad rutt.
+
+Svar:
+
+- `200` med snapshotpayload och `expiresAt` när länken finns och är giltig.
+- `404` om sluggen inte finns.
+- `410` om länken har gått ut.
+
+Delningslänkar har 1 års TTL. Direkt tabellåtkomst är inte publik; API:t går via Supabase RPC.
+
+## Route feedback
+
+`POST /api/route-feedback`
+
+Skapar en feedbackröst för en presenterad rutt och returnerar feedback-id. Feedback sparas ihop med en privat route snapshot och metadata som provider, route source, rank, tid/distans, `avoidScores`, `exposure`, aktiva filter och antal presenterade rutter.
+
+`PATCH /api/route-feedback`
+
+Uppdaterar kommentaren på en befintlig feedbackrad. Kommentar är frivillig och max 200 tecken.
+
+`DELETE /api/route-feedback?id=...`
+
+Tar bort en feedbackröst när användaren klickar på samma tumme igen.
+
+Feedbacken är kalibreringsunderlag för senare batchanalys och ska inte påverka routing automatiskt i MVP-flödet.
+
 ## Segment
 
 `GET /api/segment`

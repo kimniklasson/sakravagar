@@ -59,8 +59,29 @@ import type {
 
 const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
 const SWEDEN_ZOOM = 4.2;
+const SHARED_ROUTE_MAX_COORDINATES = 360;
+const SHARED_ROUTE_MAX_ANNOTATION_COORDINATES = 80;
+const SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS = 80;
+const SHARED_ROUTE_MAX_ANNOTATION_POINTS = 160;
 
 const mobileInfoBoxQuery = "(max-width: 767px)";
+
+export type MapProps = {
+  sharedRouteSlug?: string;
+};
+
+type RouteFeedbackVote = "up" | "down";
+
+type RouteSharePayload = {
+  version: 1;
+  createdAt: string;
+  stops: RouteStop[];
+  routeAvoids: RouteAvoidState;
+  selectedRoute: RouteLine;
+  provider: RouteProvider | null;
+  selectedRouteRank: number;
+  presentedRouteCount: number;
+};
 
 function isMobileViewport(): boolean {
   return typeof window !== "undefined" && window.matchMedia(mobileInfoBoxQuery).matches;
@@ -80,7 +101,159 @@ function liveUpdatedText(latestLastSeen: string | null, now: number): string {
   return `Uppdaterat ${minutes} min. sedan`;
 }
 
-export default function Map() {
+function routeStateKey(stops: RouteStop[]): string {
+  return stops
+    .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
+    .join("|");
+}
+
+function roundRouteCoordinate([lng, lat]: [number, number]): [number, number] {
+  return [Number(lng.toFixed(6)), Number(lat.toFixed(6))];
+}
+
+function compactRouteCoordinates(
+  coordinates: GeoJSON.Position[],
+  maxCoordinates: number,
+): [number, number][] {
+  const valid = coordinates.filter((coord): coord is [number, number] => (
+    Array.isArray(coord) &&
+    coord.length >= 2 &&
+    typeof coord[0] === "number" &&
+    typeof coord[1] === "number" &&
+    Number.isFinite(coord[0]) &&
+    Number.isFinite(coord[1])
+  ));
+
+  if (valid.length <= maxCoordinates) return valid.map(roundRouteCoordinate);
+  const sampled: [number, number][] = [];
+  const step = (valid.length - 1) / (maxCoordinates - 1);
+  for (let index = 0; index < maxCoordinates; index += 1) {
+    const coord = valid[Math.round(index * step)];
+    if (coord) sampled.push(roundRouteCoordinate(coord));
+  }
+  return dedupeRouteCoordinates(sampled);
+}
+
+function compactLineString(
+  geometry: GeoJSON.LineString,
+  maxCoordinates: number,
+): GeoJSON.LineString {
+  return {
+    type: "LineString",
+    coordinates: compactRouteCoordinates(geometry.coordinates, maxCoordinates),
+  };
+}
+
+function compactRouteForSnapshot(route: RouteLine): RouteLine {
+  return {
+    ...route,
+    geometry: compactLineString(route.geometry, SHARED_ROUTE_MAX_COORDINATES),
+    annotations: {
+      highSpeed: route.annotations.highSpeed
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
+      trafficIntensity: route.annotations.trafficIntensity
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
+      bridges: route.annotations.bridges
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
+      tunnels: route.annotations.tunnels
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
+      disturbances: route.annotations.disturbances.slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
+      accidentHistory: route.annotations.accidentHistory.slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
+    },
+  };
+}
+
+function compactStopsForSnapshot(stops: RouteStop[]): RouteStop[] {
+  return stops.map((stop) => ({
+    ...stop,
+    coordinates: stop.coordinates ? roundRouteCoordinate(stop.coordinates) : null,
+  }));
+}
+
+function coordinateParam([lng, lat]: [number, number]): string {
+  return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+}
+
+function routeGoogleWaypoints(route: RouteLine): [number, number][] {
+  const coordinates = route.geometry.coordinates.filter((coord): coord is [number, number] => (
+    Array.isArray(coord) &&
+    coord.length >= 2 &&
+    typeof coord[0] === "number" &&
+    typeof coord[1] === "number" &&
+    Number.isFinite(coord[0]) &&
+    Number.isFinite(coord[1])
+  ));
+  if (coordinates.length < 5) return [];
+
+  return [0.25, 0.5, 0.75]
+    .map((fraction) => coordinates[Math.round((coordinates.length - 1) * fraction)])
+    .filter((coord): coord is [number, number] => Boolean(coord))
+    .map(roundRouteCoordinate);
+}
+
+function buildGoogleMapsDirectionsUrl(route: RouteLine, stops: RouteStop[]): string | null {
+  const routeCoordinates = route.geometry.coordinates.filter((coord): coord is [number, number] => (
+    Array.isArray(coord) &&
+    coord.length >= 2 &&
+    typeof coord[0] === "number" &&
+    typeof coord[1] === "number" &&
+    Number.isFinite(coord[0]) &&
+    Number.isFinite(coord[1])
+  ));
+  const origin = stops[0]?.coordinates ?? routeCoordinates[0];
+  const destination = stops.at(-1)?.coordinates ?? routeCoordinates.at(-1);
+  if (!origin || !destination) return null;
+
+  const params = new URLSearchParams({
+    api: "1",
+    origin: coordinateParam(origin),
+    destination: coordinateParam(destination),
+    travelmode: "driving",
+    dir_action: "navigate",
+    utm_source: "sakravagar",
+    utm_campaign: "route_card",
+  });
+  const waypoints = routeGoogleWaypoints(route);
+  if (waypoints.length > 0) {
+    params.set("waypoints", waypoints.map(coordinateParam).join("|"));
+  }
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+export default function Map({ sharedRouteSlug }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLoadedRef = useRef(false);
@@ -111,6 +284,7 @@ export default function Map() {
   const [routeCandidates, setRouteCandidates] = useState<RouteLine[]>([]);
   const [routeLines, setRouteLines] = useState<RouteLine[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [routeProvider, setRouteProvider] = useState<RouteProvider | null>(null);
   const routeStopsRef = useRef<RouteStop[]>(initialRouteStops);
   const routeAvoidsRef = useRef<RouteAvoidState>(initialRouteAvoids);
   const routeDragHandlerRef = useRef<((commit: RouteDragCommit) => void) | null>(null);
@@ -124,6 +298,8 @@ export default function Map() {
   const routeResponseCacheRef = useRef<globalThis.Map<string, RouteCacheEntry>>(new globalThis.Map());
   const routeLinesRef = useRef<RouteLine[]>([]);
   const selectedRouteIdRef = useRef<string | null>(null);
+  const routeProviderRef = useRef<RouteProvider | null>(null);
+  const routeShareUrlsRef = useRef<globalThis.Map<string, string>>(new globalThis.Map());
   const customRouteMarkersRef = useRef<maplibregl.Marker[]>([]);
   const clearRouteStopRef = useRef<(id: string) => void>(() => {});
   const dragRouteStopIdRef = useRef<string | null>(null);
@@ -141,6 +317,7 @@ export default function Map() {
   useEffect(() => { routeAvoidsRef.current = routeAvoids; }, [routeAvoids]);
   useEffect(() => { routeLinesRef.current = routeLines; }, [routeLines]);
   useEffect(() => { selectedRouteIdRef.current = selectedRouteId; }, [selectedRouteId]);
+  useEffect(() => { routeProviderRef.current = routeProvider; }, [routeProvider]);
 
   const selectRouteById = useCallback((routeId: string) => {
     setRouteLines((current) => {
@@ -303,6 +480,15 @@ export default function Map() {
             (commit) => routeDragHandlerRef.current?.(commit),
             (commit) => routeDragPreviewHandlerRef.current?.(commit),
           );
+          if (routeLinesRef.current.length > 0) {
+            setRouteLayerData(
+              map,
+              routeLinesRef.current,
+              selectedRouteIdRef.current,
+              routeAvoidsRef.current,
+            );
+            focusRoute(map, routeLinesRef.current);
+          }
           return Promise.all([
             refreshDisturbancesLayer(map),
             refreshTrafficFlowLayer(map),
@@ -491,12 +677,204 @@ export default function Map() {
     setRouteCandidates([]);
     setRouteLines([]);
     setSelectedRouteId(null);
+    setRouteProvider(null);
     setRouteError(null);
     setRouteNoticeText(null);
     setRouteCompareLoading(false);
+    routeShareUrlsRef.current.clear();
     const map = mapRef.current;
     if (map && mapLoadedRef.current) setRouteLayerData(map, []);
   };
+  const routeSnapshotPayload = (route: RouteLine): RouteSharePayload => {
+    const routeRank = routeLinesRef.current.findIndex((candidate) => candidate.id === route.id);
+    return {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      stops: compactStopsForSnapshot(routeStopsRef.current),
+      routeAvoids: { ...routeAvoidsRef.current },
+      selectedRoute: compactRouteForSnapshot(route),
+      provider: routeProviderRef.current,
+      selectedRouteRank: routeRank >= 0 ? routeRank : 0,
+      presentedRouteCount: routeLinesRef.current.length,
+    };
+  };
+
+  const routeById = (routeId: string): RouteLine => {
+    const route = routeLinesRef.current.find((candidate) => candidate.id === routeId);
+    if (!route) throw new Error("Rutten finns inte längre.");
+    return route;
+  };
+
+  const createRouteShareUrl = async (routeId: string): Promise<string> => {
+    const cached = routeShareUrlsRef.current.get(routeId);
+    if (cached) return cached;
+
+    const route = routeById(routeId);
+    const res = await fetch("/api/route-shares", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: routeSnapshotPayload(route) }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? "Kunde inte skapa delningslänk.");
+    }
+
+    const { url } = (await res.json()) as { url: string };
+    routeShareUrlsRef.current.set(routeId, url);
+    return url;
+  };
+
+  const handleCopyRouteUrl = async (routeId: string): Promise<void> => {
+    const url = await createRouteShareUrl(routeId);
+    await writeClipboardText(url);
+  };
+
+  const handleOpenRouteInGoogleMaps = (routeId: string) => {
+    const route = routeById(routeId);
+    const url = buildGoogleMapsDirectionsUrl(route, routeStopsRef.current);
+    if (!url) {
+      setRouteNoticeText("Kunde inte öppna rutten i Google Maps.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleSubmitRouteFeedback = async (
+    routeId: string,
+    vote: RouteFeedbackVote,
+    comment: string,
+  ): Promise<string> => {
+    const route = routeById(routeId);
+    const routeRank = routeLinesRef.current.findIndex((candidate) => candidate.id === route.id);
+    const stops = routeStopsRef.current;
+    const res = await fetch("/api/route-feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vote,
+        comment,
+        snapshot: routeSnapshotPayload(route),
+        routeMeta: {
+          routeId: route.id,
+          source: route.source,
+          provider: routeProviderRef.current,
+          distanceMeters: route.distanceMeters,
+          durationSeconds: route.durationSeconds,
+          safetyScore: route.safetyScore,
+          avoidScores: route.avoidScores,
+          exposure: route.exposure,
+        },
+        searchMeta: {
+          routeAvoids: routeAvoidsRef.current,
+          stopCount: stops.length,
+          viaStopCount: stops.filter(isCustomRouteStop).length,
+          selectedRouteRank: routeRank >= 0 ? routeRank : 0,
+          presentedRouteCount: routeLinesRef.current.length,
+        },
+      }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? "Kunde inte spara feedback.");
+    }
+
+    const { id } = (await res.json()) as { id: string };
+    return id;
+  };
+
+  const handleUpdateRouteFeedbackComment = async (
+    feedbackId: string,
+    comment: string,
+  ): Promise<void> => {
+    const res = await fetch("/api/route-feedback", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: feedbackId, comment }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? "Kunde inte uppdatera feedback.");
+    }
+  };
+
+  const handleClearRouteFeedback = async (feedbackId: string): Promise<void> => {
+    const res = await fetch(`/api/route-feedback?id=${encodeURIComponent(feedbackId)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? "Kunde inte ta bort feedback.");
+    }
+  };
+
+  useEffect(() => {
+    if (!sharedRouteSlug) return;
+
+    let cancelled = false;
+    const loadSharedRoute = async () => {
+      setRouteLoading(true);
+      setRouteError(null);
+      setRouteNoticeText("Öppnar delad rutt...");
+
+      try {
+        const res = await fetch(`/api/route-shares?slug=${encodeURIComponent(sharedRouteSlug)}`);
+        if (cancelled) return;
+        if (res.status === 410) {
+          clearRoute();
+          setRouteError("Länken har gått ut. Sök rutten igen för att skapa en ny delningslänk.");
+          setRouteNoticeText(null);
+          return;
+        }
+        if (res.status === 404) {
+          clearRoute();
+          setRouteError("Den delade rutten hittades inte.");
+          setRouteNoticeText(null);
+          return;
+        }
+        if (!res.ok) throw new Error(await res.text());
+
+        const { payload } = (await res.json()) as { payload: RouteSharePayload };
+        const selectedRoute = payload.selectedRoute;
+        const stops = payload.stops;
+        const routeAvoids = payload.routeAvoids;
+        if (!selectedRoute || !Array.isArray(stops) || stops.length < 2) {
+          throw new Error("Ogiltig delad rutt.");
+        }
+
+        lastRouteKeyRef.current = routeStateKey(stops);
+        routeShareUrlsRef.current.set(selectedRoute.id, window.location.href);
+        setRouteStops(stops);
+        setRouteAvoids(routeAvoids);
+        setRouteCandidates([selectedRoute]);
+        setRouteLines([selectedRoute]);
+        setSelectedRouteId(selectedRoute.id);
+        setRouteProvider(payload.provider ?? null);
+        setRouteNoticeText(null);
+        setRouteError(null);
+
+        const map = mapRef.current;
+        if (map && mapLoadedRef.current) {
+          setRouteLayerData(map, [selectedRoute], selectedRoute.id, routeAvoids);
+          focusRoute(map, [selectedRoute]);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("shared route load failed", err);
+        clearRoute();
+        setRouteError("Kunde inte öppna den delade rutten.");
+        setRouteNoticeText(null);
+      } finally {
+        if (!cancelled) setRouteLoading(false);
+      }
+    };
+
+    void loadSharedRoute();
+    return () => {
+      cancelled = true;
+    };
+  }, [sharedRouteSlug]);
+
   const setRouteStopLabel = (id: string, label: string) => {
     clearRoute();
     setRouteStops((stops) =>
@@ -635,6 +1013,7 @@ export default function Map() {
       setRouteLoading(true);
     }
     setRouteError(null);
+    routeShareUrlsRef.current.clear();
     try {
       const resolvedStops = await Promise.all(stopsToPlan.map(geocodeRouteStop));
       const stopCoordinates = resolvedStops
@@ -673,6 +1052,7 @@ export default function Map() {
       if (cached) {
         if (isFreshRouteCacheEntry(cached, avoids)) {
           setRouteCandidates(cached.routes);
+          setRouteProvider(cached.provider ?? null);
           applyRouteSelection(cached.routes, avoids, timeBudget, { focus: !opts.compare });
           if (cached.provider === "osrm" && activeAvoidCount(avoids) > 0) {
             setRouteNoticeText("Lokal routing använder OSRM och kan bara jämföra ett fåtal standardalternativ.");
@@ -708,6 +1088,7 @@ export default function Map() {
         createdAt: Date.now(),
       });
       setRouteCandidates(routes);
+      setRouteProvider(provider ?? null);
       applyRouteSelection(routes, avoids, timeBudget, { focus: !opts.compare });
       if (provider === "osrm" && activeAvoidCount(avoids) > 0) {
         setRouteNoticeText("Lokal routing använder OSRM och kan bara jämföra ett fåtal standardalternativ.");
@@ -717,6 +1098,7 @@ export default function Map() {
       lastRouteKeyRef.current = null;
       setRouteCandidates([]);
       setRouteLines([]);
+      setRouteProvider(null);
       const map = mapRef.current;
       if (map && mapLoadedRef.current) setRouteLayerData(map, []);
       if (!opts.auto || err instanceof Error) {
@@ -1144,6 +1526,11 @@ export default function Map() {
         revealSelectedRouteRef={shouldRevealSelectedRouteRef}
         onSelectRoute={selectRouteById}
         onPreviewRoute={previewRouteById}
+        onCopyRouteUrl={handleCopyRouteUrl}
+        onOpenRouteInGoogleMaps={handleOpenRouteInGoogleMaps}
+        onSubmitRouteFeedback={handleSubmitRouteFeedback}
+        onUpdateRouteFeedbackComment={handleUpdateRouteFeedbackComment}
+        onClearRouteFeedback={handleClearRouteFeedback}
       />
       <HelpPanel
         open={infoOpen}
