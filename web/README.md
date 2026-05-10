@@ -1,19 +1,19 @@
 # web
 
-Next.js App Router + MapLibre GL. Visar olycks-, flödes-, störnings-, hastighets- och ruttlager för Säkravägar.
+Next.js App Router + MapLibre GL för Säkravägar. Visar kontrollager för olyckor, flöde, störningar och höga hastigheter samt ruttplanering med trygghetsfilter.
 
 ## Köra lokalt
 
 ```sh
 cp .env.example .env.local
 # fyll i SUPABASE_URL och SUPABASE_ANON_KEY
-# geocoding/routing har lokala defaults i .env.example, men skarp trafik bör ha dedikerad provider
 pnpm install
 pnpm --filter @trafik/web run dev
-# öppna http://localhost:3000
 ```
 
-För lokal routing som matchar production, starta med GraphHopper-env:
+Next startar normalt på `http://localhost:3000`.
+
+För lokal routing som matchar production:
 
 ```sh
 TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt') \
@@ -26,33 +26,33 @@ Utan `GRAPHHOPPER_BASE_URL` faller `/api/route` tillbaka till OSRM.
 
 ## Struktur
 
-```
+```text
 web/
 ├── app/
-│   ├── layout.tsx            # root layout
-│   ├── page.tsx              # huvudsida (laddar Map dynamiskt, ssr:false)
-│   ├── page.module.css
-│   └── api/                  # bbox-data, geocoding, routing och route scores
-├── components/
-│   └── Map/
-│       ├── Map.tsx           # MapLibre-init ('use client')
-│       ├── Map.module.css
-│       └── layers.ts         # GeoJSON-source + visualiserings-layer
+│   ├── api/                  # bbox-data, geocoding, routing, shares och feedback
+│   ├── r/[slug]/             # delade rutter
+│   ├── layout.tsx
+│   └── page.tsx
+├── components/Map/
+│   ├── Map.tsx               # MapLibre-init och orchestration
+│   ├── RoutePlannerBox.tsx   # Från/Till + undvik-pills
+│   ├── RouteAlternativesTray.tsx
+│   ├── RouteLoadingIndicator.tsx
+│   ├── HelpPanel.tsx
+│   ├── MapIcons.tsx
+│   ├── routeModel.ts         # route-typer, ranking, cache
+│   ├── layers.ts             # MapLibre-källor/lager
+│   └── Map.module.css
 ├── lib/
-│   ├── supabase.ts
-│   └── types.ts              # re-export från @trafik/shared
-├── styles/
-│   ├── globals.css
-│   └── tokens.css            # design tokens som CSS custom properties
-├── next.config.ts
-└── tsconfig.json
+├── public/icons/
+└── styles/
 ```
 
-## Stylingregler
+## Styling
 
-- **Inga inline styles.** Allt via `*.module.css` (scoped) eller `globals.css`.
-- **Design tokens** i `tokens.css` som CSS custom properties — ändra där för global konsekvens.
-- **Co-location:** komponent + dess CSS Module i samma mapp.
+- Allt via `*.module.css`, `globals.css` eller tokens i `styles/tokens.css`.
+- CSS Modules används för komponenter; globala klasser bara där MapLibre eller app-shell kräver det.
+- Behåll design tokens som källa för färger/typografi när ett värde är återanvändbart.
 
 ## Viktiga API-rutter
 
@@ -61,19 +61,19 @@ web/
 - `/api/risk` — deduplicerad segmentrisk via `risk_in_bbox`.
 - `/api/adt` — ÅDT/flöde via `adt_in_bbox`.
 - `/api/traffic-flow` — aktiva TrafficFlow-mätningar snappade till segment.
-- `/api/disturbances?bbox=...` — aktiva vägarbeten/kö-/trafikstörningar inom kartans bbox.
-- `/api/large-roads` — höghastighetssegment för badge-lagret och ruttfiltrets scoring.
+- `/api/disturbances` — aktiva vägarbeten/kö-/trafikstörningar inom bbox.
+- `/api/large-roads` — höghastighetssegment för 80+-badges.
 - `/api/geocode` — Nominatim-proxy för svensk search/reverse.
-- `/api/route` — routingproxy. Använder GraphHopper om env finns, annars OSRM.
+- `/api/route` — GraphHopper/OSRM-routing via `POST`.
+- `/api/route-shares` — public route snapshots för `/r/[slug]`.
+- `/api/route-feedback` — tumme upp/ner och kommentar som kalibreringsunderlag.
 - `/api/segment` — popupdetaljer för vägsegment.
 
-Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit. Klienten klipper eller skippar lager-bboxar utanför svenska datagränser innan den gör request.
+Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit.
 
 ## Routeplanner
 
-Ruttplaneraren bor i `components/Map/Map.tsx`. Den geocodar `Från`/`Till`, ritar primär och alternativa rutter via `layers.ts`, och rankar kandidater med `avoidScores` från `/api/route`.
-
-Aktiva "Undvik om möjligt"-filter:
+`Undvik om möjligt`-filter:
 
 - `Höga hastigheter`
 - `Trafikintensiva vägar`
@@ -81,27 +81,13 @@ Aktiva "Undvik om möjligt"-filter:
 - `Broar`
 - `Tunnlar`
 
-GraphHopper påverkar höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar via custom model. Broar/tunnlar exponeras med `road_environment` path details. Trafikintensitet använder ÅDT som bas och liveflöde som förstärkning där det finns. Stadstrafik använder statiska stadszoner i GraphHopper custom model och `road_class`/`max_speed` path details, eftersom GraphHopper-instansen inte exponerar `urban_density`. Olyckor och trafikstörningar är kontrollager/route-notices, inte planeringsfilter.
+GraphHopper påverkar dessa filter via custom model när env finns. Trafikintensitet använder ÅDT som bas och liveflöde som förstärkning. Stadstrafik använder statiska stadszoner och `road_class`/`max_speed`, eftersom vår GraphHopper-cache inte exponerar `urban_density`. Olyckor och störningar är kontrollager/route-notices, inte planeringsfilter.
 
-## Byta visualiseringstyp
+## Deploy
 
-Allt bor i `components/Map/layers.ts`. GeoJSON-källan är visualiserings-agnostisk; byt bara `map.addLayer({ type: ... })`.
-
-| Typ             | Använd när |
-|-----------------|------------|
-| `circle`        | MVP-default — enkel, läsbar på alla zoom-nivåer |
-| `heatmap`       | När du vill visa täthet i regioner |
-| `fill-extrusion`| 3D, kräver att du aggregerar till polygoner (hex-grid) först |
-| `line`          | Färgade vägsegment — kräver map-matching mot NVDB/OSM först |
-
-Kim tar beslut om definitiv visualisering när riktig data flödar in.
-
-## Deploy till Vercel
-
-1. Import repo i Vercel dashboard
-2. Root directory: `web`
-3. Framework: Next.js (autodetekteras)
-4. Environment variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GRAPHHOPPER_BASE_URL`, `GRAPHHOPPER_TOKEN`, samt ev. `NOMINATIM_*` och `OSRM_*` för dedikerade providers
-5. Deploy
+1. Importera repo i Vercel.
+2. Root directory: `web`.
+3. Environment variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GRAPHHOPPER_BASE_URL`, `GRAPHHOPPER_TOKEN`, samt dedikerade `NOMINATIM_*`/`OSRM_*` före större publik trafik.
+4. Deploy via Vercels Git-integration.
 
 Routingdrift dokumenteras i `docs/routing-ops.md`.

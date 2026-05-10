@@ -255,7 +255,10 @@ export function RoutePlannerBox({
                 key={option}
                 type="button"
                 className={`${styles.routeAvoidPill} ${routeAvoids[option] ? styles.routeAvoidPillOn : ""}`}
-                onClick={() => onToggleAvoid(option)}
+                onClick={(event) => {
+                  onToggleAvoid(option);
+                  if (event.detail > 0) event.currentTarget.blur();
+                }}
                 aria-pressed={routeAvoids[option]}
                 aria-describedby={`route-avoid-tooltip-${option}`}
               >

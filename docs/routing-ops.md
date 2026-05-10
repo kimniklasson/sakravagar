@@ -2,7 +2,7 @@
 
 Driftanteckningar för self-hostad routing i Säkravägar. Läs tillsammans med `docs/current-state.md` för nuläge och `docs/decisions.md` för varför GraphHopper valdes.
 
-## Oversikt
+## Översikt
 
 Routingkedjan:
 
@@ -68,19 +68,23 @@ GRAPHHOPPER_TOKEN="$TOKEN" \
 pnpm web
 ```
 
-Testa sedan rutter via UI:t eller `/api/route`. Kända smoke test-sträckor:
+Testa sedan rutter via UI:t eller `POST /api/route`. Kända smoke test-sträckor:
 
 - Floda -> Rönnäng: `Höga hastigheter` bör kunna välja en lugnare kandidat än snabbaste rutten.
 - Floda -> Göteborg: ska returnera snabb kandidat och calm-kandidat när GraphHopper-env finns.
 
-## GraphHopper custom model
+## GraphHopper custom models
 
-`/api/route` hämtar normalt:
+`POST /api/route` hämtar snabbaste GraphHopper-rutten som baseline och, när `Undvik om möjligt` är aktivt, fler kandidater med custom models. Aktiva planeringsfilter är:
 
-1. Snabbaste GraphHopper-rutten.
-2. En calm-kandidat med custom model som nedprioriterar bland annat `MOTORWAY`, `TRUNK`, `PRIMARY`, `max_speed >= 90` och `max_speed >= 80`.
+- `highSpeed` — sänker prioritet för motorväg/trunk och höga hastigheter, främst 90+.
+- `trafficIntensity` — sänker prioritet för trafikintensiva ÅDT-segment och aktiva liveflödessegment med tät/långsam trafik.
+- `cityTraffic` — sänker prioritet i statiska stadszoner, särskilt större/högre hastighetsleder.
+- `bridges` / `tunnels` — sänker prioritet för GraphHoppers `road_environment == BRIDGE` respektive `TUNNEL`.
 
-Custom model kräver:
+Olyckor och störningar är inte GraphHopper-filter längre. De följer med ruttsvaret som notices/annotations.
+
+Custom models kräver:
 
 ```json
 {
@@ -88,7 +92,7 @@ Custom model kräver:
 }
 ```
 
-Om `ch.disable` saknas kan GraphHopper ignorera custom model eller svara med fel, beroende på profil/cache.
+Om `ch.disable` saknas kan GraphHopper ignorera custom model eller svara med fel, beroende på profil/cache. Snabbaste baseline kan däremot använda CH.
 
 ## Bygga om graph-cache
 
@@ -132,7 +136,7 @@ Caddy ska endast proxya requests med rätt `X-Routing-Token`. Requests utan toke
 | `/api/route` använder OSRM lokalt | GraphHopper-env saknas | Starta med `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN` |
 | `routing.../info` utan token ger `200` | Caddy-regel läcker | Caddyfile och reload |
 | `routing.../info` med token ger `404` | Fel token/header eller Caddy-regel | Tokenfil, Vercel env, Caddy logs |
-| Custom model påverkar inte rutten | CH inte disabled | Request body ska ha `ch.disable: true` |
+| Custom model påverkar inte rutten | CH inte disabled eller OSRM-fallback används | Request body ska ha `ch.disable: true`; kontrollera GraphHopper-env |
 | GraphHopper startar långsamt | Cache byggs om | `journalctl -u graphhopper -f` |
 | Servern svarar inte på HTTPS | Caddy/cert/DNS | `systemctl status caddy`, Cloudflare DNS-only för `routing` |
 

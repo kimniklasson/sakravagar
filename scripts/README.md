@@ -1,23 +1,20 @@
 # scripts
 
-Sällan-körda verktyg. Inte del av scraper- eller web-koden.
+Sällan-körda verktyg för Lastkajen/NVDB-importer. De är inte del av webben eller den löpande Trafikverket-scrapen.
 
-## `import-nvdb.sh` — importera NVDB-paket från Lastkajen
+## `import-nvdb.sh` — importera NVDB/ÅDT-paket från Lastkajen
 
-Laddar ett GPKG-paket från Lastkajen (ÅDT + Vägtrafiknät + TSK mm) in i Supabase PostGIS.
+Importerar ett GPKG-paket från Lastkajen till Supabase PostGIS. Används främst för ÅDT och vägnät som underlag till flöde/risk.
 
 ### Engångs-setup
 
-1. **Installera GDAL:**
+1. Installera GDAL:
+
    ```sh
    brew install gdal
    ```
 
-2. **Lägg till `DATABASE_URL` i `.env`** — den direkta Postgres-strängen, inte Supabase-REST:
-   - Supabase dashboard → Project Settings → **Database** → Connection string
-   - Välj **"Session pooler"** (port 5432, URI-format). Transaction pooler funkar *inte* för bulk-import eftersom `COPY` kräver session-nivå.
-   - Kopiera strängen, byt ut `[YOUR-PASSWORD]` mot databaslösenordet.
-   - Formatet: `postgresql://postgres.<ref>:<password>@aws-0-eu-north-1.pooler.supabase.com:5432/postgres`
+2. Lägg till `DATABASE_URL` i `.env`. Använd Supabase session pooler på port `5432`, inte transaction pooler `6543`, eftersom bulkimport använder `COPY`.
 
 ### Köra importen
 
@@ -26,41 +23,22 @@ set -a && . .env && set +a
 ./scripts/import-nvdb.sh ~/Downloads/sakravagar_bas_2026_04.gpkg
 ```
 
-Scriptet:
-1. Listar alla lager i GPKG
-2. Importerar varje lager till en tabell `nvdb_<lagernamn>` i `public`-schemat
-3. Använder `PG_USE_COPY` för snabb bulk-insert
+Scriptet listar lager i GPKG-filen och importerar varje lager som `nvdb_<lagernamn>` i `public`-schemat med `PG_USE_COPY`.
 
-Förväntad körtid: några minuter för hela Sverige.
+Efter import ska relevanta migrations/RPC:er finnas applicerade, framför allt ÅDT-/riskkedjan i `db/migrations/0002_*.sql` och framåt. TSK-spåret är borttaget ur UI/dataflödet via `0016_remove_tsk.sql`.
 
-### Efter import
-
-Lager som kommer in blir typiskt:
-- `nvdb_trafik` — ÅDT per vägsegment
-- `nvdb_trafiksakerhetsklass_stracka_bil` — TSK-klassning
-- `nvdb_vagtrafiknat` — vägnätets topologi
-
-**Nästa steg** efter första importen: inspektera kolumnerna (`\d nvdb_trafik` i psql eller Supabase Table Editor) och skriv `db/migrations/0002_nvdb.sql` som:
-- Lägger till GIST-index på geom-kolumnerna
-- Skapar en vy eller materialiserad vy som joinar olycksevent mot närmaste vägsegment
-- Ev. normaliserar kolumnnamn om Lastkajens namngivning är obekväm
-
-### Varför en engångs-import och inte polling?
-
-ÅDT uppdateras årligen. Vägnätet ändras sällan. Ingen poäng att polla — vi kör `import-nvdb.sh` en gång per år när nya mätdata släppts.
-
-## `import-large-roads.sh` — importera trygghetsfiltret "Höga hastigheter"
+## `import-large-roads.sh` — importera höghastighetsunderlag
 
 Importerar bara de rader som behövs från Lastkajen-paketet `sakravagar_filter_*.gpkg`:
 
 - `Hastighetsgräns` där hastighet är 80 km/h eller högre
 - `Vägtyp` där typen är `Motorväg`, `Motortrafikled`, `Motortrafikled mötesfri`, `4-fältsväg` eller `Vanlig väg mötesfri`
 
-Detta undviker att hela hastighetslagret på ~2,2 miljoner rader hamnar i Supabase.
+Detta undviker att hela hastighetslagret på cirka 2,2 miljoner rader hamnar i Supabase.
 
 ```sh
 set -a && . .env && set +a
-./scripts/import-large-roads.sh /Users/kimniklasson/Documents/sakravagar_filter_Geopackage_253085/sakravagar_filter_253085.gpkg
+./scripts/import-large-roads.sh /sökväg/till/sakravagar_filter_253085.gpkg
 ```
 
 Efter import:
@@ -69,7 +47,7 @@ Efter import:
 /opt/homebrew/opt/libpq/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/0025_high_speed_badges_80.sql
 ```
 
-Skapar:
+Skapar/uppdaterar:
 
 - `nvdb_large_roads_speed`
 - `nvdb_large_roads_type`

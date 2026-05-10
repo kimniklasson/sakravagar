@@ -4,95 +4,71 @@ Senast uppdaterad: 2026-05-10
 
 ## Idén
 
-Webbapp som visar historisk olycksdata på svenska vägar för att hjälpa nervösa/rädda förare känna trygghet och välja säkrare rutter. Målgrupp: personer som känner oro inför trafiken och behöver bygga upp sitt självförtroende gradvis ("många bäckar små").
+Säkravägar.se visar historisk och aktuell trafikdata på svenska vägar för att hjälpa oroliga förare känna mer kontroll och välja lugnare rutter. Målgruppen är personer som behöver bygga självförtroende gradvis, inte förare som jagar snabbaste vägen.
 
-## Nuvarande inriktning (efter validering)
+## MVP-inriktning
 
-**MVP = kartbaserade kontrollager + ruttplanerare med första self-hostade trygghetsrouting.**
+**Kartbaserade kontrollager + trygghetsrouting.**
 
-Visa historiska olyckor, pågående olyckor, trafikflöde, trafikstörningar och höga hastigheter som kontrollager. Ruttplaneraren har geocoding, self-hostad GraphHopper-routing och "Undvik om möjligt"-filter. Höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar påverkar kandidatgenereringen via GraphHopper custom model. Olyckor och störningar visas som lager/route-notices, inte som planeringsfilter. Alla tunga kartlager ska skyddas med bbox-area, Sverige-bounds och SQL/RPC-limit.
+MVP:n visar olyckor, trafikflöde, trafikstörningar och höga hastigheter som kontrollager. Ruttplaneraren använder self-hostad GraphHopper för `Undvik om möjligt`-filter där höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar påverkar vägkostnaden. Olyckor och störningar visas som lager/route-notices, inte som planeringsfilter.
 
-## Validering — vad vi verifierat
+Alla tunga kartlager ska skyddas med bbox-area, Sverige-bounds och SQL/RPC-limit.
+
+## Verifierat
 
 ### Datakällor
 
-- ❌ **STRADA** (Transportstyrelsens fulla olycksdatabas): endast forskare/statistikändamål, inte kommersiella appar. Kräver formell ansökan enligt Lag 2021:319.
-- ❌ **Transportstyrelsens publika olycksstatistik**: bara XLSX, bara nationell/länsnivå. För grovt för vägbaserad analys.
-- ❌ **Trafikanalys**: samma — länsnivå som finaste uppdelning.
-- ✅ **Trafikverkets öppna API** (api.trafikinfo.trafikverket.se): `Situation`/`Deviation`-objekt med olyckor i realtid, inkl. koordinater. **CC0-licens** — fri att lagra, använda kommersiellt, redistribuera.
-- ✅ **NVDB/Lastkajen**: svenska vägnätet, ÅDT och hastighetsdata. Används redan för risknormalisering, flödeslager och hastighetslager.
+- ❌ **STRADA** — kräver formell ansökan och är inte lämplig som MVP-källa för kommersiell app.
+- ❌ **Transportstyrelsens/Trafikanalys publika statistik** — nationell/länsnivå, för grovt för vägbaserad analys.
+- ✅ **Trafikverkets öppna API** — `Situation`/`Deviation` och `TrafficFlow`, med koordinater och CC0-licens.
+- ✅ **NVDB/Lastkajen** — vägnät, ÅDT och hastighetsdata. Används för risknormalisering, flödeslager, höghastighetsbadges och routing-scoring.
 
-### Juridik & villkor
+### Juridik och marknad
 
-- Trafikverkets API: CC0 1.0 — inga restriktioner. Attribution ej krävs men artigt.
-- Trafikverket övervakar trafik, hör av sig vid excess. Nuvarande polling är låg volym.
+- Trafikverkets API-data är CC0 1.0. Attribution krävs inte, men är rimligt.
+- Nuvarande polling är låg volym.
+- Ingen svensk konkurrent hittad som positionerar sig på tryggare rutter för oroliga förare. Google/Waze/HERE optimerar främst snabbast/kortast.
 
-### Konkurrens
+## Arkitektur
 
-- Ingen svensk konkurrent hittad som positionerar sig på säkerhet/trygghet.
-- Google, Waze, HERE WeGo optimerar på snabbast/kortast, inte säkraste.
-- Akademisk forskning finns (ScienceDaily 2023), Google har pratat om "safer routes" — inget lanserat i Sverige.
-
-## Teknisk arkitektur (beslutad)
-
-### Datainsamling
-- **Supabase pg_cron + Edge Function `scrape`** — hämtar Trafikverket-flöden och upsertar i Supabase.
-- **GitHub Actions** finns kvar som manuell nödknapp, inte som primär schemaläggning.
-- **Polling-intervall:** scrape-cron är fortfarande lugn nog för Trafikverkets API, men TrafficFlow kan behöva tätare intervall om det ska kännas minutnära.
-- **Pollinganalys 2026-05-01:** 226 olycksevents analyserade efter ungefär en veckas insamling. `pg_cron` hade 301 lyckade körningar, median-gap 30 min, max-gap 30 min. Observerad olyckstid hade median 30 min och 35% single-observation-events. Trafikverkets `StartTime`→`EndTime` hade p10 cirka 45 min, p25 cirka 58 min och inga events under 30 min. Rekommendation: behåll 30 min och kör om `pnpm --filter @trafik/scraper run analyze:polling` efter ytterligare 1–2 veckor.
-- **Deduplicering:** Trafikverkets `Deviation.Id` bevarar tekniska rader; användarnära risk/popup dedupar logiska olyckor per segment, meddelande, vägnummer och timme.
-
-### Lagring
-- **Supabase free tier** — Postgres med PostGIS. Nytt projekt på befintligt konto (delar inte quota med andra projekt)
-- 500 MB räcker för flera års data
-
-### Frontend
-- **Vercel hobby** på befintligt konto. Shared bandwidth (100 GB/mån) är gott och väl för MVP
-
-### Kostnad
-- **0 kr/mån** hela vägen till MVP
+- **Scrape:** Supabase `pg_cron` + Edge Function `scrape`. GitHub Actions finns kvar som manuell nödknapp.
+- **Databas:** Supabase Postgres + PostGIS.
+- **Webb:** Next.js på Vercel, MapLibre GL, CSS Modules + tokens.
+- **Routing:** Self-hostad GraphHopper 11 på Hetzner bakom Caddy/HTTPS och header-token. OSRM är fallback när GraphHopper-env saknas.
+- **Kostnad:** 0 kr/mån för app/databas under MVP, plus routingservern när GraphHopper behövs i production.
 
 ## Tidsperspektiv
 
-- Dag 1: tom databas
-- Månad 1: begränsat värde, kan visa "senaste 30 dagarna"
-- Månad 6–12: meningsfull heatmap på riksnivå
+- Dag 1: tom databas.
+- Månad 1: begränsat historiskt värde, men aktuell olycks-/störningsdata och routing fungerar.
+- Månad 6-12: historisk heatmap/risk blir mer meningsfull på riksnivå.
 
-**Viktigt: starta insamlingen så snart som möjligt, även innan UI byggts.** Varje dag utan polling = en dag mindre historik vid lansering.
+Viktigt: fortsätt samla data löpande. Varje dag utan polling är en dag mindre historik.
 
 ## Nuvarande byggfokus
 
-1. Frontend cleanup utan UX-ändring: `Map.tsx` är delvis uppdelad i mindre route-/UI-moduler. Kvar som möjliga rena extraktioner: `layers.ts`, `Map.module.css`, mer route state/hook-logik och `/api/route`.
-2. A11y avvaktar: route suggestions, InfoBox/fokus och övriga UX-/designnära tillgänglighetsfixar ska tas senare efter bekräftade produktbeslut.
-3. Route-card UX senare: snabborsaker vid negativ feedback och fortsatt kalibreringsunderlag från verkliga rutter.
-4. Följ upp GraphHopper-fanout i prod-loggar när fler verkliga sträckor testas, särskilt `highSpeed`, `trafficIntensity`, `cityTraffic` och kombinationer.
-5. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg. Stadstrafik behöver extra kalibrering eftersom den bygger på stadszoner + vägklass/hastighet, inte GraphHopper `urban_density`.
-6. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
+1. Kalibrera routing mot verkliga sträckor, särskilt `Stadstrafik` och `Trafikintensiva vägar`.
+2. Följ upp GraphHopper-fanout och prestanda i prod-loggar.
+3. Använd ruttfeedback som batchunderlag när tillräckligt många rader finns.
+4. Fortsätt frontend cleanup utan UX-ändring: mindre route-/UI-moduler, senare mer `layers.ts`, `Map.module.css`, route state/hook-logik och `/api/route`.
+5. A11y avvaktar produkt-/designbeslut: route suggestions, InfoBox/fokus och närliggande interaktioner.
+6. Låt olyckshistoriken växa innan riskskalan hårdkalibreras.
 
-## Potentiella framtida datalager
+## Framtida datalager
 
-Olycksdata från `Situation` är kärnan, men heatmappen blir mer trovärdig om den viktas mot fler riskfaktorer. Kandidater, rankade efter relevans för "rädd förare"-usecaset:
+Högst relevanta kompletteringar:
 
-**Hög prioritet — riskproxy oberoende av historik:**
-- **`RoadData` v1** (öppna API:et, verifierat 2026-04-24) — `SpeedLimit`, `RoadWidth`, `BearingCapacity`, `RoadOwner`, `RoadConstruction2009`. Kan bli kompletterande källa, men NVDB/Lastkajen används redan för ÅDT/hastighet.
-- **ÅDT (årsdygnstrafik)** — redan importerat från Lastkajen och används för risknormalisering samt Flöde-lagret.
-- **`TrafficSafetyCamera`** — ATK-kameror sätts där dödsolyckor skett historiskt. Proxy för kända farliga sträckor, trivial att lägga in.
+- **Kommunal trafikmängdsdata för innerstäder** — framtidsidé. Lastkajen/NVDB täcker större/statliga leder bra men kan lämna luckor på kommunala innerstadsgator, t.ex. centrala Göteborg och Stockholm. Malmö och Stockholm har nedladdningsbara öppna geodata; Göteborg har publik Power BI-vy men behöver helst stabil export/API. Bör först berika `Trafikintensiva vägar` och Flöde-lagret, och eventuellt kalibrera `Stadstrafik` sekundärt. Import bör normalisera källa, licens, mätår, metric-typ (`ÅDT`, `MVD`, `ÅMVD`), råvärde, normaliserat värde och geometri i separat lager innan union med NVDB.
+- **`TrafficSafetyCamera`** — ATK-kameror som proxy för kända farliga sträckor.
+- **`RoadCondition`** — halka/friktion som realtidslager snarare än historisk heatmap.
+- **Viltolyckor/viltstängsel** — relevant i skogsområden men kräver separat källa/integration.
 
-**Medelhög — realtidslager, inte del av historisk heatmap:**
-- **`RoadCondition`** — friktion/halka. Användbart för "undvik idag"-vy snarare än statisk karta.
-- **`TrafficFlow`** — implementerat som `Liveflöde`, snappat till närmaste vägsegment.
-- **Vägarbeten/köer** — implementerat som separat `Störning`-overlay, inte del av historisk risk.
+NVDB-mängder i Trafikverkets öppna API kan vara användbara som komplement, men ÅDT ingår inte där och hämtas fortsatt via Lastkajen.
 
-**Bonus från NVDB i öppna API:et (sedan feb 2025):**
-12 NVDB-mängder tillgängliga via `api.trafikinfo`: `Hastighetsgräns`, `Vägbredd`, `Bärighet`, `AntalKörfält2`, `FunktionellVägklass`, `FörbjudenFärdriktning`, `Gatunamn`, `Höjdhinder_upp_till_45_dm`, `Väghållare`, `Vägnummer`, `Vägtrafiknät`, `ÖvrigtVägnamn`. Överlappar delvis `RoadData`. ÅDT ingår *inte* i denna lista.
+## Öppna frågor
 
-**Behöver utredas:**
-- **Viltolyckor / viltstängsel** — viltolyckor ägs av Nationella Viltolycksrådet, separat datakälla. Viltstängsel kan finnas i NVDB via Lastkajen. Relevant för nervösa förare i skogsområden men kräver egen integration.
-
-## Öppna frågor / överväganden
-
-- Hur kategorisera allvarlighetsgrad? Kanske via `IconId` eller text i `Message`.
-- Eventuellt parallellt: mejla Transportstyrelsen om STRADA-access för framtida berikning.
+- Hur ska allvarlighetsgrad kategoriseras utan STRADA? Möjliga signaler är `IconId`, `SeverityText` och text i `Message`.
+- Om projektet går bortom MVP: utred om Transportstyrelsen kan ge STRADA-access för begränsad, tillåten användning.
 
 ## Referenser
 

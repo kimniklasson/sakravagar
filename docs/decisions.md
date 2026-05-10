@@ -4,7 +4,9 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 ## 2026-04-24 — Stack: GH Actions + Supabase + Vercel
 
-**Valt:** GitHub Actions cron (publikt repo) → Supabase Postgres med PostGIS → Next.js på Vercel.
+**Status:** Delvis ersatt 2026-04-25. Supabase + Vercel gäller, men schemalagd scrape körs nu via Supabase `pg_cron` + Edge Function. GitHub Actions är manuell nödknapp.
+
+**Valt initialt:** GitHub Actions cron (publikt repo) → Supabase Postgres med PostGIS → Next.js på Vercel.
 
 **Varför:** 0 kr/mån hela vägen till MVP. Alla tre tjänsterna har generösa gratisnivåer som räcker länge. Publikt repo krävs för obegränsade Actions-minuter.
 
@@ -64,7 +66,7 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Övervägt:** External cron (cron-job.org) → `workflow_dispatch` via GitHub API. Fungerar men flyttar bara opålitligheten ett steg — och det är ett extra system att hålla koll på. Cloudflare Workers Cron Triggers — pålitligast men kräver port av scrapern till Workers-runtime utan stark Postgres-klient.
 
-**Konsekvens:** Scraper-koden finns nu i två versioner — `scraper/` (Node, kvar för manuell körning via `workflow_dispatch`) och `supabase/functions/scrape/` (Deno, prod). Håll dem i sync vid förändringar; eller på sikt ta bort Node-versionen om den inte används.
+**Konsekvens:** Scraper-koden finns nu i två versioner — `scraper/` (Node, lokal/manuell körning och `workflow_dispatch`) och `supabase/functions/scrape/` (Deno, prod). Håll dem i sync vid förändringar; eller på sikt ta bort Node-versionen om den inte används.
 
 ## 2026-04-24 — Dedupe-strategi
 
@@ -100,7 +102,7 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Valt:** Self-hosta GraphHopper 11 på Hetzner CPX32 (`trafik-routing`, IPv4 `116.203.135.46`) bakom Caddy/HTTPS och header-token. Appen anropar GraphHopper via Vercel `/api/route` med `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. GraphHopper lyssnar bara på `localhost:8989`; publikt finns endast `https://routing.säkravägar.se` med `X-Routing-Token`.
 
-**Varför:** Vi behöver kunna påverka vägkostnad, särskilt för `Höga hastigheter (90+)`, utan att vara låsta till publika OSRM:s få standardalternativ. GraphHopper custom model ger ett rimligt MVP-steg mot lugnare rutter. Hetzner CPX32 är billigare och mer förutsägbart än GraphHopper Cloud/Render/Railway, men utan att förlita sig på osäkra free-tier VPS:er.
+**Varför:** Vi behöver kunna påverka vägkostnad, först för `Höga hastigheter` och senare även trafikintensitet, stadstrafik, broar och tunnlar, utan att vara låsta till publika OSRM:s få standardalternativ. GraphHopper custom model ger ett rimligt MVP-steg mot lugnare rutter. Hetzner CPX32 är billigare och mer förutsägbart än GraphHopper Cloud/Render/Railway, men utan att förlita sig på osäkra free-tier VPS:er.
 
 **Övervägt:** GraphHopper Cloud — snabbast operativt men dyrare och mindre kontroll över kostnad över tid. Oracle Always Free — tekniskt möjlig men olämplig som MVP-ryggrad p.g.a. kapacitets-/reclaim-risk. pgRouting/egen graf — maximal kontroll men för stort steg nu; kräver egen hantering av routbart vägnät, svängregler, enkelriktat, prestanda och uppdateringar.
 

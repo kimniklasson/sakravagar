@@ -19,6 +19,7 @@ Praktisk startguide för nya sessioner och nya utvecklare.
 corepack enable
 pnpm install
 cp .env.example .env
+cp web/.env.example web/.env.local
 pnpm web
 ```
 
@@ -65,7 +66,10 @@ När ett beteende ändras:
 
 ## Viktiga ytor
 
-- `web/components/Map/Map.tsx` — UI-state, routeplanner, livebox och interaktion.
+- `web/components/Map/Map.tsx` — MapLibre-init, orchestration och karta/UI-interaktion.
+- `web/components/Map/RoutePlannerBox.tsx` — Från/Till, geocoding-resultat och undvik-pills.
+- `web/components/Map/RouteAlternativesTray.tsx` — ruttkort, delning, Google Maps och feedback.
+- `web/components/Map/routeModel.ts` — route-typer, ranking, labels och session-cache.
 - `web/components/Map/layers.ts` — MapLibre-källor/lager, bbox-laddning och popup.
 - `web/app/api/route/route.ts` — GraphHopper/OSRM, kandidater och `avoidScores`.
 - `db/migrations/` — schema, RPC:er, grants och cron.
