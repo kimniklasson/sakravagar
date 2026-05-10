@@ -102,6 +102,8 @@ const ROUTE_ENDPOINT_SOURCE_ID = "route-endpoints";
 const ROUTE_ENDPOINT_LAYER_ID = "route-endpoint-symbols";
 const ROUTE_START_IMAGE_ID = "route-start-marker";
 const ROUTE_END_IMAGE_ID = "route-end-marker";
+const ROUTE_DRAG_HOLD_MS = 180;
+const ROUTE_DRAG_CANCEL_PX = 4;
 const ROUTE_ANNOTATION_LINE_SOURCE_ID = "route-annotation-lines";
 const ROUTE_ANNOTATION_POINT_SOURCE_ID = "route-annotation-points";
 const ROUTE_HIGH_SPEED_LAYER_ID = "route-high-speed-lines";
@@ -966,6 +968,14 @@ export function addRouteLayer(
       anchorCoordinates: [number, number][];
       segmentIndex: number;
     } | null = null;
+    let pendingDrag: {
+      routeId: string;
+      coordinates: [number, number][];
+      anchorCoordinates: [number, number][];
+      segmentIndex: number;
+      startPoint: maplibregl.Point;
+      timeoutId: number;
+    } | null = null;
     let hasDragged = false;
 
     const closeHoverPopup = () => {
@@ -986,6 +996,15 @@ export function addRouteLayer(
       routeDotMarker = null;
     };
 
+    const cancelPendingDrag = () => {
+      if (!pendingDrag) return;
+      window.clearTimeout(pendingDrag.timeoutId);
+      pendingDrag = null;
+      map.off("mousemove", handlePendingRouteDragMove);
+      map.off("mouseup", handlePendingRouteDragEnd);
+      removeRouteDotMarker();
+    };
+
     const cleanupDrag = () => {
       map.off("mousemove", handleRouteDragMove);
       removeRouteDotMarker();
@@ -993,6 +1012,38 @@ export function addRouteLayer(
       hasDragged = false;
       map.dragPan.enable();
       map.getCanvas().style.cursor = "";
+    };
+
+    const promotePendingDrag = () => {
+      const pending = pendingDrag;
+      if (!pending) return;
+      pendingDrag = null;
+      map.off("mousemove", handlePendingRouteDragMove);
+      map.off("mouseup", handlePendingRouteDragEnd);
+      dragging = {
+        routeId: pending.routeId,
+        coordinates: pending.coordinates,
+        anchorCoordinates: pending.anchorCoordinates,
+        segmentIndex: pending.segmentIndex,
+      };
+      hasDragged = false;
+      map.dragPan.disable();
+      map.getCanvas().style.cursor = "pointer";
+      map.on("mousemove", handleRouteDragMove);
+      map.once("mouseup", handleRouteDragEnd);
+    };
+
+    const handlePendingRouteDragMove = (event: maplibregl.MapMouseEvent) => {
+      if (!pendingDrag) return;
+      const delta = Math.hypot(
+        event.point.x - pendingDrag.startPoint.x,
+        event.point.y - pendingDrag.startPoint.y,
+      );
+      if (delta > ROUTE_DRAG_CANCEL_PX) cancelPendingDrag();
+    };
+
+    const handlePendingRouteDragEnd = () => {
+      cancelPendingDrag();
     };
 
     const handleRouteDragMove = (event: maplibregl.MapMouseEvent) => {
@@ -1037,7 +1088,7 @@ export function addRouteLayer(
       })
         .setLngLat(event.lngLat)
         .setHTML(
-          '<div class="route-drag-popup-body">Dra för att ändra rutt</div>',
+          '<div class="route-drag-popup-body">Håll och dra för att ändra rutt</div>',
         )
         .addTo(map);
     });
@@ -1065,20 +1116,19 @@ export function addRouteLayer(
       const target = closestRoutePoint(map, coordinates, event.point);
       if (typeof routeId !== "string" || coordinates.length < 2 || !target) return;
 
-      event.preventDefault();
+      cancelPendingDrag();
       closeHoverPopup();
-      dragging = {
+      pendingDrag = {
         routeId,
         coordinates,
         anchorCoordinates: routeDragAnchorCoordinates(coordinates, target.segmentIndex, target.lngLat),
         segmentIndex: target.segmentIndex,
+        startPoint: event.point,
+        timeoutId: window.setTimeout(promotePendingDrag, ROUTE_DRAG_HOLD_MS),
       };
-      hasDragged = false;
-      map.dragPan.disable();
-      map.getCanvas().style.cursor = "pointer";
       ensureRouteDotMarker(event.lngLat);
-      map.on("mousemove", handleRouteDragMove);
-      map.once("mouseup", handleRouteDragEnd);
+      map.on("mousemove", handlePendingRouteDragMove);
+      map.on("mouseup", handlePendingRouteDragEnd);
     });
   }
 
