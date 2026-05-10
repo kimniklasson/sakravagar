@@ -1224,6 +1224,54 @@
   white-space: nowrap;
 }
 
+.routeAlternativeDistanceGroup {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  justify-self: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.routeAlternativeNoticeIcon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  transform: translateY(1px);
+}
+
+.routeAlternativeNoticeIconImage {
+  display: block;
+  width: 13px;
+  height: 13px;
+  pointer-events: none;
+}
+
+.routeAlternativeNoticeTooltip {
+  position: fixed;
+  z-index: 80;
+  width: max-content;
+  max-width: 220px;
+  transform: translate(-50%, -100%);
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--color-white);
+  color: #111111;
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
 .routeAlternativeMetrics {
   composes: type-m-small from global;
   display: flex;
@@ -1266,6 +1314,12 @@
   background: #4DA3FF;
 }
 
+.routeAlternativeMetricIcon_cityTraffic {
+  height: 3px;
+  border-radius: 999px;
+  background: #FFD166;
+}
+
 .routeAlternativeMetricIcon_bridges,
 .routeAlternativeMetricIcon_tunnels {
   background: repeating-linear-gradient(
@@ -1285,21 +1339,6 @@
     transparent 1.5px,
     transparent 3px
   );
-}
-
-.routeAlternativeMetricIcon_disturbances {
-  width: 0;
-  height: 0;
-  border-right: 4px solid transparent;
-  border-bottom: 8px solid #F27A3F;
-  border-left: 4px solid transparent;
-}
-
-.routeAlternativeMetricIcon_accidentHistory {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #FF2F00;
 }
 
 .routeAlternativeMetricIconMuted {

@@ -1,6 +1,6 @@
 # Trafiksäkerhets-app — projektanteckningar
 
-Senast uppdaterad: 2026-05-01
+Senast uppdaterad: 2026-05-10
 
 ## Idén
 
@@ -8,9 +8,9 @@ Webbapp som visar historisk olycksdata på svenska vägar för att hjälpa nerv�
 
 ## Nuvarande inriktning (efter validering)
 
-**MVP = kartbaserad risk/trygghetsvy + ruttplanerare med första self-hostade trygghetsrouting.**
+**MVP = kartbaserade kontrollager + ruttplanerare med första self-hostade trygghetsrouting.**
 
-Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk normaliserad mot trafikflöde. Ruttplaneraren har geocoding, self-hostad GraphHopper-routing och "Undvik om möjligt"-filter. Höga hastigheter, broar och tunnlar påverkar kandidatgenereringen via GraphHopper custom model, och olyckshistorik/störningar skickas in som dynamiska penalty zones när de filtren är aktiva.
+Visa historiska olyckor, pågående olyckor, trafikflöde, trafikstörningar och höga hastigheter som kontrollager. Ruttplaneraren har geocoding, self-hostad GraphHopper-routing och "Undvik om möjligt"-filter. Höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar påverkar kandidatgenereringen via GraphHopper custom model. Olyckor och störningar visas som lager/route-notices, inte som planeringsfilter. Alla tunga kartlager ska skyddas med bbox-area, Sverige-bounds och SQL/RPC-limit.
 
 ## Validering — vad vi verifierat
 
@@ -64,9 +64,9 @@ Visa historiska olyckor, pågående olyckor och vägsegment färgade efter risk 
 
 1. Frontend cleanup utan UX-ändring: `Map.tsx` är delvis uppdelad i mindre route-/UI-moduler. Kvar som möjliga rena extraktioner: `layers.ts`, `Map.module.css`, mer route state/hook-logik och `/api/route`.
 2. A11y avvaktar: route suggestions, InfoBox/fokus och övriga UX-/designnära tillgänglighetsfixar ska tas senare efter bekräftade produktbeslut.
-3. Route-card UX senare: ruttfeedback/betyg för kalibreringsunderlag och delningskontroller för app-URL samt Google Maps-länk.
-4. Följ upp GraphHopper-fanout i prod-loggar när fler verkliga sträckor testas, särskilt `highSpeed`, `trafficIntensity` och kombinationer.
-5. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg.
+3. Route-card UX senare: snabborsaker vid negativ feedback och fortsatt kalibreringsunderlag från verkliga rutter.
+4. Följ upp GraphHopper-fanout i prod-loggar när fler verkliga sträckor testas, särskilt `highSpeed`, `trafficIntensity`, `cityTraffic` och kombinationer.
+5. Senare: systematisk routingkalibrering på 10-20 verkliga sträckor och filterkombinationer, inklusive dokumenterade fall för korta/långa rutter, flera samtidiga undvik-filter och jämförelse mot användarens upplevda "lugnaste" väg. Stadstrafik behöver extra kalibrering eftersom den bygger på stadszoner + vägklass/hastighet, inte GraphHopper `urban_density`.
 6. Låt olyckshistoriken växa; riskskalan blir mer meningsfull efter månader snarare än dagar.
 
 ## Potentiella framtida datalager

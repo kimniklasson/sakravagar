@@ -15,7 +15,6 @@ import {
   addLargeRoadsLayer,
   addTrafficFlowLayer,
   addPopupHandler,
-  addRiskLayer,
   refreshDisturbancesLayer,
   refreshTrafficFlowLayer,
   setEventsLayerVisible,
@@ -149,32 +148,38 @@ function compactRouteForSnapshot(route: RouteLine): RouteLine {
     ...route,
     geometry: compactLineString(route.geometry, SHARED_ROUTE_MAX_COORDINATES),
     annotations: {
-      highSpeed: route.annotations.highSpeed
+      highSpeed: (route.annotations.highSpeed ?? [])
         .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
         .map((segment) => ({
           ...segment,
           geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
         })),
-      trafficIntensity: route.annotations.trafficIntensity
+      trafficIntensity: (route.annotations.trafficIntensity ?? [])
         .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
         .map((segment) => ({
           ...segment,
           geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
         })),
-      bridges: route.annotations.bridges
+      cityTraffic: (route.annotations.cityTraffic ?? [])
         .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
         .map((segment) => ({
           ...segment,
           geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
         })),
-      tunnels: route.annotations.tunnels
+      bridges: (route.annotations.bridges ?? [])
         .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
         .map((segment) => ({
           ...segment,
           geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
         })),
-      disturbances: route.annotations.disturbances.slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
-      accidentHistory: route.annotations.accidentHistory.slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
+      tunnels: (route.annotations.tunnels ?? [])
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
+      disturbances: (route.annotations.disturbances ?? []).slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
+      liveAccidents: (route.annotations.liveAccidents ?? []).slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
     },
   };
 }
@@ -264,11 +269,10 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   const [liveCount, setLiveCount] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("risk");
-  const [accidentsRiskOn, setAccidentsRiskOn] = useState(false);
-  const [adtOn, setAdtOn] = useState(false);
+  const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("accidents");
+  const [accidentsOn, setAccidentsOn] = useState(false);
+  const [trafficOn, setTrafficOn] = useState(false);
   const [disturbancesOn, setDisturbancesOn] = useState(false);
-  const [trafficFlowOn, setTrafficFlowOn] = useState(false);
   const [largeRoadsOn, setLargeRoadsOn] = useState(false);
   const [atUserLocation, setAtUserLocation] = useState(false);
   const [routeStops, setRouteStops] = useState<RouteStop[]>(initialRouteStops);
@@ -307,7 +311,6 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   const routeCompareTimerRef = useRef<number | null>(null);
   const shouldRevealSelectedRouteRef = useRef(false);
   const layerCtrlRef = useRef<{
-    risk?: LayerController;
     adt?: LayerController;
     disturbances?: LayerController;
     trafficFlow?: LayerController;
@@ -462,18 +465,16 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     map.on("load", () => {
       layerCtrlRef.current.largeRoads = addLargeRoadsLayer(map);
       layerCtrlRef.current.adt = addAdtLayer(map);
-      layerCtrlRef.current.risk = addRiskLayer(map);
-      layerCtrlRef.current.risk.setVisible(accidentsRiskOn);
-      layerCtrlRef.current.adt.setVisible(adtOn);
+      layerCtrlRef.current.adt.setVisible(trafficOn);
       layerCtrlRef.current.largeRoads.setVisible(largeRoadsOn);
       void addEventsLayer(map)
         .then(() => {
           void refreshLiveCount();
-          setEventsLayerVisible(map, accidentsRiskOn);
+          setEventsLayerVisible(map, accidentsOn);
           layerCtrlRef.current.disturbances = addDisturbancesLayer(map);
           layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
           layerCtrlRef.current.trafficFlow = addTrafficFlowLayer(map);
-          layerCtrlRef.current.trafficFlow.setVisible(trafficFlowOn);
+          layerCtrlRef.current.trafficFlow.setVisible(trafficOn);
           addRouteLayer(
             map,
             selectRouteById,
@@ -510,22 +511,18 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   }, []);
 
   useEffect(() => {
-    layerCtrlRef.current.risk?.setVisible(accidentsRiskOn);
     const map = mapRef.current;
-    if (map && mapLoadedRef.current) setEventsLayerVisible(map, accidentsRiskOn);
-  }, [accidentsRiskOn]);
+    if (map && mapLoadedRef.current) setEventsLayerVisible(map, accidentsOn);
+  }, [accidentsOn]);
 
   useEffect(() => {
-    layerCtrlRef.current.adt?.setVisible(adtOn);
-  }, [adtOn]);
+    layerCtrlRef.current.adt?.setVisible(trafficOn);
+    layerCtrlRef.current.trafficFlow?.setVisible(trafficOn);
+  }, [trafficOn]);
 
   useEffect(() => {
     layerCtrlRef.current.disturbances?.setVisible(disturbancesOn);
   }, [disturbancesOn]);
-
-  useEffect(() => {
-    layerCtrlRef.current.trafficFlow?.setVisible(trafficFlowOn);
-  }, [trafficFlowOn]);
 
   useEffect(() => {
     layerCtrlRef.current.largeRoads?.setVisible(largeRoadsOn);
@@ -1429,7 +1426,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       return next;
     });
   };
-  const handleAccidentsRiskToggle = () => setAccidentsRiskOn((on) => !on);
+  const handleAccidentsToggle = () => setAccidentsOn((on) => !on);
   const handleFocusLiveEvents = () => {
     const map = mapRef.current;
     if (!map) return;
@@ -1598,24 +1595,18 @@ export default function Map({ sharedRouteSlug }: MapProps) {
         />
         <div className={styles.layerMenuItems}>
           <LayerIconButton
-            label="Olyckor och risk"
+            label="Olyckor"
             icon="accidents"
-            on={accidentsRiskOn}
-            onToggle={handleAccidentsRiskToggle}
+            on={accidentsOn}
+            onToggle={handleAccidentsToggle}
             badgeCount={liveCount}
             onBadgeClick={handleFocusLiveEvents}
           />
           <LayerIconButton
             label="Trafikflöde"
             icon="flow"
-            on={adtOn}
-            onToggle={() => setAdtOn((v) => !v)}
-          />
-          <LayerIconButton
-            label="Liveflöde (storstad)"
-            icon="live"
-            on={trafficFlowOn}
-            onToggle={() => setTrafficFlowOn((v) => !v)}
+            on={trafficOn}
+            onToggle={() => setTrafficOn((v) => !v)}
           />
           <LayerIconButton
             label="Trafikstörningar"
@@ -1635,7 +1626,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   );
 }
 
-type LayerIconName = "layers" | "help" | "close" | "accidents" | "flow" | "live" | "disturbances" | "speed";
+type LayerIconName = "layers" | "help" | "close" | "accidents" | "flow" | "disturbances" | "speed";
 
 function LayerIconButton({
   label,

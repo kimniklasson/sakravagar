@@ -12,5 +12,6 @@ out/
 .turbo
 coverage/
 .claude/
+.playwright-cli/
 tsconfig.tsbuildinfo
 **/tsconfig.tsbuildinfo

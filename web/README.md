@@ -1,6 +1,6 @@
 # web
 
-Next.js App Router + MapLibre GL. Visar risk-, flödes-, störnings-, liveflödes- och ruttlager för Säkravägar.
+Next.js App Router + MapLibre GL. Visar olycks-, flödes-, störnings-, hastighets- och ruttlager för Säkravägar.
 
 ## Köra lokalt
 
@@ -67,7 +67,7 @@ web/
 - `/api/route` — routingproxy. Använder GraphHopper om env finns, annars OSRM.
 - `/api/segment` — popupdetaljer för vägsegment.
 
-Alla tunga bbox-rutter ska ha både API-side area guard och SQL-side limit.
+Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit. Klienten klipper eller skippar lager-bboxar utanför svenska datagränser innan den gör request.
 
 ## Routeplanner
 
@@ -75,14 +75,13 @@ Ruttplaneraren bor i `components/Map/Map.tsx`. Den geocodar `Från`/`Till`, rita
 
 Aktiva "Undvik om möjligt"-filter:
 
-- `Vägar med olyckshistorik`
 - `Höga hastigheter`
 - `Trafikintensiva vägar`
-- `Störningar (kö/vägarbeten)`
+- `Stadstrafik`
 - `Broar`
 - `Tunnlar`
 
-GraphHopper påverkar höga hastigheter, broar och tunnlar via custom model. Broar/tunnlar exponeras med `road_environment` path details. Olyckshistorik, trafikintensiva vägar och störningar skickas också in som dynamiska penalty zones när deras filter är aktiva, och poängsätts efteråt för ranking/exponering i UI:t. Trafikintensitet använder ÅDT som bas och liveflöde som förstärkning där det finns.
+GraphHopper påverkar höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar via custom model. Broar/tunnlar exponeras med `road_environment` path details. Trafikintensitet använder ÅDT som bas och liveflöde som förstärkning där det finns. Stadstrafik använder statiska stadszoner i GraphHopper custom model och `road_class`/`max_speed` path details, eftersom GraphHopper-instansen inte exponerar `urban_density`. Olyckor och trafikstörningar är kontrollager/route-notices, inte planeringsfilter.
 
 ## Byta visualiseringstyp
 

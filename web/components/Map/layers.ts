@@ -62,6 +62,12 @@ const SWEDEN_EVENTS_BBOX: Bbox = {
   east: 24.5,
   north: 69.5,
 };
+const SWEDEN_LAYER_BBOX: Bbox = {
+  west: 9,
+  south: 54,
+  east: 25,
+  north: 70,
+};
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
@@ -100,6 +106,7 @@ const ROUTE_ANNOTATION_LINE_SOURCE_ID = "route-annotation-lines";
 const ROUTE_ANNOTATION_POINT_SOURCE_ID = "route-annotation-points";
 const ROUTE_HIGH_SPEED_LAYER_ID = "route-high-speed-lines";
 const ROUTE_TRAFFIC_INTENSITY_LAYER_ID = "route-traffic-intensity-lines";
+const ROUTE_CITY_TRAFFIC_LAYER_ID = "route-city-traffic-lines";
 const ROUTE_BRIDGE_LAYER_ID = "route-bridge-lines";
 const ROUTE_TUNNEL_LAYER_ID = "route-tunnel-lines";
 const ROUTE_DISTURBANCE_LAYER_ID = "route-disturbance-points";
@@ -108,10 +115,11 @@ const ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID = "route-disturbance-triangle";
 const ROUTE_ANNOTATION_COLORS = {
   highSpeed: "#FF8C8C",
   trafficIntensity: "#4DA3FF",
+  cityTraffic: "#FFD166",
   bridges: "#F23FC8",
   tunnels: "#FF2F00",
   disturbances: "#F27A3F",
-  accidentHistory: "#FF2F00",
+  liveAccidents: "#FF2F00",
 };
 
 // Vid zoom 8 är viewporten ~4° bred i Sverige; padded blir den ~6° och en
@@ -122,6 +130,7 @@ const DISTURBANCE_MIN_ZOOM = NVDB_MIN_ZOOM;
 const ADT_TILE_DEG = 0.6;
 const ADT_TILE_PADDING = 0.2;
 const ADT_MAX_CONCURRENT_TILES = 8;
+const ADT_MAX_VIEWPORT_AREA_DEG2 = 8;
 
 // Hastighetslagret är betydligt glesare än Risk/ÅDT och behöver vara synligt
 // tidigare för att fungera som orienteringslager när kartan är utzoomad.
@@ -129,6 +138,7 @@ const LARGE_ROADS_MIN_ZOOM = 8;
 const LARGE_ROADS_TILE_DEG = 0.75;
 const LARGE_ROADS_TILE_PADDING = 0.45;
 const LARGE_ROADS_MAX_CONCURRENT_TILES = 6;
+const LARGE_ROADS_MAX_VIEWPORT_AREA_DEG2 = 20;
 const LARGE_ROADS_BADGE_MIN_LINE_PX = 72;
 const LARGE_ROADS_SPEED_RUN_MIN_LENGTH_M = 500;
 const LARGE_ROADS_SPEED_CONNECT_DISTANCE_M = 120;
@@ -361,7 +371,10 @@ export async function addEventsLayer(
   map: MapLibreMap,
   opts: { since?: string | null } = {},
 ): Promise<{ liveCount: number }> {
-  const params = new URLSearchParams({ bbox: bboxToParam(mapBoundsBbox(map, 0.2)) });
+  const bbox = mapBoundsBbox(map, 0.2);
+  if (!bbox) return { liveCount: 0 };
+
+  const params = new URLSearchParams({ bbox: bboxToParam(bbox) });
   if (opts.since) params.set("since", opts.since);
   const url = `/api/events?${params.toString()}`;
   const res = await fetch(url);
@@ -824,6 +837,20 @@ export function addRouteLayer(
   );
   map.addLayer(
     {
+      id: ROUTE_CITY_TRAFFIC_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "cityTraffic"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.cityTraffic,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.8, 12, 3.2, 16, 4.4],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
       id: ROUTE_BRIDGE_LAYER_ID,
       type: "line",
       source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
@@ -872,9 +899,9 @@ export function addRouteLayer(
       id: ROUTE_ACCIDENT_LAYER_ID,
       type: "circle",
       source: ROUTE_ANNOTATION_POINT_SOURCE_ID,
-      filter: ["==", ["get", "kind"], "accidentHistory"],
+      filter: ["==", ["get", "kind"], "liveAccidents"],
       paint: {
-        "circle-color": ROUTE_ANNOTATION_COLORS.accidentHistory,
+        "circle-color": ROUTE_ANNOTATION_COLORS.liveAccidents,
         "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.5, 12, 4, 16, 6],
         "circle-stroke-color": "rgba(17, 17, 17, 0.9)",
         "circle-stroke-width": 1.5,
@@ -1064,6 +1091,7 @@ export function addRouteLayer(
         ROUTE_PRIMARY_CASING_LAYER_ID,
         ROUTE_PRIMARY_LAYER_ID,
         ROUTE_TRAFFIC_INTENSITY_LAYER_ID,
+        ROUTE_CITY_TRAFFIC_LAYER_ID,
         ROUTE_HIGH_SPEED_LAYER_ID,
         ROUTE_BRIDGE_LAYER_ID,
         ROUTE_TUNNEL_LAYER_ID,
@@ -1118,16 +1146,17 @@ export function setRouteLayerData(
   const endCoordinate = selectedCoordinates.at(-1);
   const lineAnnotations = selectedRoute?.annotations
     ? [
-        ...(visibleAnnotations.highSpeed ? selectedRoute.annotations.highSpeed : []),
-        ...(visibleAnnotations.trafficIntensity ? selectedRoute.annotations.trafficIntensity : []),
-        ...(visibleAnnotations.bridges ? selectedRoute.annotations.bridges : []),
-        ...(visibleAnnotations.tunnels ? selectedRoute.annotations.tunnels : []),
+        ...(visibleAnnotations.highSpeed ? selectedRoute.annotations.highSpeed ?? [] : []),
+        ...(visibleAnnotations.trafficIntensity ? selectedRoute.annotations.trafficIntensity ?? [] : []),
+        ...(visibleAnnotations.cityTraffic ? selectedRoute.annotations.cityTraffic ?? [] : []),
+        ...(visibleAnnotations.bridges ? selectedRoute.annotations.bridges ?? [] : []),
+        ...(visibleAnnotations.tunnels ? selectedRoute.annotations.tunnels ?? [] : []),
       ]
     : [];
   const pointAnnotations = selectedRoute?.annotations
     ? [
-        ...(visibleAnnotations.disturbances ? selectedRoute.annotations.disturbances : []),
-        ...(visibleAnnotations.accidentHistory ? selectedRoute.annotations.accidentHistory : []),
+        ...(selectedRoute.annotations.disturbances ?? []),
+        ...(selectedRoute.annotations.liveAccidents ?? []),
       ]
     : [];
 
@@ -1267,7 +1296,14 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
 }
 
 export async function refreshDisturbancesLayer(map: MapLibreMap): Promise<{ disturbanceCount: number }> {
-  const params = new URLSearchParams({ bbox: bboxToParam(mapBoundsBbox(map, 0.2)) });
+  const bbox = mapBoundsBbox(map, 0.2);
+  if (!bbox) {
+    const src = map.getSource(DISTURBANCE_SOURCE_ID) as GeoJSONSource | undefined;
+    src?.setData({ type: "FeatureCollection", features: [] });
+    return { disturbanceCount: 0 };
+  }
+
+  const params = new URLSearchParams({ bbox: bboxToParam(bbox) });
   const res = await fetch(`/api/disturbances?${params.toString()}`);
   if (!res.ok) {
     console.error("failed to fetch disturbances", await res.text());
@@ -1407,15 +1443,12 @@ export async function refreshTrafficFlowLayer(
   if (!bbox && map.getZoom() < TRAFFIC_FLOW_MIN_ZOOM) {
     return { trafficFlowCount: 0 };
   }
-  const targetBbox = bbox ?? (() => {
-    const b = map.getBounds();
-    return {
-      west: b.getWest(),
-      south: b.getSouth(),
-      east: b.getEast(),
-      north: b.getNorth(),
-    };
-  })();
+  const targetBbox = bbox ? clipBboxToLayerBounds(bbox) : mapBoundsBbox(map);
+  if (!targetBbox || bboxArea(targetBbox) > 30) {
+    const src = map.getSource(TRAFFIC_FLOW_SOURCE_ID) as GeoJSONSource | undefined;
+    src?.setData({ type: "FeatureCollection", features: [] });
+    return { trafficFlowCount: 0 };
+  }
   const res = await fetch(`/api/traffic-flow?bbox=${bboxToParam(targetBbox)}`);
   if (!res.ok) {
     console.warn("failed to fetch traffic flow", await res.text());
@@ -1502,6 +1535,43 @@ function toCoordinate2D(position: GeoJSON.Position | undefined): Coordinate2D | 
   return typeof lng === "number" && typeof lat === "number" ? [lng, lat] : null;
 }
 
+function bboxArea(b: Bbox): number {
+  return Math.max(0, b.east - b.west) * Math.max(0, b.north - b.south);
+}
+
+function finiteBbox(b: Bbox): boolean {
+  return (
+    Number.isFinite(b.west) &&
+    Number.isFinite(b.south) &&
+    Number.isFinite(b.east) &&
+    Number.isFinite(b.north) &&
+    b.west < b.east &&
+    b.south < b.north
+  );
+}
+
+function clipBboxToLayerBounds(b: Bbox): Bbox | null {
+  if (!finiteBbox(b)) return null;
+  const clipped: Bbox = {
+    west: Math.max(SWEDEN_LAYER_BBOX.west, b.west),
+    south: Math.max(SWEDEN_LAYER_BBOX.south, b.south),
+    east: Math.min(SWEDEN_LAYER_BBOX.east, b.east),
+    north: Math.min(SWEDEN_LAYER_BBOX.north, b.north),
+  };
+  return finiteBbox(clipped) ? clipped : null;
+}
+
+function paddedBbox(b: Bbox, padding: number): Bbox {
+  const padW = (b.east - b.west) * padding;
+  const padH = (b.north - b.south) * padding;
+  return {
+    west: b.west - padW,
+    south: b.south - padH,
+    east: b.east + padW,
+    north: b.north + padH,
+  };
+}
+
 function createBboxLoader(
   map: MapLibreMap,
   opts: {
@@ -1533,25 +1603,12 @@ function createBboxLoader(
       needsRefresh = true;
       return;
     }
-    const b = map.getBounds();
-    const viewport: Bbox = {
-      west: b.getWest(),
-      south: b.getSouth(),
-      east: b.getEast(),
-      north: b.getNorth(),
-    };
+    const viewport = mapBoundsBbox(map);
+    if (!viewport) return;
     if (cachedBbox && contains(cachedBbox, viewport)) return;
 
-    const padW = (viewport.east - viewport.west) * BBOX_PADDING;
-    const padH = (viewport.north - viewport.south) * BBOX_PADDING;
-    const padded: Bbox = {
-      west: viewport.west - padW,
-      south: viewport.south - padH,
-      east: viewport.east + padW,
-      north: viewport.north + padH,
-    };
-    const area = (padded.east - padded.west) * (padded.north - padded.south);
-    if (area > MAX_BBOX_AREA_DEG2) return;
+    const padded = clipBboxToLayerBounds(paddedBbox(viewport, BBOX_PADDING));
+    if (!padded || bboxArea(padded) > MAX_BBOX_AREA_DEG2) return;
 
     inFlight = true;
     try {
@@ -1582,7 +1639,7 @@ function bboxToParam(b: Bbox): string {
   return [b.west, b.south, b.east, b.north].map((n) => n.toFixed(4)).join(",");
 }
 
-function mapBoundsBbox(map: MapLibreMap, padding = 0): Bbox {
+function mapBoundsBbox(map: MapLibreMap, padding = 0): Bbox | null {
   const b = map.getBounds();
   const viewport: Bbox = {
     west: b.getWest(),
@@ -1590,14 +1647,8 @@ function mapBoundsBbox(map: MapLibreMap, padding = 0): Bbox {
     east: b.getEast(),
     north: b.getNorth(),
   };
-  const padW = (viewport.east - viewport.west) * padding;
-  const padH = (viewport.north - viewport.south) * padding;
-  return {
-    west: Math.max(-180, viewport.west - padW),
-    south: Math.max(-90, viewport.south - padH),
-    east: Math.min(180, viewport.east + padW),
-    north: Math.min(90, viewport.north + padH),
-  };
+  const padded = padding > 0 ? paddedBbox(viewport, padding) : viewport;
+  return clipBboxToLayerBounds(padded);
 }
 
 function adtTilesForBbox(b: Bbox, center: { lng: number; lat: number }): AdtTile[] {
@@ -1957,21 +2008,11 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     if (!enabled) return;
     if (map.getZoom() < NVDB_MIN_ZOOM) return;
 
-    const b = map.getBounds();
-    const viewport: Bbox = {
-      west: b.getWest(),
-      south: b.getSouth(),
-      east: b.getEast(),
-      north: b.getNorth(),
-    };
-    const padW = (viewport.east - viewport.west) * ADT_TILE_PADDING;
-    const padH = (viewport.north - viewport.south) * ADT_TILE_PADDING;
-    const padded: Bbox = {
-      west: viewport.west - padW,
-      south: viewport.south - padH,
-      east: viewport.east + padW,
-      north: viewport.north + padH,
-    };
+    const viewport = mapBoundsBbox(map);
+    if (!viewport) return;
+    const padded = clipBboxToLayerBounds(paddedBbox(viewport, ADT_TILE_PADDING));
+    if (!padded || bboxArea(padded) > ADT_MAX_VIEWPORT_AREA_DEG2) return;
+
     const center = map.getCenter();
     const nextTiles = adtTilesForBbox(padded, center).filter(
       (tile) => !fetchedTiles.has(tile.key) &&
@@ -2154,21 +2195,11 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
     if (map.getZoom() < LARGE_ROADS_MIN_ZOOM) return;
     updateBadgeSource();
 
-    const b = map.getBounds();
-    const viewport: Bbox = {
-      west: b.getWest(),
-      south: b.getSouth(),
-      east: b.getEast(),
-      north: b.getNorth(),
-    };
-    const padW = (viewport.east - viewport.west) * LARGE_ROADS_TILE_PADDING;
-    const padH = (viewport.north - viewport.south) * LARGE_ROADS_TILE_PADDING;
-    const padded: Bbox = {
-      west: viewport.west - padW,
-      south: viewport.south - padH,
-      east: viewport.east + padW,
-      north: viewport.north + padH,
-    };
+    const viewport = mapBoundsBbox(map);
+    if (!viewport) return;
+    const padded = clipBboxToLayerBounds(paddedBbox(viewport, LARGE_ROADS_TILE_PADDING));
+    if (!padded || bboxArea(padded) > LARGE_ROADS_MAX_VIEWPORT_AREA_DEG2) return;
+
     const center = map.getCenter();
 
     const nextTiles: LargeRoadTile[] = [];
@@ -2318,24 +2349,22 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// Click → popup för segment, olyckor och aktuella live-lager.
+// Click → popup för olyckor och aktuella live-lager.
 //
-// Prioritetsordning vid klick: olyckor → störningar → trafikläge → risk.
+// Prioritetsordning vid klick: olyckor → störningar → trafikläge.
 // Eventcirklarna ligger överst i render-stacken så ett klick rakt på en
 // punkt vinner; klick lite vid sidan om faller igenom till segmentet.
 // Osynliga lager filtreras automatiskt bort eftersom queryRenderedFeatures
 // bara returnerar visible features.
 //
 // Event-popup: all data finns redan på feature.properties, ingen fetch behövs.
-// Segment-popup: behöver RPC-anrop, så vi visar "Laddar…" först.
-//
 // Cursor → pointer på hover så användaren ser att lagren är klickbara.
 //
 // Popupar renderas via setHTML — alla värden från databasen passerar
 // escapeHtml() eftersom de kommer från Trafikverkets API och kan innehålla
 // godtyckliga strängar.
 export function addPopupHandler(map: MapLibreMap): void {
-  const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID];
+  const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID].filter((id) => map.getLayer(id));
   const disturbanceLayerIds = [DISTURBANCE_LAYER_ID, DISTURBANCE_HIT_LAYER_ID];
   const trafficFlowLayerIds = [TRAFFIC_FLOW_LAYER_ID, TRAFFIC_FLOW_HIT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ — klick går
@@ -2357,7 +2386,7 @@ export function addPopupHandler(map: MapLibreMap): void {
     const features = map.queryRenderedFeatures(e.point, { layers: allLayerIds });
     if (!features.length) return;
 
-    // Olyckor vinner alltid, därefter färska störningar, trafikläge och risksegment.
+    // Olyckor vinner alltid, därefter färska störningar och trafikläge.
     const eventFeature = features.find((f) => eventLayerIds.includes(f.layer.id));
     if (eventFeature) {
       openEventPopup(map, e.lngLat, eventFeature.properties);

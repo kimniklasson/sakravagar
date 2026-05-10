@@ -2,7 +2,7 @@
 
 import styles from "./Map.module.css";
 
-export type HelpSectionId = "risk" | "adt" | "trafficFlow" | "disturbances" | "largeRoads";
+export type HelpSectionId = "accidents" | "traffic" | "disturbances" | "largeRoads";
 
 type HelpLegendSwatch = {
   kind: "line" | "dot" | "pulse" | "square" | "triangle";
@@ -14,7 +14,7 @@ type HelpLegendItem = {
   swatch: HelpLegendSwatch;
 };
 
-type HelpSectionIcon = "accidents" | "flow" | "live" | "disturbances" | "speed";
+type HelpSectionIcon = "accidents" | "flow" | "disturbances" | "speed";
 
 type HelpSection = {
   id: HelpSectionId;
@@ -26,47 +26,31 @@ type HelpSection = {
 
 const helpSections: HelpSection[] = [
   {
-    id: "risk",
+    id: "accidents",
     icon: "accidents",
-    title: "Olyckor och risk",
+    title: "Olyckor",
     body: [
-      "Risk-lagret färgar vägsegment efter olyckor i relation till trafikmängd. En väg blir alltså inte starkare markerad bara för att många kör där, utan för att olyckorna är många i förhållande till hur trafikerad vägen är.",
-      "Här visas också historiska olyckor som ljusa punkter och, om de finns just nu, pågående olyckor som live-markeringar. Informationen ska hjälpa dig se mönster, inte förutsäga exakt vad som kommer hända.",
+      "Här visas historiska olyckor som ljusa punkter och, om de finns just nu, pågående olyckor som live-markeringar.",
+      "Lagret är tänkt som ett kontrollager. Det hjälper dig se mönster och aktuella händelser utan att göra en förenklad riskprognos.",
     ],
     legend: [
-      { label: "Lägre risk", swatch: { kind: "line", color: "#FFF382" } },
-      { label: "Medelrisk", swatch: { kind: "line", color: "#FFA54E" } },
-      { label: "Högre risk", swatch: { kind: "line", color: "#FF2F00" } },
       { label: "Registrerad olycka", swatch: { kind: "dot", color: "#FFFFFF" } },
       { label: "Pågående olycka", swatch: { kind: "pulse", color: "#FFFFFF" } },
     ],
   },
   {
-    id: "adt",
+    id: "traffic",
     icon: "flow",
-    title: "Trafikflöde (snitt)",
+    title: "Trafikflöde",
     body: [
-      "Det här lagret visar genomsnittlig trafikmängd, ÅDT, från NVDB via Lastkajen. ÅDT betyder ungefär hur många fordon som passerar ett vägavsnitt under ett genomsnittligt dygn.",
-      "Det är inte live-data, utan en visuell uppskattning av om en väg brukar vara lugnare eller mer trafikerad. Lagret är inte klickbart och används också när olycksrisken normaliseras mot hur många som faktiskt kör på vägen.",
+      "Lagret visar både genomsnittlig trafikmängd, ÅDT, från NVDB och liveflöde från Trafikverkets mätplatser där sådan data finns.",
+      "ÅDT är inte live-data, utan en uppskattning av hur trafikerad vägen brukar vara. Liveflödet har bäst täckning i större trafikområden och gäller mätplatser med närliggande segment.",
     ],
     legend: [
       { label: "Lägre genomsnittligt flöde", swatch: { kind: "line", color: "#C2DEFF" } },
       { label: "Högre genomsnittligt flöde", swatch: { kind: "line", color: "#0077FF" } },
-    ],
-  },
-  {
-    id: "trafficFlow",
-    icon: "live",
-    title: "Liveflöde (storstad)",
-    body: [
-      "Liveflödet kommer från Trafikverkets TrafficFlow-data. Det bygger på mätplatser och visar aktuellt flöde och snitthastighet där data finns.",
-      "Täckningen är bäst i större trafikområden, särskilt Stockholm och Göteborg. Färgen gäller mätplatsen och närliggande segment, inte nödvändigtvis hela vägen.",
-    ],
-    legend: [
-      { label: "Lugnt", swatch: { kind: "line", color: "#72F2D0" } },
-      { label: "Rullar på", swatch: { kind: "line", color: "#9FD86B" } },
-      { label: "Tätare trafik", swatch: { kind: "line", color: "#FFD166" } },
-      { label: "Långsamt", swatch: { kind: "line", color: "#FF7A3D" } },
+      { label: "Live: rullar på", swatch: { kind: "line", color: "#9FD86B" } },
+      { label: "Live: tätare/långsam trafik", swatch: { kind: "line", color: "#FF7A3D" } },
     ],
   },
   {
@@ -75,7 +59,7 @@ const helpSections: HelpSection[] = [
     title: "Trafikstörningar",
     body: [
       "Här visas pågående trafikstörningar från Trafikverket, till exempel vägarbeten, köer eller andra hinder.",
-      "De ingår inte i den historiska olycksrisken, men kan påverka ruttförslagen om du väljer att undvika störningar.",
+      "De används som kontrollager och visas också direkt på vald rutt när en föreslagen rutt passerar en pågående händelse.",
     ],
     legend: [
       { label: "Vägarbete", swatch: { kind: "triangle", color: "#999999" } },
@@ -87,7 +71,7 @@ const helpSections: HelpSection[] = [
     icon: "speed",
     title: "Höga hastigheter",
     body: [
-      "Lagret visar skyltade hastigheter 80 km/h och högre som diskreta badges. Linjerna lämnas till rutter, risk och trafikflöde, så du kan läsa hastigheten ovanpå en föreslagen rutt utan att kartan blir rörig.",
+      "Lagret visar skyltade hastigheter 80 km/h och högre som diskreta badges. Linjerna lämnas till rutter, olyckor och trafikflöde, så du kan läsa hastigheten ovanpå en föreslagen rutt utan att kartan blir rörig.",
       "Det betyder inte att vägen är farlig, bara att körmiljön kan kännas mer intensiv. Lägre hastigheter visas inte i det här lagret.",
     ],
     legend: [],
@@ -198,7 +182,6 @@ export function HelpPanel({
           <p>
             Olyckor, störningar och liveflöde hämtas från Trafikverket var 30:e minut.
             Kartan uppdaterar synliga lager ungefär varje minut medan sidan är öppen.
-            Riskvärden räknas om i databasen ungefär var 15:e minut.
           </p>
           <p>
             {collectionText} Pågående olyckor räknas som live när de har setts inom de senaste 90 minuterna.

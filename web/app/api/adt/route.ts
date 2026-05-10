@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam, serverErrorResponse } from "../_utils";
+import { jsonResponse, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +32,7 @@ export async function GET(req: Request) {
   const { bbox, error: bboxError } = parseBboxParam(searchParams.get("bbox"), {
     required: true,
     maxArea: 8,
+    bounds: SWEDEN_DATA_BOUNDS,
   });
   if (bboxError || !bbox) {
     return jsonResponse({ error: bboxError }, { status: 400 });

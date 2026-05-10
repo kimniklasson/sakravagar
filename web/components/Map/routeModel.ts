@@ -1,7 +1,7 @@
 import type { RouteLine } from "@/app/api/route/route";
 
 export type RouteStopSource = "manual" | "gps";
-export type RouteAvoidOption = "accidentHistory" | "highSpeed" | "trafficIntensity" | "disturbances" | "bridges" | "tunnels";
+export type RouteAvoidOption = "highSpeed" | "trafficIntensity" | "cityTraffic" | "bridges" | "tunnels";
 export type RouteAvoidState = Record<RouteAvoidOption, boolean>;
 export type RouteTimeBudget = number | "unlimited";
 export type RouteProvider = "graphhopper" | "osrm";
@@ -54,10 +54,9 @@ export const initialRouteStops: RouteStop[] = [
 ];
 
 export const initialRouteAvoids: RouteAvoidState = {
-  accidentHistory: false,
   highSpeed: false,
   trafficIntensity: false,
-  disturbances: false,
+  cityTraffic: false,
   bridges: false,
   tunnels: false,
 };
@@ -65,28 +64,25 @@ export const initialRouteAvoids: RouteAvoidState = {
 export const routeAvoidLabels: Record<RouteAvoidOption, string> = {
   highSpeed: "Höga hastigheter",
   trafficIntensity: "Trafikintensiva vägar",
+  cityTraffic: "Stadstrafik",
   bridges: "Broar",
   tunnels: "Tunnlar",
-  disturbances: "Störningar",
-  accidentHistory: "Olycksrisk",
 };
 
 export const routeAvoidTooltips: Record<RouteAvoidOption, string> = {
   highSpeed: "90-120 km/h",
   trafficIntensity: "Vägar som brukar ha mycket trafik",
+  cityTraffic: "Tät stadsmiljö och större leder",
   bridges: "Alla brotyper",
   tunnels: "Alla tunnlar",
-  disturbances: "Vägarbeten, köer m.m.",
-  accidentHistory: "Historiska olyckor",
 };
 
 const routeMetricLabels: Record<RouteAvoidOption, string> = {
   highSpeed: "Höga hastigheter",
   trafficIntensity: "Trafikintensiva vägar",
+  cityTraffic: "Stadstrafik",
   bridges: "Broar",
   tunnels: "Tunnlar",
-  disturbances: "Störningar",
-  accidentHistory: "Historisk olycksrisk",
 };
 
 export const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
@@ -94,10 +90,9 @@ export const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
 const routeAvoidOptionWeights: Record<RouteAvoidOption, number> = {
   highSpeed: 5,
   trafficIntensity: 4,
+  cityTraffic: 4,
   bridges: 1.6,
   tunnels: 1.6,
-  disturbances: 0.25,
-  accidentHistory: 0.2,
 };
 const routeAvoidSortTieEpsilon = 0.005;
 const routeExtraMinuteScoreDivisor = 240;
@@ -106,10 +101,8 @@ const routeDistanceTieMeters = 50;
 const routeHighSpeedAvoidedMeters = 50;
 const routeHighSpeedNearAvoidedMeters = 6_000;
 const routeCacheMaxEntries = 24;
-const routeStaticCacheTtlMs = 60 * 60 * 1000;
-const routeAccidentHistoryCacheTtlMs = 15 * 60 * 1000;
+const routeStaticCacheTtlMs = 2 * 60 * 1000;
 const routeTrafficIntensityCacheTtlMs = 5 * 60 * 1000;
-const routeDisturbanceCacheTtlMs = 2 * 60 * 1000;
 export const customRouteStopIdPrefix = "via-";
 
 export function routeGeolocationErrorMessage(error: GeolocationPositionError): string {
@@ -156,9 +149,7 @@ export function routeCacheKey({
 }
 
 function routeCacheTtlMs(avoid: RouteAvoidState): number {
-  if (avoid.disturbances) return routeDisturbanceCacheTtlMs;
   if (avoid.trafficIntensity) return routeTrafficIntensityCacheTtlMs;
-  if (avoid.accidentHistory) return routeAccidentHistoryCacheTtlMs;
   return routeStaticCacheTtlMs;
 }
 
@@ -404,15 +395,16 @@ export function selectRouteCandidates(
 function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
   if (option === "highSpeed") return route.exposure?.highSpeedMeters ?? null;
   if (option === "trafficIntensity") return route.exposure?.trafficIntensityMeters ?? null;
+  if (option === "cityTraffic") return route.exposure?.cityTrafficMeters ?? null;
   if (option === "bridges") return route.exposure?.bridgeMeters ?? null;
   if (option === "tunnels") return route.exposure?.tunnelMeters ?? null;
-  return route.exposure?.[option] ?? null;
+  return null;
 }
 
 function routeCappedExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
   const value = routeExposureValue(route, option);
   if (value === null) return null;
-  if (option === "highSpeed" || option === "trafficIntensity" || option === "bridges" || option === "tunnels") {
+  if (option === "highSpeed" || option === "trafficIntensity" || option === "cityTraffic" || option === "bridges" || option === "tunnels") {
     return Math.min(Math.max(0, value), route.distanceMeters);
   }
   return Math.max(0, value);
@@ -427,50 +419,17 @@ function formatRouteExposureDistance(meters: number): string {
   return formatRouteDistance(meters);
 }
 
-function routeAccidentRiskValue(route: RouteLine, baseline: RouteLine): RouteAlternativeMetricRow {
-  const baseRow = { kind: "accidentHistory" as const, label: routeMetricLabels.accidentHistory };
-  const eventCount = route.exposure?.accidentHistoryEvents;
-  if (eventCount !== null && eventCount !== undefined && eventCount <= 2) {
-    return { ...baseRow, value: "Data ofullständig", tone: "muted" };
-  }
-
-  const current = routeScoreValue(route, "accidentHistory");
-  if (current === null) {
-    return { ...baseRow, value: "Saknas", tone: "muted" };
-  }
-  if (current <= 0) {
-    return { ...baseRow, value: "Inga i data", tone: "muted" };
-  }
-
-  const base = routeScoreValue(baseline, "accidentHistory");
-  if (base === null || base <= 0) {
-    return { ...baseRow, value: "Medel" };
-  }
-
-  const ratio = current / base;
-  if (ratio <= 0.25) return { ...baseRow, value: "Väldigt låg" };
-  if (ratio <= 0.6) return { ...baseRow, value: "Låg" };
-  return { ...baseRow, value: "Medel" };
-}
-
 function routeAlternativeMetricRow(
   route: RouteLine,
-  baseline: RouteLine,
   option: RouteAvoidOption,
 ): RouteAlternativeMetricRow {
-  if (option === "accidentHistory") return routeAccidentRiskValue(route, baseline);
-
   const current = routeCappedExposureValue(route, option);
   const baseRow = { kind: option, label: routeMetricLabels[option] };
   if (current === null) return { ...baseRow, value: "Saknas", tone: "muted" };
   if (current <= 0) return { ...baseRow, value: "Undviker", tone: "positive" };
 
-  if (option === "disturbances") {
-    return { ...baseRow, value: `${Math.round(current)} st` };
-  }
-
-  if (option === "trafficIntensity") {
-    const score = routeScoreValue(route, "trafficIntensity");
+  if (option === "trafficIntensity" || option === "cityTraffic") {
+    const score = routeScoreValue(route, option);
     if (current <= 50 || (score !== null && score < 0.08)) {
       return { ...baseRow, value: "Undviker", tone: "positive" };
     }
@@ -485,25 +444,24 @@ function routeAlternativeMetricRow(
 
 function routeAlternativeRows(
   route: RouteLine,
-  baseline: RouteLine,
   avoids: RouteAvoidState,
 ): RouteAlternativeMetricRow[] {
-  return activeAvoidOptionsForUi(avoids).map((option) => routeAlternativeMetricRow(route, baseline, option));
+  return activeAvoidOptionsForUi(avoids).map((option) => routeAlternativeMetricRow(route, option));
 }
 
-function routeAvoidedMetricCount(route: RouteLine, baseline: RouteLine, avoids: RouteAvoidState): number {
-  return routeAlternativeRows(route, baseline, avoids).filter((row) => row.tone === "positive").length;
+function routeAvoidedMetricCount(route: RouteLine, avoids: RouteAvoidState): number {
+  return routeAlternativeRows(route, avoids).filter((row) => row.tone === "positive").length;
 }
 
 function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: RouteAvoidOption): boolean {
-  const current = option === "accidentHistory" || option === "trafficIntensity"
+  const current = option === "trafficIntensity" || option === "cityTraffic"
     ? routeScoreValue(route, option)
     : routeCappedExposureValue(route, option);
   if (current === null) return false;
 
   const values = routes
     .map((candidate) => (
-      option === "accidentHistory" || option === "trafficIntensity"
+      option === "trafficIntensity" || option === "cityTraffic"
         ? routeScoreValue(candidate, option)
         : routeCappedExposureValue(candidate, option)
     ))
@@ -513,16 +471,14 @@ function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: Rou
 }
 
 function routeImprovesOption(route: RouteLine, baseline: RouteLine, option: RouteAvoidOption): boolean {
-  const current = option === "accidentHistory" || option === "trafficIntensity"
+  const current = option === "trafficIntensity" || option === "cityTraffic"
     ? routeScoreValue(route, option)
     : routeCappedExposureValue(route, option);
-  const base = option === "accidentHistory" || option === "trafficIntensity"
+  const base = option === "trafficIntensity" || option === "cityTraffic"
     ? routeScoreValue(baseline, option)
     : routeCappedExposureValue(baseline, option);
   if (current === null || base === null) return false;
-  if (option === "disturbances") return current < base;
-  if (option === "accidentHistory") return base - current > 0.05;
-  if (option === "trafficIntensity") return base - current > 0.025;
+  if (option === "trafficIntensity" || option === "cityTraffic") return base - current > 0.025;
   return base - current > 25;
 }
 
@@ -546,7 +502,7 @@ function routeAlternativeTitle(
   const shortestDistance = Math.min(...routes.map((candidate) => candidate.distanceMeters));
   if (route.distanceMeters <= shortestDistance + 50) return "Kortast";
 
-  const avoidedCount = routeAvoidedMetricCount(route, baseline, avoids);
+  const avoidedCount = routeAvoidedMetricCount(route, avoids);
   if (activeOptions.length > 1 && avoidedCount >= Math.max(2, activeOptions.length - 1)) {
     return "Mest lugn";
   }
@@ -559,8 +515,8 @@ function routeAlternativeTitle(
     return routeCappedExposureValue(route, "trafficIntensity") === 0 ? "Mindre trafik" : "Lugnare trafik";
   }
 
-  if (avoids.disturbances && routeIsBestForOption(route, routes, "disturbances") && routeImprovesOption(route, baseline, "disturbances")) {
-    return "Färre störningar";
+  if (avoids.cityTraffic && routeIsBestForOption(route, routes, "cityTraffic") && routeImprovesOption(route, baseline, "cityTraffic")) {
+    return routeCappedExposureValue(route, "cityTraffic") === 0 ? "Mindre stadstrafik" : "Lugnare stadsmiljö";
   }
 
   if (avoids.bridges && routeIsBestForOption(route, routes, "bridges") && routeImprovesOption(route, baseline, "bridges")) {
@@ -569,10 +525,6 @@ function routeAlternativeTitle(
 
   if (avoids.tunnels && routeIsBestForOption(route, routes, "tunnels") && routeImprovesOption(route, baseline, "tunnels")) {
     return routeCappedExposureValue(route, "tunnels") === 0 ? "Utan tunnlar" : "Färre tunnlar";
-  }
-
-  if (avoids.accidentHistory && routeIsBestForOption(route, routes, "accidentHistory") && routeImprovesOption(route, baseline, "accidentHistory")) {
-    return "Lägre olycksrisk";
   }
 
   if (routeExtraMinutes(route, baseline) <= 10 && activeOptions.length > 1) return "Balanserad";
@@ -590,7 +542,7 @@ export function routeAlternativeCopy(
   const fallbackBaseline = baseline ?? route;
   return {
     title: routeAlternativeTitle(route, index, fallbackBaseline, avoids, routes, isCustomRoute),
-    rows: routeAlternativeRows(route, fallbackBaseline, avoids),
+    rows: routeAlternativeRows(route, avoids),
   };
 }
 

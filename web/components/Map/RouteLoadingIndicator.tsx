@@ -8,7 +8,7 @@ const routeLoadingMessages = [
   "Mäter distanser...",
   "Räknar vägar...",
   "Hittar alternativ...",
-  "Väger risker...",
+  "Väger vägval...",
   "Letar lugnare sträckor...",
   "Jämför vägval...",
   "Kollar störningar...",

@@ -6,9 +6,10 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 
 - Tunga kartendpoints ska kräva `bbox`.
 - Bbox-format: `minLng,minLat,maxLng,maxLat`.
-- API-rutter ska validera bbox-area på serversidan.
+- API-rutter ska validera bbox-area och svenska datagränser på serversidan.
 - SQL/RPC ska också ha limit eller annan spärr. Klientens zoomlogik räcker inte som skydd.
 - Publika svar ska inte exponera `events.raw`.
+- Bboxar utanför `SWEDEN_DATA_BOUNDS` returnerar `400` innan Supabase/RPC anropas.
 
 ## Events
 
@@ -109,7 +110,8 @@ Returnerar:
 - ruttkandidater
 - primär geometri
 - tid/distans
-- `avoidScores` för `accidentHistory`, `highSpeed`, `trafficIntensity`, `disturbances`, `bridges` och `tunnels`
+- `avoidScores` för `highSpeed`, `trafficIntensity`, `cityTraffic`, `bridges` och `tunnels`
+- route-annotations för aktiva undvik-värden samt pågående störningar/liveolyckor på vald rutt
 
 GraphHopper-kandidater:
 
@@ -118,13 +120,14 @@ GraphHopper-kandidater:
 3. Filterstyrda custom model-kandidater:
    - `highSpeed` sänker prioritet för motorväg/trunk och höga hastigheter.
    - `trafficIntensity` sänker prioritet för trafikintensiva ÅDT-segment och aktiva liveflödessegment med tät/långsam trafik.
+   - `cityTraffic` sänker prioritet i statiska stadszoner, särskilt för större leder och högre hastigheter, via GraphHopper custom model-areas samt `road_class` och `max_speed`.
    - `bridges`/`tunnels` sänker prioritet för GraphHoppers `road_environment`-värden `BRIDGE` och `TUNNEL`.
-   - `accidentHistory` skapar penalty zones runt risksegment i baseline-korridoren.
-   - `disturbances` skapar penalty zones runt aktiva störningspunkter i baseline-korridoren.
 
-Olyckshistorik, trafikintensiva vägar, störningar, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Bro-/tunnelexponering räknas från GraphHopper `road_environment` path details, medan övriga filter även poängsätts efteråt för ranking, exponeringstext och jämförelse mot snabbaste rutt.
+Höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar påverkar GraphHoppers vägkostnad när GraphHopper-env finns. Störningar och olyckor är inte längre undvik-filter, men aktiva störningar och liveolyckor hämtas till ruttsvaret så UI:t kan visa varningar på ruttkort och vald rutt.
 
-Fanout hålls nere med några budgetsäkra begränsningar: plain `highSpeed + trafficIntensity` hoppar över en redundant calm-kandidat, den extra diversifierade `highSpeed`-kandidaten används bara på längre highSpeed-only-rutter och rena `trafficIntensity`-kombinationer skickar max cirka fem rutter vidare till scoring/UI. För längre rutter med `highSpeed` kan API:t bygga hybridkandidater från redan hämtade GraphHopper-rutter och räkna om några låg-hastighets-via-punkter från alternativa korridorer med den hårda calm-modellen. När `highSpeed` kombineras med andra filter tas en extra highSpeed-backbone med, så tidigare lugna korridorer behålls och de nya filtren adderar kompromissalternativ i stället för att ersätta dem. Genererade via-/hybridkandidater som gör en tydlig avstickare och kommer tillbaka nära samma punkt sållas bort, och highSpeed-svaret prioriterar ungefär tre helt lugna alternativ för highSpeed-only eller upp till fem lugna alternativ när flera filter är aktiva, plus ett litet antal snabbare referenser.
+Vår GraphHopper-instans exponerar inte `urban_density`, så stadstrafik ska inte dokumenteras eller byggas som ett `urban_density`-filter. Stadsexponering i scores räknas från stadszoner plus `road_class`/`max_speed`; saknad metadata behandlas som okänd, inte som bättre.
+
+Fanout hålls nere med några budgetsäkra begränsningar: plain `highSpeed + trafficIntensity` hoppar över en redundant calm-kandidat, `cityTraffic` körs i den kombinerade custom modellen utan extra singelfanout, och rena `trafficIntensity`-kombinationer skickar max cirka fem rutter vidare till scoring/UI. För längre rutter med `highSpeed` kan API:t bygga hybridkandidater från redan hämtade GraphHopper-rutter och räkna om några låg-hastighets-via-punkter från alternativa korridorer med den hårda calm-modellen. När `highSpeed` kombineras med andra filter tas en extra highSpeed-backbone med, så tidigare lugna korridorer behålls och de nya filtren adderar kompromissalternativ i stället för att ersätta dem. Genererade via-/hybridkandidater som gör en tydlig avstickare och kommer tillbaka nära samma punkt sållas bort.
 
 Performancebudget:
 
@@ -137,7 +140,7 @@ Frontend session-cache:
 
 - `Map.tsx` cachar `/api/route`-svar i minnet per browser-session.
 - Cache key bygger på route-koordinater inklusive via-punkter, aktiva undvik-filter, tidsbudget och antal alternativ.
-- TTL är kort för livepåverkade filter: `Störningar` 2 min, `Trafikintensiva vägar` 5 min, `Olycksrisk` 15 min och övriga statiska kombinationer 60 min.
+- TTL är kort eftersom ruttsvaret kan innehålla live-notices: statiska filter 2 min och `Trafikintensiva vägar` 5 min.
 - Syftet är snabba filter-toggles i samma session, inte permanent server-cache.
 
 Observability:

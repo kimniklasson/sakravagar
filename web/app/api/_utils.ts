@@ -8,15 +8,30 @@ export type Bbox = {
   area: number;
 };
 
+export type BboxBounds = {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+};
+
 type BboxOptions = {
   required?: boolean;
   maxArea: number;
+  bounds?: BboxBounds;
 };
 
 const MIN_LNG = -180;
 const MAX_LNG = 180;
 const MIN_LAT = -90;
 const MAX_LAT = 90;
+
+export const SWEDEN_DATA_BOUNDS: BboxBounds = {
+  minLng: 9,
+  minLat: 54,
+  maxLng: 25,
+  maxLat: 70,
+};
 
 export function jsonResponse<T>(
   body: T,
@@ -62,6 +77,15 @@ export function parseBboxParam(
     minLat >= maxLat
   ) {
     return { bbox: null, error: "bbox outside valid coordinate bounds" };
+  }
+
+  if (opts.bounds && (
+    minLng < opts.bounds.minLng ||
+    maxLng > opts.bounds.maxLng ||
+    minLat < opts.bounds.minLat ||
+    maxLat > opts.bounds.maxLat
+  )) {
+    return { bbox: null, error: "bbox outside supported data bounds" };
   }
 
   const area = (maxLng - minLng) * (maxLat - minLat);

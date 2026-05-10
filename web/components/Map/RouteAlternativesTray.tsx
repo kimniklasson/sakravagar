@@ -10,6 +10,33 @@ import {
 } from "./routeModel";
 import type { RouteAvoidState } from "./routeModel";
 
+type RouteNoticeCounts = {
+  disturbances: number;
+  liveAccidents: number;
+  total: number;
+};
+
+function routeNoticeCounts(route: RouteLine): RouteNoticeCounts {
+  const disturbances = route.annotations.disturbances?.length ?? 0;
+  const liveAccidents = route.annotations.liveAccidents?.length ?? 0;
+  return {
+    disturbances,
+    liveAccidents,
+    total: disturbances + liveAccidents,
+  };
+}
+
+function routeNoticeLabel(counts: RouteNoticeCounts): string {
+  const parts: string[] = [];
+  if (counts.disturbances > 0) {
+    parts.push(`${counts.disturbances} ${counts.disturbances === 1 ? "störning" : "störningar"}`);
+  }
+  if (counts.liveAccidents > 0) {
+    parts.push(`${counts.liveAccidents} ${counts.liveAccidents === 1 ? "olycka" : "olyckor"}`);
+  }
+  return parts.length ? `Pågår: ${parts.join(" och ")}` : "";
+}
+
 export function RouteAlternativesTray({
   routes,
   baselineRoute,
@@ -53,6 +80,11 @@ export function RouteAlternativesTray({
   const [copiedRouteId, setCopiedRouteId] = useState<string | null>(null);
   const [copyingRouteId, setCopyingRouteId] = useState<string | null>(null);
   const [copyErrorRouteId, setCopyErrorRouteId] = useState<string | null>(null);
+  const [noticeTooltip, setNoticeTooltip] = useState<{
+    label: string;
+    left: number;
+    top: number;
+  } | null>(null);
   const [routeFeedbackByRoute, setRouteFeedbackByRoute] = useState<Record<string, {
     vote: "up" | "down";
     feedbackId: string | null;
@@ -75,6 +107,16 @@ export function RouteAlternativesTray({
       right: Math.max(16, window.innerWidth - rect.right - 14),
       bottom: Math.max(16, window.innerHeight - rect.top + 18),
     };
+  };
+
+  const showNoticeTooltip = (element: HTMLElement, label: string) => {
+    const rect = element.getBoundingClientRect();
+    const halfWidth = 112;
+    setNoticeTooltip({
+      label,
+      left: Math.min(window.innerWidth - halfWidth, Math.max(halfWidth, rect.left + rect.width / 2)),
+      top: Math.max(12, rect.top - 10),
+    });
   };
 
   useLayoutEffect(() => {
@@ -261,7 +303,9 @@ export function RouteAlternativesTray({
       ref={routeAlternativesRef}
       className={styles.routeAlternatives}
       aria-live="polite"
+      onScroll={() => setNoticeTooltip(null)}
       onWheel={(e) => {
+        setNoticeTooltip(null);
         const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         if (delta === 0) return;
         e.currentTarget.scrollLeft += delta;
@@ -269,6 +313,7 @@ export function RouteAlternativesTray({
       }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
+        setNoticeTooltip(null);
         dragRef.current = {
           pointerId: e.pointerId,
           startX: e.clientX,
@@ -308,6 +353,8 @@ export function RouteAlternativesTray({
       {routes.map((route, index) => {
         const copy = routeAlternativeCopy(route, index, baselineRoute, routeAvoids, routes, isCustomRoute);
         const selected = route.id === selectedRouteId;
+        const noticeCounts = routeNoticeCounts(route);
+        const noticeLabel = routeNoticeLabel(noticeCounts);
         const routeFeedback = routeFeedbackByRoute[route.id] ?? null;
         const feedbackVote = routeFeedback?.vote ?? null;
         const copyTooltip =
@@ -348,8 +395,26 @@ export function RouteAlternativesTray({
           >
             <span className={styles.routeAlternativeTop}>
               <span className={styles.routeAlternativeTitle}>{copy.title}</span>
-              <span className={styles.routeAlternativeDistance}>
-                {formatRouteDistance(route.distanceMeters)}
+              <span className={styles.routeAlternativeDistanceGroup}>
+                <span className={styles.routeAlternativeDistance}>
+                  {formatRouteDistance(route.distanceMeters)}
+                </span>
+                {noticeCounts.total > 0 && (
+                  <span
+                    className={styles.routeAlternativeNoticeIcon}
+                    aria-label={noticeLabel}
+                    onPointerEnter={(event) => showNoticeTooltip(event.currentTarget, noticeLabel)}
+                    onPointerLeave={() => setNoticeTooltip(null)}
+                    role="img"
+                  >
+                    <img
+                      className={styles.routeAlternativeNoticeIconImage}
+                      src="/icons/varning_rund.svg"
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  </span>
+                )}
               </span>
             </span>
             <span className={styles.routeAlternativeTime}>
@@ -463,6 +528,19 @@ export function RouteAlternativesTray({
         );
       })}
     </div>
+    {noticeTooltip && typeof document !== "undefined" && createPortal(
+      <div
+        className={styles.routeAlternativeNoticeTooltip}
+        style={{
+          left: `${noticeTooltip.left}px`,
+          top: `${noticeTooltip.top}px`,
+        }}
+        role="tooltip"
+      >
+        {noticeTooltip.label}
+      </div>,
+      document.body,
+    )}
     {feedbackDraft && typeof document !== "undefined" && createPortal(
       <form
         ref={feedbackPopoverRef}
