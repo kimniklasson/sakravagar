@@ -375,6 +375,8 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     let frame = 0;
     let stableViewportHeight = window.innerHeight;
     let stableViewportWidth = window.innerWidth;
+    let appliedViewportHeight: number | null = null;
+    let appliedViewportWidth: number | null = null;
 
     const textInputFocused = () => {
       const el = document.activeElement;
@@ -397,7 +399,12 @@ export default function Map({ sharedRouteSlug }: MapProps) {
         root.style.setProperty("--app-visual-height", `${stableViewportHeight}px`);
         root.style.setProperty("--app-visual-top", "0px");
         root.style.setProperty("--app-visual-bottom", "0px");
-        mapRef.current?.resize();
+        const viewportChanged =
+          appliedViewportHeight !== stableViewportHeight ||
+          appliedViewportWidth !== stableViewportWidth;
+        appliedViewportHeight = stableViewportHeight;
+        appliedViewportWidth = stableViewportWidth;
+        if (viewportChanged) mapRef.current?.resize();
       });
     };
 
