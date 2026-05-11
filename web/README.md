@@ -87,7 +87,7 @@ GraphHopper påverkar dessa filter via custom model när env finns. Trafikintens
 
 1. Importera repo i Vercel.
 2. Root directory: `web`.
-3. Environment variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GRAPHHOPPER_BASE_URL`, `GRAPHHOPPER_TOKEN`, samt dedikerade `NOMINATIM_*`/`OSRM_*` före större publik trafik.
+3. Environment variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL`, `GRAPHHOPPER_TOKEN`, samt dedikerade `NOMINATIM_*`/`OSRM_*` före större publik trafik.
 4. Deploy via Vercels Git-integration.
 
 Routingdrift dokumenteras i `docs/routing-ops.md`.

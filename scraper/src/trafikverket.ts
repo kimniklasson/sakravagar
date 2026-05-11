@@ -80,16 +80,30 @@ const TrafficFlowResponseSchema = z.object({
 
 export type TrafficFlow = z.infer<typeof TrafficFlowSchema>;
 
+const ALLOWED_MESSAGE_TYPES = new Set(["Olycka", "Vägarbete", "Trafikstörning"]);
+
+function xmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&apos;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function buildQuery(apiKey: string, messageType?: string): string {
+  if (messageType && !ALLOWED_MESSAGE_TYPES.has(messageType)) {
+    throw new Error(`unsupported message type: ${messageType}`);
+  }
   const filter = messageType
     ? `
     <FILTER>
-      <EQ name="Deviation.MessageType" value="${messageType}" />
+      <EQ name="Deviation.MessageType" value="${xmlAttribute(messageType)}" />
     </FILTER>`
     : "";
 
   return `<REQUEST>
-  <LOGIN authenticationkey="${apiKey}" />
+  <LOGIN authenticationkey="${xmlAttribute(apiKey)}" />
   <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="${SITUATION_QUERY_LIMIT}">
     ${filter}
   </QUERY>

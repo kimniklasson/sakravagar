@@ -254,6 +254,7 @@ const TRAFFIC_INTENSITY_ANNOTATION_MAX_SAMPLES = 1400;
 const PENALTY_ZONE_BBOX_PADDING = 0.08;
 const PENALTY_ZONE_MAX_BBOX_AREA = 80;
 const TRAFFIC_FLOW_ACTIVE_WINDOW_MS = 45 * 60 * 1000;
+const OSRM_ROUTE_TIMEOUT_MS = 15_000;
 const GRAPHHOPPER_ROUTE_TIMEOUT_MS = 15_000;
 const GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS = 7_000;
 const GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS = 9_000;
@@ -1689,12 +1690,7 @@ function highSpeedSegments(route: OsrmRoute, rows: LargeRoadRow[]): RouteAnnotat
     const start = route.geometry.coordinates[segmentIndex];
     const end = route.geometry.coordinates[segmentIndex + 1];
     if (!start || !end) return false;
-    const mid: GeoJSON.Position = [
-      ((start[0] ?? 0) + (end[0] ?? 0)) / 2,
-      ((start[1] ?? 0) + (end[1] ?? 0)) / 2,
-    ];
-    return samples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 130 ||
-      distancePointToSegmentMeters(mid, sample, sample, originLat) <= 130);
+    return samples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 130);
   });
 }
 
@@ -1967,12 +1963,7 @@ function trafficIntensitySegments(
     const start = route.geometry.coordinates[segmentIndex];
     const end = route.geometry.coordinates[segmentIndex + 1];
     if (!start || !end) return false;
-    const mid: GeoJSON.Position = [
-      ((start[0] ?? 0) + (end[0] ?? 0)) / 2,
-      ((start[1] ?? 0) + (end[1] ?? 0)) / 2,
-    ];
-    return annotationSamples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 130 ||
-      distancePointToSegmentMeters(mid, sample, sample, originLat) <= 130);
+    return annotationSamples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 130);
   });
 }
 
@@ -2319,9 +2310,22 @@ async function fetchOsrmRoutes(coordinates: [number, number][], alternatives: nu
     steps: "false",
   }).toString();
 
-  const res = await fetch(url, {
-    headers: { Accept: "application/json" },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OSRM_ROUTE_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("route provider timed out");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     console.error("route provider failed", await res.text());
     throw new Error("route provider failed");

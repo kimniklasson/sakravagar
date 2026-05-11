@@ -1408,6 +1408,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     setRouteAvoids((current) => {
       const next = { ...current, [option]: !current[option] };
       setRouteNoticeText(null);
+      routeShareUrlsRef.current.clear();
       if (routeCompareTimerRef.current !== null) {
         window.clearTimeout(routeCompareTimerRef.current);
       }

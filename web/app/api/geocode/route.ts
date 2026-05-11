@@ -18,6 +18,18 @@ const MAX_SWEDEN_LAT = 70;
 const DEFAULT_RESULT_LIMIT = 5;
 const MIN_RESULT_LIMIT = 1;
 const MAX_RESULT_LIMIT = 8;
+const NOMINATIM_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const NOMINATIM_CACHE_MAX_ENTRIES = 300;
+const NOMINATIM_MIN_INTERVAL_MS = Number(process.env.NOMINATIM_MIN_INTERVAL_MS ?? 1100);
+const NOMINATIM_MAX_WAIT_MS = 2_500;
+
+type CacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+const nominatimCache = new Map<string, CacheEntry>();
+let nextNominatimAt = 0;
 
 export type GeocodeResult = {
   id: string;
@@ -215,6 +227,45 @@ function fallbackQueryFor(q: string): string | null {
     : null;
 }
 
+function cacheKey(path: string, params: URLSearchParams): string {
+  return `${path}?${params.toString()}`;
+}
+
+function readCache<T>(key: string): T | null {
+  const entry = nominatimCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    nominatimCache.delete(key);
+    return null;
+  }
+  nominatimCache.delete(key);
+  nominatimCache.set(key, entry);
+  return entry.value as T;
+}
+
+function writeCache(key: string, value: unknown) {
+  if (nominatimCache.size >= NOMINATIM_CACHE_MAX_ENTRIES) {
+    const oldest = nominatimCache.keys().next().value;
+    if (oldest) nominatimCache.delete(oldest);
+  }
+  nominatimCache.set(key, {
+    expiresAt: Date.now() + NOMINATIM_CACHE_TTL_MS,
+    value,
+  });
+}
+
+async function acquireNominatimSlot(): Promise<boolean> {
+  const now = Date.now();
+  const startAt = Math.max(now, nextNominatimAt);
+  const waitMs = startAt - now;
+  if (waitMs > NOMINATIM_MAX_WAIT_MS) return false;
+  nextNominatimAt = startAt + Math.max(0, NOMINATIM_MIN_INTERVAL_MS);
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  return true;
+}
+
 async function searchNominatim(q: string, limit: number): Promise<NominatimSearchResult[]> {
   return fetchNominatim<NominatimSearchResult[]>("/search", new URLSearchParams({
     format: "jsonv2",
@@ -229,6 +280,14 @@ async function searchNominatim(q: string, limit: number): Promise<NominatimSearc
 
 async function fetchNominatim<T>(path: string, params: URLSearchParams): Promise<T> {
   if (NOMINATIM_EMAIL) params.set("email", NOMINATIM_EMAIL);
+  const key = cacheKey(path, params);
+  const cached = readCache<T>(key);
+  if (cached) return cached;
+
+  const slotAcquired = await acquireNominatimSlot();
+  if (!slotAcquired) {
+    throw new Error("nominatim rate limited");
+  }
 
   const url = new URL(path, NOMINATIM_BASE_URL);
   url.search = params.toString();
@@ -245,7 +304,9 @@ async function fetchNominatim<T>(path: string, params: URLSearchParams): Promise
     throw new Error(`nominatim ${res.status}: ${await res.text()}`);
   }
 
-  return (await res.json()) as T;
+  const value = (await res.json()) as T;
+  writeCache(key, value);
+  return value;
 }
 
 export async function GET(req: Request) {
@@ -294,6 +355,9 @@ export async function GET(req: Request) {
     const mapped = results.map(mapResult).filter((r): r is GeocodeResult => r !== null);
     return jsonResponse({ results: rankResults(mapped, q) }, { cacheSeconds: 3600 });
   } catch (err) {
+    if (err instanceof Error && err.message === "nominatim rate limited") {
+      return jsonResponse({ error: "geocode rate limited" }, { status: 429 });
+    }
     console.error("geocode failed", err);
     return jsonResponse({ error: "geocode failed" }, { status: 502 });
   }

@@ -7,8 +7,10 @@ export const dynamic = "force-dynamic";
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const serviceKey = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const siteOrigin = process.env.PUBLIC_SITE_ORIGIN ?? process.env.NEXT_PUBLIC_SITE_ORIGIN;
 const SNAPSHOT_MAX_BYTES = 300_000;
-const PUBLIC_SNAPSHOT_TTL_DAYS = 365;
+const PUBLIC_SNAPSHOT_TTL_DAYS = 30;
 
 type SnapshotRpcRow = {
   id: string;
@@ -74,11 +76,23 @@ function makeSlug(): string {
 }
 
 function requestOrigin(req: Request): string {
+  if (siteOrigin) {
+    try {
+      return new URL(siteOrigin).origin;
+    } catch {
+      // Fall through to the request-derived origin.
+    }
+  }
   const fallback = new URL(req.url).origin;
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   if (!host) return fallback;
   const proto = req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "");
-  return `${proto}://${host}`;
+  try {
+    const origin = new URL(`${proto}://${host}`).origin;
+    return proto === "https" || origin.startsWith("http://localhost") ? origin : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function GET(req: Request) {
@@ -106,7 +120,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  if (!url || !anon) {
+  if (!url || !serviceKey) {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
@@ -117,7 +131,7 @@ export async function POST(req: Request) {
     return jsonResponse({ error: payloadError }, { status: 400 });
   }
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
   const expiresAt = new Date(Date.now() + PUBLIC_SNAPSHOT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   for (let attempt = 0; attempt < 5; attempt += 1) {

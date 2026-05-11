@@ -90,9 +90,32 @@ type UpsertBatchSummary = {
   batches: number;
 };
 
-function normalizeSecret(value: string | null): string {
+const textEncoder = new TextEncoder();
+const ALLOWED_MESSAGE_TYPES = new Set(["Olycka", "Vägarbete", "Trafikstörning"]);
+
+function normalizeHeaderSecret(value: string | null): string {
   const trimmed = (value ?? "").trim();
   return trimmed.startsWith("Bearer ") ? trimmed.slice("Bearer ".length).trim() : trimmed;
+}
+
+function secretMatches(candidate: string, expected: string): boolean {
+  const candidateBytes = textEncoder.encode(candidate);
+  const expectedBytes = textEncoder.encode(expected);
+  const maxLength = Math.max(candidateBytes.byteLength, expectedBytes.byteLength);
+  let mismatch = candidateBytes.byteLength ^ expectedBytes.byteLength;
+  for (let index = 0; index < maxLength; index += 1) {
+    mismatch |= (candidateBytes[index] ?? 0) ^ (expectedBytes[index] ?? 0);
+  }
+  return mismatch === 0;
+}
+
+function xmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&apos;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function chunks<T>(rows: T[], size: number): T[][] {
@@ -123,15 +146,18 @@ async function upsertInBatches<T>(
 }
 
 function buildQuery(apiKey: string, messageType?: string): string {
+  if (messageType && !ALLOWED_MESSAGE_TYPES.has(messageType)) {
+    throw new Error(`unsupported message type: ${messageType}`);
+  }
   const filter = messageType
     ? `
     <FILTER>
-      <EQ name="Deviation.MessageType" value="${messageType}" />
+      <EQ name="Deviation.MessageType" value="${xmlAttribute(messageType)}" />
     </FILTER>`
     : "";
 
   return `<REQUEST>
-  <LOGIN authenticationkey="${apiKey}" />
+  <LOGIN authenticationkey="${xmlAttribute(apiKey)}" />
   <QUERY objecttype="Situation" namespace="Road.TrafficInfo" schemaversion="1.6" limit="${SITUATION_QUERY_LIMIT}">
     ${filter}
   </QUERY>
@@ -276,15 +302,15 @@ function trafficFlowToRow(f: TrafficFlow, now: string): TrafficFlowUpsertRow | n
 }
 
 Deno.serve(async (req: Request) => {
-  const sharedSecret = normalizeSecret(Deno.env.get("SCRAPE_SHARED_SECRET"));
+  const sharedSecret = (Deno.env.get("SCRAPE_SHARED_SECRET") ?? "").trim();
   if (!sharedSecret) {
     console.error("[scrape] SCRAPE_SHARED_SECRET not configured");
     return new Response("server misconfigured", { status: 500 });
   }
   const auth = req.headers.get("authorization") ?? "";
-  const bearerSecret = normalizeSecret(auth);
-  const headerSecret = normalizeSecret(req.headers.get("x-scrape-secret"));
-  if (bearerSecret !== sharedSecret && headerSecret !== sharedSecret) {
+  const bearerSecret = normalizeHeaderSecret(auth);
+  const headerSecret = normalizeHeaderSecret(req.headers.get("x-scrape-secret"));
+  if (!secretMatches(bearerSecret, sharedSecret) && !secretMatches(headerSecret, sharedSecret)) {
     return new Response("unauthorized", { status: 401 });
   }
 

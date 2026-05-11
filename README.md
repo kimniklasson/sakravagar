@@ -45,7 +45,7 @@ Engångsgrejer som inte kan automatiseras:
 - [ ] Schemat applicerat: kör migrationskedjan i [`db/migrations/`](./db/migrations/)
 - [ ] Edge Function `scrape` deployad och `pg_cron`/`pg_net` aktiverat via migration
 - [ ] Repo-secrets satta om GitHub Actions-nödknappen ska användas: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
-- [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN` samt dedikerade `NOMINATIM_*`/`OSRM_*`-värden före större publik trafik
+- [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN` samt dedikerade `NOMINATIM_*`/`OSRM_*`-värden före större publik trafik
 
 ## Deploy
 

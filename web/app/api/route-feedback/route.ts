@@ -5,9 +5,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const serviceKey = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SNAPSHOT_MAX_BYTES = 300_000;
-const FEEDBACK_SNAPSHOT_TTL_DAYS = 365;
+const FEEDBACK_SNAPSHOT_TTL_DAYS = 90;
 
 type FeedbackVote = "up" | "down";
 
@@ -51,7 +51,7 @@ function validateSnapshotPayload(payload: unknown): string | null {
 }
 
 export async function POST(req: Request) {
-  if (!url || !anon) {
+  if (!url || !serviceKey) {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
 
   const routeMeta = isObject(body?.routeMeta) ? body.routeMeta : {};
   const searchMeta = isObject(body?.searchMeta) ? body.searchMeta : {};
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
   const expiresAt = new Date(Date.now() + FEEDBACK_SNAPSHOT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: snapshotData, error: snapshotErrorResponse } = await client.rpc("create_route_snapshot", {
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  if (!url || !anon) {
+  if (!url || !serviceKey) {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
@@ -118,7 +118,7 @@ export async function PATCH(req: Request) {
   if (!id) return jsonResponse({ error: "invalid feedback id" }, { status: 400 });
 
   const comment = normalizeComment(body?.comment);
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
   const { data, error } = await client.rpc("update_route_feedback_comment", {
     p_feedback_id: id,
     p_comment: comment,
@@ -129,7 +129,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  if (!url || !anon) {
+  if (!url || !serviceKey) {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
@@ -137,7 +137,7 @@ export async function DELETE(req: Request) {
   const id = normalizeUuid(searchParams.get("id"));
   if (!id) return jsonResponse({ error: "invalid feedback id" }, { status: 400 });
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
   const { data, error } = await client.rpc("delete_route_feedback", {
     p_feedback_id: id,
   });

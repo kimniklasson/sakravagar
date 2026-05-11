@@ -6,7 +6,6 @@ export const dynamic = "force-dynamic";
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const PAGE_SIZE = 1000;
 
 export type LargeRoadClass = "high_speed" | "major_road" | "motor_traffic_road" | "motorway";
 
@@ -48,27 +47,17 @@ export async function GET(req: Request) {
   }
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
-  const rows: LargeRoadRow[] = [];
-
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const to = from + PAGE_SIZE - 1;
-    const { data, error } = await client
-      .rpc("large_roads_in_bbox", {
-        min_lng: bbox.minLng,
-        min_lat: bbox.minLat,
-        max_lng: bbox.maxLng,
-        max_lat: bbox.maxLat,
-      })
-      .range(from, to);
-
-    if (error) {
-      return serverErrorResponse("large roads query failed", error);
-    }
-
-    const page = (data ?? []) as LargeRoadRow[];
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
+  const { data, error } = await client.rpc("large_roads_in_bbox", {
+    min_lng: bbox.minLng,
+    min_lat: bbox.minLat,
+    max_lng: bbox.maxLng,
+    max_lat: bbox.maxLat,
+  });
+  if (error) {
+    return serverErrorResponse("large roads query failed", error);
   }
+
+  const rows = (data ?? []) as LargeRoadRow[];
 
   const segments: LargeRoadSegment[] = rows
     .filter((row) => row.class === "high_speed" && row.speed_limit !== null && row.speed_limit >= 80)

@@ -36,8 +36,8 @@ Viktiga beteenden:
 - Primär rutt kan dras direkt på kartan; preview kör `POST /api/route` med `preview: true` och hoppar över Supabase-scoring.
 - Utan aktiva filter visas snabbaste rutten. Med aktiva filter visas relevanta kandidater och listan sorteras efter filtermatchning, därefter tid och distans.
 - Frontend har kort session-cache för route-svar: 2 min för statiska filter och 5 min när `Trafikintensiva vägar` är aktivt.
-- Delning skapar public route snapshots via `/api/route-shares` med 1 års TTL.
-- Tumme upp/ner och valfri kommentar sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal.
+- Delning skapar public route snapshots via `/api/route-shares` med 30 dagars TTL.
+- Tumme upp/ner och valfri kommentar sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal. Feedback-snapshots sparas i 90 dagar.
 
 ## Data och API
 
@@ -66,7 +66,7 @@ Detaljerade endpoint-kontrakt finns i `docs/api.md`.
 - **Routing:** Hetzner CPX32 med GraphHopper 11 bakom Caddy och `X-Routing-Token`. Drift i `docs/routing-ops.md`.
 - **Tiles:** MapLibre GL med OpenFreeMap.
 
-Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. Lokal routing utan GraphHopper-env faller tillbaka till OSRM och matchar inte production-routing.
+Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. Lokal routing utan GraphHopper-env faller tillbaka till OSRM och matchar inte production-routing.
 
 ## Viktiga dataregler
 

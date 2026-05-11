@@ -39,8 +39,8 @@ export async function GET(req: Request) {
     return jsonResponse({ error: "fid required" }, { status: 400 });
   }
   const fid = Number(fidRaw);
-  if (!Number.isFinite(fid) || !Number.isInteger(fid)) {
-    return jsonResponse({ error: "fid must be an integer" }, { status: 400 });
+  if (!Number.isSafeInteger(fid) || fid < 0 || fid > 1_000_000_000) {
+    return jsonResponse({ error: "fid must be a safe integer" }, { status: 400 });
   }
 
   const client = createClient(url, anon, { auth: { persistSession: false } });

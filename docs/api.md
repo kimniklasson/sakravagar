@@ -88,7 +88,7 @@ Observability-loggen innehåller filter, antal koordinatstopp, alternativ-count,
 
 `POST /api/route-shares`
 
-Skapar en public route snapshot och returnerar `slug`, `url` och `expiresAt`. Payloaden valideras och får vara max 300 kB. Delningslänkar pekar på `/r/[slug]` och har 1 års TTL.
+Skapar en public route snapshot och returnerar `slug`, `url` och `expiresAt`. Payloaden valideras och får vara max 300 kB. Delningslänkar pekar på `/r/[slug]` och har 30 dagars TTL.
 
 `GET /api/route-shares?slug=...`
 
@@ -102,7 +102,7 @@ Direkt tabellåtkomst är inte publik; API:t går via Supabase RPC.
 
 `POST /api/route-feedback`
 
-Skapar en feedbackröst (`up`/`down`) och sparar en privat route snapshot med metadata. Returnerar feedback-id och snapshot-expiry.
+Skapar en feedbackröst (`up`/`down`) och sparar en privat route snapshot med metadata. Returnerar feedback-id och snapshot-expiry. Feedback-snapshots har 90 dagars TTL.
 
 `PATCH /api/route-feedback`
 
@@ -113,3 +113,5 @@ Uppdaterar kommentaren på en befintlig feedbackrad. Kommentar är frivillig och
 Tar bort en feedbackröst när användaren klickar på samma tumme igen.
 
 Feedback är batchunderlag för routingkalibrering och ska inte påverka routing automatiskt i MVP-flödet.
+
+Feedback-id fungerar som en kortlivad capability för att uppdatera kommentar eller ta bort rösten från samma klientflöde. Write-RPC:erna körs server-side med service-role; direkt anonym RPC-write är stängd.
