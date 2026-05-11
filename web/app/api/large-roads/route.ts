@@ -80,5 +80,5 @@ export async function GET(req: Request) {
     rowCount: segments.length,
   });
 
-  return jsonResponse({ segments }, { cacheSeconds: 300 });
+  return jsonResponse({ segments }, { cacheSeconds: 86_400 });
 }

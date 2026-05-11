@@ -68,6 +68,7 @@ Numrera i ordning efter senaste filen i `migrations/`. En ADR-post i `docs/decis
 - `0027_route_sharing_feedback.sql` — skapar `route_snapshots`, `route_feedback` och RPC:er för delade ruttlänkar och feedbackskapande.
 - `0028_route_feedback_update_delete.sql` — lägger till RPC:er för att uppdatera feedbackkommentar och ta bort feedbackröst.
 - `0030_events_dedup_and_orphan_resnap.sql` — dedupad `events_in_bbox` för kartpunkter och timvis resnap av orphans.
+- `0031_performance_indexes_disturbances_bbox.sql` — index för `events.first_seen` och GIST-baserad `disturbances_in_bbox`.
 
 ## Dataregler
 

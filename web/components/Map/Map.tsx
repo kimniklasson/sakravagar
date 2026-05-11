@@ -68,11 +68,12 @@ const mobileInfoBoxQuery = "(max-width: 767px)";
 
 export type MapProps = {
   sharedRouteSlug?: string;
+  initialSharedRoutePayload?: RouteSharePayload | null;
 };
 
 type RouteFeedbackVote = "up" | "down";
 
-type RouteSharePayload = {
+export type RouteSharePayload = {
   version: 1;
   createdAt: string;
   stops: RouteStop[];
@@ -295,7 +296,7 @@ async function writeClipboardText(text: string): Promise<void> {
   textarea.remove();
 }
 
-export default function Map({ sharedRouteSlug }: MapProps) {
+export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLoadedRef = useRef(false);
@@ -581,7 +582,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     const id = window.setInterval(() => {
       const map = mapRef.current;
       if (!map || !mapLoadedRef.current) return;
-      void addEventsLayer(map);
+      void addEventsLayer(map, { force: true });
       void refreshDisturbancesLayer(map);
       void refreshTrafficFlowLayer(map);
     }, 60_000);
@@ -854,6 +855,32 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     }
   };
 
+  const applySharedRoutePayload = (payload: RouteSharePayload, shareUrl: string | null): void => {
+    const selectedRoute = payload.selectedRoute;
+    const stops = payload.stops;
+    const routeAvoids = payload.routeAvoids;
+    if (!selectedRoute || !Array.isArray(stops) || stops.length < 2) {
+      throw new Error("Ogiltig delad rutt.");
+    }
+
+    lastRouteKeyRef.current = routeStateKey(stops);
+    if (shareUrl) routeShareUrlsRef.current.set(selectedRoute.id, shareUrl);
+    setRouteStops(stops);
+    setRouteAvoids(routeAvoids);
+    setRouteCandidates([selectedRoute]);
+    setRouteLines([selectedRoute]);
+    setSelectedRouteId(selectedRoute.id);
+    setRouteProvider(payload.provider ?? null);
+    setRouteNoticeText(null);
+    setRouteError(null);
+
+    const map = mapRef.current;
+    if (map && mapLoadedRef.current) {
+      setRouteLayerData(map, [selectedRoute], selectedRoute.id, routeAvoids);
+      focusRoute(map, [selectedRoute]);
+    }
+  };
+
   useEffect(() => {
     if (!sharedRouteSlug) return;
 
@@ -866,47 +893,28 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       setRouteNoticeText("Öppnar delad rutt...");
 
       try {
-        const res = await fetch(`/api/route-shares?slug=${encodeURIComponent(sharedRouteSlug)}`);
+        let payload = initialSharedRoutePayload;
+        if (!payload) {
+          const res = await fetch(`/api/route-shares?slug=${encodeURIComponent(sharedRouteSlug)}`);
+          if (!stillCurrent()) return;
+          if (res.status === 410) {
+            clearRoute();
+            setRouteError("Länken har gått ut. Sök rutten igen för att skapa en ny delningslänk.");
+            setRouteNoticeText(null);
+            return;
+          }
+          if (res.status === 404) {
+            clearRoute();
+            setRouteError("Den delade rutten hittades inte.");
+            setRouteNoticeText(null);
+            return;
+          }
+          if (!res.ok) throw new Error(await res.text());
+
+          ({ payload } = (await res.json()) as { payload: RouteSharePayload });
+        }
         if (!stillCurrent()) return;
-        if (res.status === 410) {
-          clearRoute();
-          setRouteError("Länken har gått ut. Sök rutten igen för att skapa en ny delningslänk.");
-          setRouteNoticeText(null);
-          return;
-        }
-        if (res.status === 404) {
-          clearRoute();
-          setRouteError("Den delade rutten hittades inte.");
-          setRouteNoticeText(null);
-          return;
-        }
-        if (!res.ok) throw new Error(await res.text());
-
-        const { payload } = (await res.json()) as { payload: RouteSharePayload };
-        if (!stillCurrent()) return;
-        const selectedRoute = payload.selectedRoute;
-        const stops = payload.stops;
-        const routeAvoids = payload.routeAvoids;
-        if (!selectedRoute || !Array.isArray(stops) || stops.length < 2) {
-          throw new Error("Ogiltig delad rutt.");
-        }
-
-        lastRouteKeyRef.current = routeStateKey(stops);
-        routeShareUrlsRef.current.set(selectedRoute.id, window.location.href);
-        setRouteStops(stops);
-        setRouteAvoids(routeAvoids);
-        setRouteCandidates([selectedRoute]);
-        setRouteLines([selectedRoute]);
-        setSelectedRouteId(selectedRoute.id);
-        setRouteProvider(payload.provider ?? null);
-        setRouteNoticeText(null);
-        setRouteError(null);
-
-        const map = mapRef.current;
-        if (map && mapLoadedRef.current) {
-          setRouteLayerData(map, [selectedRoute], selectedRoute.id, routeAvoids);
-          focusRoute(map, [selectedRoute]);
-        }
+        applySharedRoutePayload(payload, window.location.href);
       } catch (err) {
         if (cancelled) return;
         console.warn("shared route load failed", err);
@@ -922,7 +930,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     return () => {
       cancelled = true;
     };
-  }, [sharedRouteSlug]);
+  }, [initialSharedRoutePayload, sharedRouteSlug]);
 
   const setRouteStopLabel = (id: string, label: string) => {
     markRouteUserMutation();

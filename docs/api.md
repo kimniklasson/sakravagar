@@ -16,12 +16,12 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 | --- | --- | --- | --- |
 | `GET /api/events` | `bbox`, ev. `live=1`, ev. `since` | Dedupade olyckspunkter från `events_in_bbox` | 30 s |
 | `GET /api/events/stats` | - | datafönster och färskhet för UI-copy | 30 s |
-| `GET /api/risk` | `bbox` | deduplicerad segmentrisk via `risk_in_bbox` | 30 s |
-| `GET /api/adt` | `bbox` | ÅDT-segment via `adt_in_bbox` | 60 s |
+| `GET /api/risk` | `bbox` | deduplicerad segmentrisk via `risk_in_bbox` | 600 s |
+| `GET /api/adt` | `bbox` | ÅDT-segment via `adt_in_bbox` | 24 h |
 | `GET /api/traffic-flow` | `bbox` | aktiva TrafficFlow-mätningar snappade till segment | 20 s |
-| `GET /api/disturbances` | `bbox` | aktiva vägarbeten/köer/störningar | 30 s |
-| `GET /api/large-roads` | `bbox` | höghastighetssegment för 80+-badges | 300 s |
-| `GET /api/segment` | `fid` | `segment_detail(p_fid)` för popup | 120 s |
+| `GET /api/disturbances` | `bbox` | aktiva vägarbeten/köer/störningar via `disturbances_in_bbox` | 30 s |
+| `GET /api/large-roads` | `bbox` | höghastighetssegment för 80+-badges | 24 h |
+| `GET /api/segment` | `fid` | `segment_detail(p_fid)` för popup | 1 h |
 
 Pågående olycka definieras som `last_seen >= now() - 90 min`. `/api/events` dedupar kartpunkter innan visualisering; snappade events använder samma logiska regel som risk/popup: `fid + message + road_number + first_seen-hour`.
 

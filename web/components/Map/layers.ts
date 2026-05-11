@@ -39,6 +39,12 @@ export type RouteDragCommit = {
 export type RouteDragHandler = (commit: RouteDragCommit) => void;
 type HeatmapStop = { density: number; color: string; alpha: number };
 type Bbox = { west: number; south: number; east: number; north: number };
+type EventsLayerCache = {
+  bbox: Bbox | null;
+  inFlight: boolean;
+  liveCount: number;
+  needsRefresh: boolean;
+};
 
 const DEFAULT_HEATMAP_STOPS: HeatmapStop[] = [
   { density: 0, color: "#000000", alpha: 0 },
@@ -65,6 +71,7 @@ const SWEDEN_LAYER_BBOX: Bbox = {
   east: 25,
   north: 70,
 };
+const eventLayerCache = new WeakMap<MapLibreMap, EventsLayerCache>();
 
 const ADT_SOURCE_ID = "adt";
 const ADT_LAYER_ID = "adt-lines";
@@ -368,52 +375,85 @@ function ensureSpeedBadgeImage(
 
 export async function addEventsLayer(
   map: MapLibreMap,
-  opts: { since?: string | null } = {},
+  opts: { force?: boolean; since?: string | null } = {},
 ): Promise<{ liveCount: number }> {
-  const bbox = mapBoundsBbox(map, 0.2);
+  const viewport = mapBoundsBbox(map);
+  const bbox = viewport ? clipBboxToLayerBounds(paddedBbox(viewport, 0.2)) : null;
   if (!bbox) return { liveCount: 0 };
+  let cache = eventLayerCache.get(map);
+  if (!cache) {
+    cache = { bbox: null, inFlight: false, liveCount: 0, needsRefresh: false };
+    eventLayerCache.set(map, cache);
+  }
+
+  const sourceExists = Boolean(map.getSource(SOURCE_ID));
+  if (!opts.force && !opts.since && sourceExists && cache.bbox && bboxContains(cache.bbox, viewport ?? bbox)) {
+    return { liveCount: cache.liveCount };
+  }
+  if (cache.inFlight) {
+    cache.needsRefresh = true;
+    return { liveCount: cache.liveCount };
+  }
+  cache.inFlight = true;
 
   const params = new URLSearchParams({ bbox: bboxToParam(bbox) });
   if (opts.since) params.set("since", opts.since);
-  const url = `/api/events?${params.toString()}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error("failed to fetch events", await res.text());
-    return { liveCount: 0 };
+  let liveCount = cache.liveCount;
+  try {
+    const url = `/api/events?${params.toString()}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("failed to fetch events", await res.text());
+      return { liveCount: cache.liveCount };
+    }
+    const { points } = (await res.json()) as { points: EventPoint[] };
+
+    const liveCutoff = Date.now() - LIVE_EVENT_THRESHOLD_MS;
+    liveCount = 0;
+    const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+      type: "FeatureCollection",
+      features: points.map((p) => {
+        const isLive = Date.parse(p.last_seen) >= liveCutoff;
+        if (isLive) liveCount++;
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [p.lng, p.lat] },
+          properties: {
+            id: p.id,
+            icon_id: p.icon_id,
+            road_number: p.road_number,
+            message: p.message,
+            severity: p.severity,
+            first_seen: p.first_seen,
+            last_seen: p.last_seen,
+            is_live: isLive,
+          },
+        };
+      }),
+    };
+
+    const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
+    if (existing) {
+      existing.setData(geojson);
+      cache.bbox = bbox;
+      cache.liveCount = liveCount;
+      return { liveCount };
+    }
+
+    map.addSource(SOURCE_ID, { type: "geojson", data: geojson });
+    cache.bbox = bbox;
+    cache.liveCount = liveCount;
+  } finally {
+    cache.inFlight = false;
+    if (cache.needsRefresh) {
+      cache.needsRefresh = false;
+      void addEventsLayer(map, { ...opts, force: true });
+    }
   }
-  const { points } = (await res.json()) as { points: EventPoint[] };
 
-  const liveCutoff = Date.now() - LIVE_EVENT_THRESHOLD_MS;
-  let liveCount = 0;
-  const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
-    type: "FeatureCollection",
-    features: points.map((p) => {
-      const isLive = Date.parse(p.last_seen) >= liveCutoff;
-      if (isLive) liveCount++;
-      return {
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [p.lng, p.lat] },
-        properties: {
-          id: p.id,
-          icon_id: p.icon_id,
-          road_number: p.road_number,
-          message: p.message,
-          severity: p.severity,
-          first_seen: p.first_seen,
-          last_seen: p.last_seen,
-          is_live: isLive,
-        },
-      };
-    }),
-  };
-
-  const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-  if (existing) {
-    existing.setData(geojson);
+  if (map.getLayer(HEATMAP_LAYER_ID)) {
     return { liveCount };
   }
-
-  map.addSource(SOURCE_ID, { type: "geojson", data: geojson });
 
   // Heatmap — dominerande vid låg/medel zoom. Syns som färgfält över Sverige.
   map.addLayer({
@@ -1331,6 +1371,16 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
     beforeId,
   );
 
+  const loader = createBboxLoader(map, {
+    minZoom: DISTURBANCE_MIN_ZOOM,
+    initialEnabled: false,
+    bboxPadding: 0.2,
+    maxBboxAreaDeg2: 5000,
+    fetchBbox: async (bbox) => {
+      await refreshDisturbancesLayer(map, bbox);
+    },
+  });
+
   return {
     setVisible: (v) => {
       if (map.getLayer(DISTURBANCE_LAYER_ID)) {
@@ -1339,12 +1389,16 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
       if (map.getLayer(DISTURBANCE_HIT_LAYER_ID)) {
         map.setLayoutProperty(DISTURBANCE_HIT_LAYER_ID, "visibility", v ? "visible" : "none");
       }
+      loader.setEnabled(v);
     },
   };
 }
 
-export async function refreshDisturbancesLayer(map: MapLibreMap): Promise<{ disturbanceCount: number }> {
-  const bbox = mapBoundsBbox(map, 0.2);
+export async function refreshDisturbancesLayer(
+  map: MapLibreMap,
+  bboxOverride?: Bbox,
+): Promise<{ disturbanceCount: number }> {
+  const bbox = bboxOverride ?? mapBoundsBbox(map, 0.2);
   if (!bbox) {
     const src = map.getSource(DISTURBANCE_SOURCE_ID) as GeoJSONSource | undefined;
     src?.setData({ type: "FeatureCollection", features: [] });
@@ -1620,6 +1674,15 @@ function paddedBbox(b: Bbox, padding: number): Bbox {
   };
 }
 
+function bboxContains(outer: Bbox, inner: Bbox): boolean {
+  return (
+    outer.west <= inner.west &&
+    outer.east >= inner.east &&
+    outer.south <= inner.south &&
+    outer.north >= inner.north
+  );
+}
+
 function createBboxLoader(
   map: MapLibreMap,
   opts: {
@@ -1638,12 +1701,6 @@ function createBboxLoader(
   let needsRefresh = false;
   let enabled = opts.initialEnabled ?? true;
 
-  const contains = (outer: Bbox, inner: Bbox) =>
-    outer.west <= inner.west &&
-    outer.east >= inner.east &&
-    outer.south <= inner.south &&
-    outer.north >= inner.north;
-
   const refresh = async (): Promise<void> => {
     if (!enabled) return;
     if (map.getZoom() < opts.minZoom) return;
@@ -1653,7 +1710,7 @@ function createBboxLoader(
     }
     const viewport = mapBoundsBbox(map);
     if (!viewport) return;
-    if (cachedBbox && contains(cachedBbox, viewport)) return;
+    if (cachedBbox && bboxContains(cachedBbox, viewport)) return;
 
     const padded = clipBboxToLayerBounds(paddedBbox(viewport, BBOX_PADDING));
     if (!padded || bboxArea(padded) > MAX_BBOX_AREA_DEG2) return;

@@ -4,7 +4,14 @@ import {
   LIVE_EVENT_THRESHOLD_MS,
   type DisturbanceCategory,
 } from "@trafik/shared";
-import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import {
+  isMissingPostgrestFunctionError,
+  jsonResponse,
+  logApiObservation,
+  parseBboxParam,
+  serverErrorResponse,
+  SWEDEN_DATA_BOUNDS,
+} from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,27 +51,41 @@ export async function GET(req: Request) {
   const activeSince = new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString();
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
+  let resultSource = "disturbances_in_bbox";
+  let { data, error } = await client.rpc("disturbances_in_bbox", {
+    min_lng: bbox.minLng,
+    min_lat: bbox.minLat,
+    max_lng: bbox.maxLng,
+    max_lat: bbox.maxLat,
+    p_active_since: activeSince,
+  });
 
-  let query = client
-    .from("disturbances_public")
-    .select("id, lng, lat, icon_id, message_type, road_number, message, severity, first_seen, last_seen")
-    .gte("last_seen", activeSince)
-    .order("last_seen", { ascending: false })
-    .limit(2000);
+  if (error && isMissingPostgrestFunctionError(error, "disturbances_in_bbox")) {
+    resultSource = "disturbances_public_fallback";
+    let fallbackQuery = client
+      .from("disturbances_public")
+      .select("id, lng, lat, icon_id, message_type, road_number, message, severity, first_seen, last_seen")
+      .gte("last_seen", activeSince)
+      .order("last_seen", { ascending: false })
+      .limit(2000);
 
-  query = query
-    .gte("lng", bbox.minLng)
-    .lte("lng", bbox.maxLng)
-    .gte("lat", bbox.minLat)
-    .lte("lat", bbox.maxLat);
+    fallbackQuery = fallbackQuery
+      .gte("lng", bbox.minLng)
+      .lte("lng", bbox.maxLng)
+      .gte("lat", bbox.minLat)
+      .lte("lat", bbox.maxLat);
 
-  const { data, error } = await query;
+    const fallbackResult = await fallbackQuery;
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
+
   if (error) {
     return serverErrorResponse("disturbances query failed", error);
   }
 
   let unknownCategoryCount = 0;
-  const points: DisturbancePoint[] = (data ?? []).map((row) => {
+  const points: DisturbancePoint[] = ((data ?? []) as DisturbancePoint[]).map((row) => {
     const messageType = (row.message_type ?? null) as string | null;
     const category = categoryFromDisturbanceMessageType(messageType);
     if (category === "other") unknownCategoryCount += 1;
@@ -87,6 +108,7 @@ export async function GET(req: Request) {
     bboxArea: Number(bbox.area.toFixed(4)),
     durationMs: Date.now() - startedAt,
     rowCount: points.length,
+    source: resultSource,
     unknownCategoryCount,
   });
 

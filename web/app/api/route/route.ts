@@ -218,6 +218,15 @@ type Bbox = {
   maxLat: number;
 };
 
+type TrafficIntensityRows = {
+  adtRows: AdtRow[];
+  trafficFlowRows: TrafficFlowRow[];
+};
+
+type RouteRequestContext = {
+  trafficIntensityRowsCache: Map<string, Promise<TrafficIntensityRows>>;
+};
+
 const calmRouteCustomModel: GraphHopperCustomModel = {
   priority: [
     { if: "road_class == MOTORWAY", multiply_by: "0.03" },
@@ -339,6 +348,7 @@ const noAvoids: RouteAvoidState = {
   bridges: false,
   tunnels: false,
 };
+const emptyTrafficIntensityRows: TrafficIntensityRows = { adtRows: [], trafficFlowRows: [] };
 
 class RouteDeadlineError extends Error {
   constructor(readonly timeoutMs: number) {
@@ -430,6 +440,10 @@ function routeLogPayloadBase({
     maxExtraMinutes: maxExtraMinutes ?? "unlimited",
     preview,
   };
+}
+
+function createRouteRequestContext(): RouteRequestContext {
+  return { trafficIntensityRowsCache: new Map() };
 }
 
 function isCoordinate(value: unknown): value is [number, number] {
@@ -1998,17 +2012,32 @@ function roadEnvironmentExposure(route: OsrmRoute, environment: "BRIDGE" | "TUNN
 async function fetchPenaltyZoneRows(
   routes: OsrmRoute[],
   avoid: RouteAvoidState,
-): Promise<{
-  adtRows: AdtRow[];
-  trafficFlowRows: TrafficFlowRow[];
-}> {
-  const empty = { adtRows: [], trafficFlowRows: [] };
-  if (!supabaseUrl || !supabaseAnon) return empty;
-  if (!avoid.trafficIntensity) return empty;
+  context?: RouteRequestContext,
+): Promise<TrafficIntensityRows> {
+  if (!avoid.trafficIntensity) return emptyTrafficIntensityRows;
 
   const bbox = routeBbox(routes, PENALTY_ZONE_BBOX_PADDING);
-  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return empty;
-  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return empty;
+  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return emptyTrafficIntensityRows;
+  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return emptyTrafficIntensityRows;
+
+  return fetchTrafficIntensityRowsForBbox(bbox, context);
+}
+
+function trafficIntensityRowsCacheKey(bbox: Bbox): string {
+  return [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat].map((n) => n.toFixed(5)).join(",");
+}
+
+async function fetchTrafficIntensityRowsForBbox(
+  bbox: Bbox,
+  context?: RouteRequestContext,
+): Promise<TrafficIntensityRows> {
+  if (!supabaseUrl || !supabaseAnon) return emptyTrafficIntensityRows;
+  if (bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return emptyTrafficIntensityRows;
+  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return emptyTrafficIntensityRows;
+
+  const key = trafficIntensityRowsCacheKey(bbox);
+  const cached = context?.trafficIntensityRowsCache.get(key);
+  if (cached) return cached;
 
   const client = createClient(supabaseUrl, supabaseAnon, { auth: { persistSession: false } });
   const params = {
@@ -2018,13 +2047,11 @@ async function fetchPenaltyZoneRows(
     max_lat: bbox.maxLat,
   };
 
-  try {
+  const promise = (async (): Promise<TrafficIntensityRows> => {
     const trafficFlowActiveSince = new Date(Date.now() - TRAFFIC_FLOW_ACTIVE_WINDOW_MS).toISOString();
     const [adtResult, trafficFlowResult] = await Promise.all([
-      avoid.trafficIntensity
-        ? client.rpc("adt_in_bbox", params).limit(TRAFFIC_INTENSITY_ADT_RPC_LIMIT)
-        : Promise.resolve({ data: [], error: null }),
-      avoid.trafficIntensity && bboxArea(bbox) <= 30
+      client.rpc("adt_in_bbox", params).limit(TRAFFIC_INTENSITY_ADT_RPC_LIMIT),
+      bboxArea(bbox) <= 30
         ? client.rpc("traffic_flow_segments_in_bbox", {
             ...params,
             active_since: trafficFlowActiveSince,
@@ -2036,10 +2063,13 @@ async function fetchPenaltyZoneRows(
       adtRows: adtResult.error ? [] : (adtResult.data ?? []) as AdtRow[],
       trafficFlowRows: trafficFlowResult.error ? [] : (trafficFlowResult.data ?? []) as TrafficFlowRow[],
     };
-  } catch (err) {
+  })().catch((err) => {
     console.warn("route penalty zone lookup failed", err);
-    return empty;
-  }
+    return emptyTrafficIntensityRows;
+  });
+
+  context?.trafficIntensityRowsCache.set(key, promise);
+  return promise;
 }
 
 function buildPenaltyZoneCustomModel(
@@ -2116,8 +2146,9 @@ function buildPenaltyZoneCustomModel(
 async function buildRoutePreferenceCustomModel(
   baselineRoutes: OsrmRoute[],
   avoid: RouteAvoidState,
+  context?: RouteRequestContext,
 ): Promise<GraphHopperCustomModel | undefined> {
-  const penaltyRows = await fetchPenaltyZoneRows(baselineRoutes, avoid);
+  const penaltyRows = await fetchPenaltyZoneRows(baselineRoutes, avoid, context);
   const penaltyModel = buildPenaltyZoneCustomModel(penaltyRows, avoid, baselineRoutes);
   return mergeCustomModels(
     avoid.highSpeed ? calmRouteCustomModel : undefined,
@@ -2130,7 +2161,11 @@ async function buildRoutePreferenceCustomModel(
 
 type RouteScoreResult = Pick<RouteLine, "avoidScores" | "exposure" | "annotations">;
 
-async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidState): Promise<RouteScoreResult[]> {
+async function scoreRouteAlternatives(
+  routes: OsrmRoute[],
+  avoid: RouteAvoidState,
+  context?: RouteRequestContext,
+): Promise<RouteScoreResult[]> {
   const baseScores = routes.map((route) => {
     const bridges = roadEnvironmentExposure(route, "BRIDGE");
     const tunnels = roadEnvironmentExposure(route, "TUNNEL");
@@ -2198,7 +2233,6 @@ async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidStat
 
   try {
     const activeSince = new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString();
-    const trafficFlowActiveSince = new Date(Date.now() - TRAFFIC_FLOW_ACTIVE_WINDOW_MS).toISOString();
     const eventsRequest = bboxArea(bbox) <= 80
       ? (async () => {
           const result = await client.rpc("events_in_bbox", {
@@ -2220,11 +2254,17 @@ async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidStat
             .limit(500);
         })()
       : Promise.resolve({ data: [], error: null });
-    const [largeRoadsResult, disturbancesResult, eventsResult, adtResult, trafficFlowResult] = await Promise.all([
-      bboxArea(bbox) <= 40
-        ? client.rpc("large_roads_in_bbox", params)
-        : Promise.resolve({ data: [], error: null }),
-      client
+    const disturbancesRequest = (async () => {
+      const result = await client
+        .rpc("disturbances_in_bbox", {
+          ...params,
+          p_active_since: activeSince,
+        })
+        .limit(500);
+      if (!result.error || !isMissingPostgrestFunctionError(result.error, "disturbances_in_bbox")) {
+        return result;
+      }
+      return client
         .from("disturbances_public")
         .select("id, lng, lat, message_type")
         .gte("last_seen", activeSince)
@@ -2232,17 +2272,18 @@ async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidStat
         .lte("lng", bbox.maxLng)
         .gte("lat", bbox.minLat)
         .lte("lat", bbox.maxLat)
-        .limit(500),
+        .limit(500);
+    })();
+    const trafficIntensityRowsRequest = avoid.trafficIntensity
+      ? fetchTrafficIntensityRowsForBbox(bbox, context)
+      : Promise.resolve(emptyTrafficIntensityRows);
+    const [largeRoadsResult, disturbancesResult, eventsResult, trafficIntensityRows] = await Promise.all([
+      bboxArea(bbox) <= 40
+        ? client.rpc("large_roads_in_bbox", params)
+        : Promise.resolve({ data: [], error: null }),
+      disturbancesRequest,
       eventsRequest,
-      avoid.trafficIntensity && bboxArea(bbox) <= 80
-        ? client.rpc("adt_in_bbox", params).limit(TRAFFIC_INTENSITY_ADT_RPC_LIMIT)
-        : Promise.resolve({ data: [], error: null }),
-      avoid.trafficIntensity && bboxArea(bbox) <= 30
-        ? client.rpc("traffic_flow_segments_in_bbox", {
-            ...params,
-            active_since: trafficFlowActiveSince,
-          })
-        : Promise.resolve({ data: [], error: null }),
+      trafficIntensityRowsRequest,
     ]);
 
     const largeRoadRows = largeRoadsResult.error
@@ -2256,10 +2297,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidStat
     const eventRows = eventsResult.error
       ? []
       : (eventsResult.data ?? []) as EventRow[];
-    const adtRows = adtResult.error ? [] : (adtResult.data ?? []) as AdtRow[];
-    const trafficFlowRows = trafficFlowResult.error
-      ? []
-      : (trafficFlowResult.data ?? []) as TrafficFlowRow[];
+    const { adtRows, trafficFlowRows } = trafficIntensityRows;
 
     return routes.map((route) => {
       const highSpeed = scoreHighSpeed(route, largeRoadRows);
@@ -2446,6 +2484,7 @@ async function fetchProviderRoutes(
   alternatives: number,
   avoid: RouteAvoidState,
   maxExtraMinutes: number | null,
+  context?: RouteRequestContext,
 ): Promise<RouteFetchResult> {
   const activeOptions = activeAvoidOptions(avoid);
   if (!GRAPHHOPPER_BASE_URL) {
@@ -2565,7 +2604,7 @@ async function fetchProviderRoutes(
     !avoid.tunnels;
 
   const preferenceModel = activeOptions.length > 0 && !skipCombinedTrafficPreference
-    ? await buildRoutePreferenceCustomModel(fastestRoutes, avoid)
+    ? await buildRoutePreferenceCustomModel(fastestRoutes, avoid, context)
     : undefined;
   const preferenceRequests: Array<Promise<OsrmRoute[]>> = [];
 
@@ -2658,7 +2697,7 @@ async function fetchProviderRoutes(
   if (activeCoreOptions.length > 1) {
     for (const option of activeCoreOptions) {
       const singleAvoid = routeAvoidStateForOption(option);
-      const singlePreferenceModel = await buildRoutePreferenceCustomModel(fastestRoutes, singleAvoid);
+      const singlePreferenceModel = await buildRoutePreferenceCustomModel(fastestRoutes, singleAvoid, context);
       if (!singlePreferenceModel) continue;
 
       preferenceRequests.push(
@@ -2852,18 +2891,19 @@ export async function POST(req: Request) {
   });
 
   try {
+    const requestContext = createRouteRequestContext();
     const timeoutMs = routeRequestTimeoutMs(preview, alternatives, avoid);
     const result = await withRouteDeadline((async () => {
       const providerStartedAt = Date.now();
       const routeResult = preview
-        ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
+        ? await fetchProviderRoutes(coordinates, 0, noAvoids, null, requestContext)
         : alternatives === 0
-          ? await fetchProviderRoutes(coordinates, 0, noAvoids, null)
-          : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes);
+          ? await fetchProviderRoutes(coordinates, 0, noAvoids, null, requestContext)
+          : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes, requestContext);
       const providerMs = Date.now() - providerStartedAt;
       const providerRoutes = routeResult.routes;
       const scoringStartedAt = Date.now();
-      const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid);
+      const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid, requestContext);
       const scoringMs = Date.now() - scoringStartedAt;
       const routes: RouteLine[] = providerRoutes.map((route, index) => ({
         id: `route-${index + 1}`,
@@ -2911,7 +2951,7 @@ export async function POST(req: Request) {
       ...result.telemetry,
     });
 
-    return jsonResponse(result.response, { cacheSeconds: 60 });
+    return jsonResponse(result.response);
   } catch (err) {
     console.error("routing failed", err);
     console.warn("route observability", {

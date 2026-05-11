@@ -53,5 +53,5 @@ export async function GET(req: Request) {
     return jsonResponse({ error: "segment not found" }, { status: 404 });
   }
 
-  return jsonResponse({ segment: data as SegmentDetail }, { cacheSeconds: 120 });
+  return jsonResponse({ segment: data as SegmentDetail }, { cacheSeconds: 3600 });
 }
