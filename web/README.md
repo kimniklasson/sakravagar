@@ -17,7 +17,7 @@ För lokal routing som matchar production:
 
 ```sh
 TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt') \
-GRAPHHOPPER_BASE_URL='https://routing.xn--skravgar-0zae.se' \
+GRAPHHOPPER_BASE_URL='https://routing.sakravagar.se' \
 GRAPHHOPPER_TOKEN="$TOKEN" \
 pnpm web
 ```

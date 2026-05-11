@@ -62,8 +62,8 @@ Detaljerade endpoint-kontrakt finns i `docs/api.md`.
 
 ## Infrastruktur
 
-- **App:** `https://säkravägar.se` (`xn--skravgar-0zae.se`) på Vercel.
-- **DNS:** Cloudflare free plan. Loopia är registrar.
+- **App:** `https://sakravagar.se` på Vercel.
+- **DNS:** `sakravagar.se` hanteras i Loopia. Gamla IDN-domänen ligger kvar i Cloudflare tills redirect-migrationen är färdig.
 - **Databas:** Supabase Postgres + PostGIS, migrations i `db/migrations/`.
 - **Routing:** Hetzner CPX32 med GraphHopper 11 bakom Caddy och `X-Routing-Token`. Drift i `docs/routing-ops.md`.
 - **Tiles:** MapLibre GL med OpenFreeMap.

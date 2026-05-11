@@ -116,7 +116,7 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 ## 2026-05-01 — Routing: self-hostad GraphHopper på Hetzner
 
-**Valt:** Self-hosta GraphHopper 11 på Hetzner CPX32 (`trafik-routing`, IPv4 `116.203.135.46`) bakom Caddy/HTTPS och header-token. Appen anropar GraphHopper via Vercel `/api/route` med `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. GraphHopper lyssnar bara på `localhost:8989`; publikt finns endast `https://routing.säkravägar.se` med `X-Routing-Token`.
+**Valt:** Self-hosta GraphHopper 11 på Hetzner CPX32 (`trafik-routing`, IPv4 `116.203.135.46`) bakom Caddy/HTTPS och header-token. Appen anropar GraphHopper via Vercel `/api/route` med `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. GraphHopper lyssnar bara på `localhost:8989`; publikt finns endast `https://routing.sakravagar.se` med `X-Routing-Token`.
 
 **Varför:** Vi behöver kunna påverka vägkostnad, först för `Höga hastigheter` och senare även trafikintensitet, stadstrafik, broar och tunnlar, utan att vara låsta till publika OSRM:s få standardalternativ. GraphHopper custom model ger ett rimligt MVP-steg mot lugnare rutter. Hetzner CPX32 är billigare och mer förutsägbart än GraphHopper Cloud/Render/Railway, men utan att förlita sig på osäkra free-tier VPS:er.
 
@@ -124,10 +124,10 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Konsekvens:** Vi äger nu en extra driftkomponent utanför Vercel/Supabase. Servern måste hållas uppdaterad och GraphHopper-grafen behöver byggas om när OSM/config ändras. Första setup: Ubuntu 24.04, Java 21, GraphHopper JAR i `/opt/graphhopper`, Sverige-PBF från Geofabrik, 4 GB swap, UFW med endast 22/80/443 publikt, Caddy med LetsEncrypt. Lokala devtester som ska matcha production måste sätta GraphHopper-env vars; annars faller `/api/route` tillbaka till OSRM.
 
-## 2026-05-01 — Domän och DNS: Cloudflare + Vercel
+## 2026-05-01 — Domän och DNS: Loopia/Cloudflare + Vercel
 
-**Valt:** `säkravägar.se` köpt via Loopia, men DNS hanteras i Cloudflare free plan. Appen ligger på Vercel production (`xn--skravgar-0zae.se`/`säkravägar.se`), routing på `routing.säkravägar.se` mot Hetzner. DNS-poster: `A @ -> 76.76.21.21`, `CNAME www -> cname.vercel-dns.com`, `A routing -> 116.203.135.46` DNS-only.
+**Valt:** `sakravagar.se` köpt via Loopia och används som canonical domän. Appen ligger på Vercel production (`sakravagar.se`), routing på `routing.sakravagar.se` mot Hetzner. DNS-poster: `A @ -> 76.76.21.21`, `CNAME www -> cname.vercel-dns.com`, `A routing -> 116.203.135.46`. Den gamla IDN-domänen ligger kvar i Cloudflare tills redirect-migrationen är färdig.
 
-**Varför:** Cloudflare DNS är gratis, stabilt och gör det enklare att hantera subdomäner utan Loopias DNS-paket. Vercel får fortsatt sköta appens certifikat/deploys, medan Caddy sköter routing-subdomänens certifikat på Hetzner.
+**Varför:** ASCII-domänen ger stabilare delningslänkar än `säkravägar.se`, som ofta behöver punycode i tekniska system. Vercel får fortsatt sköta appens certifikat/deploys, medan Caddy sköter routing-subdomänens certifikat på Hetzner.
 
-**Konsekvens:** Unicode-domänen behöver ibland anges som punycode i tekniska system: `xn--skravgar-0zae.se` och `routing.xn--skravgar-0zae.se`. Vercel accepterade punycode-varianten. Cloudflare DNS-posten för `routing` ska vara DNS-only så Caddy/Hetzner hanterar HTTPS direkt.
+**Konsekvens:** `sakravagar.se` är canonical. Den gamla IDN-domänen `säkravägar.se` / `xn--skravgar-0zae.se` behålls som legacy redirect till `sakravagar.se`. DNS-posten för `routing` ska vara DNS-only om den hanteras i Cloudflare; i Loopia ska den vara en vanlig A-post så Caddy/Hetzner hanterar HTTPS direkt.

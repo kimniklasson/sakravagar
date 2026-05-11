@@ -8,7 +8,7 @@ Routingkedjan:
 
 ```text
 Next.js /api/route
-  -> https://routing.xn--skravgar-0zae.se
+  -> https://routing.sakravagar.se
   -> Caddy reverse proxy
   -> GraphHopper på localhost:8989
 ```
@@ -19,7 +19,8 @@ Publik app anropar aldrig GraphHopper direkt från browsern. All trafik går via
 
 - Server: Hetzner CPX32, Ubuntu 24.04.
 - IPv4: `116.203.135.46`.
-- Domän: `routing.säkravägar.se` / `routing.xn--skravgar-0zae.se`.
+- Domän: `routing.sakravagar.se`.
+- Legacy-domän under övergång: `routing.xn--skravgar-0zae.se`.
 - GraphHopper: `/opt/graphhopper/graphhopper-web-11.0.jar`.
 - OSM-data: `/opt/graphhopper/data/sweden-latest.osm.pbf`.
 - Graph-cache: `/opt/graphhopper/graph-cache`.
@@ -34,7 +35,7 @@ Tokenvärdet ska inte in i chat, loggar eller repo.
 Production behöver:
 
 ```sh
-GRAPHHOPPER_BASE_URL=https://routing.xn--skravgar-0zae.se
+GRAPHHOPPER_BASE_URL=https://routing.sakravagar.se
 GRAPHHOPPER_TOKEN=<värdet från serverns /root/routing-token.txt>
 ```
 
@@ -45,7 +46,7 @@ Utan dessa variabler faller `web/app/api/route/route.ts` tillbaka till OSRM. Det
 Utan token ska endpointen inte avslöja GraphHopper:
 
 ```sh
-curl -i https://routing.xn--skravgar-0zae.se/info
+curl -i https://routing.sakravagar.se/info
 ```
 
 Förväntat: `404`.
@@ -54,7 +55,7 @@ Med token ska GraphHopper svara:
 
 ```sh
 TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt')
-curl -i -H "X-Routing-Token: $TOKEN" https://routing.xn--skravgar-0zae.se/info
+curl -i -H "X-Routing-Token: $TOKEN" https://routing.sakravagar.se/info
 ```
 
 Förväntat: `200`.
@@ -63,7 +64,7 @@ Förväntat: `200`.
 
 ```sh
 TOKEN=$(ssh root@116.203.135.46 'cat /root/routing-token.txt') \
-GRAPHHOPPER_BASE_URL='https://routing.xn--skravgar-0zae.se' \
+GRAPHHOPPER_BASE_URL='https://routing.sakravagar.se' \
 GRAPHHOPPER_TOKEN="$TOKEN" \
 pnpm web
 ```

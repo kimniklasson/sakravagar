@@ -16,7 +16,7 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://tiles.openfreemap.org",
       "font-src 'self' data: https://tiles.openfreemap.org",
-      "connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://*.supabase.co https://routing.xn--skravgar-0zae.se",
+      "connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://*.supabase.co https://routing.sakravagar.se https://routing.xn--skravgar-0zae.se",
       "worker-src 'self' blob:",
       "child-src 'self' blob:",
       "object-src 'none'",
@@ -45,6 +45,28 @@ const config: NextConfig = {
       {
         source: "/:path*",
         headers: securityHeaders,
+      },
+    ];
+  },
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.sakravagar.se" }],
+        destination: "https://sakravagar.se/:path*",
+        permanent: true,
+      },
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "xn--skravgar-0zae.se" }],
+        destination: "https://sakravagar.se/:path*",
+        permanent: true,
+      },
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.xn--skravgar-0zae.se" }],
+        destination: "https://sakravagar.se/:path*",
+        permanent: true,
       },
     ];
   },
