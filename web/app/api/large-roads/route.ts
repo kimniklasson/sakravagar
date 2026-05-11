@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +46,7 @@ export async function GET(req: Request) {
     return jsonResponse({ error: bboxError }, { status: 400 });
   }
 
+  const startedAt = Date.now();
   const client = createClient(url, anon, { auth: { persistSession: false } });
   const { data, error } = await client.rpc("large_roads_in_bbox", {
     min_lng: bbox.minLng,
@@ -71,6 +72,13 @@ export async function GET(req: Request) {
       length_m: row.length_m,
       geometry: row.geometry,
     }));
+
+  logApiObservation("large-roads", {
+    bboxArea: Number(bbox.area.toFixed(4)),
+    durationMs: Date.now() - startedAt,
+    returnedRows: rows.length,
+    rowCount: segments.length,
+  });
 
   return jsonResponse({ segments }, { cacheSeconds: 300 });
 }

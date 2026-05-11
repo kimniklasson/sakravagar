@@ -67,11 +67,12 @@ Numrera i ordning efter senaste filen i `migrations/`. En ADR-post i `docs/decis
 - `0025_high_speed_badges_80.sql` — utökar kartlagret Höga hastigheter från 90+ till 80+ efter omimport.
 - `0027_route_sharing_feedback.sql` — skapar `route_snapshots`, `route_feedback` och RPC:er för delade ruttlänkar och feedbackskapande.
 - `0028_route_feedback_update_delete.sql` — lägger till RPC:er för att uppdatera feedbackkommentar och ta bort feedbackröst.
+- `0030_events_dedup_and_orphan_resnap.sql` — dedupad `events_in_bbox` för kartpunkter och timvis resnap av orphans.
 
 ## Dataregler
 
 - Pågående olycka = `last_seen >= now() - 90 min`.
-- Risk och popup dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`.
+- Kartpunkter dedupas via `events_in_bbox`; riskinfrastruktur och `segment_detail` dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`.
 - Risk aggregeras per `fid`, inte `element_id`.
 - `events.raw` ska inte exponeras publikt.
 - Publika, tunga RPC:er ska ha både bbox-filter och response-limit.

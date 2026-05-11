@@ -90,6 +90,22 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Konsekvens:** Frontend måste alltid skicka bbox till `/api/events` och tyngre lager. För hel-Sverige-vyer tillåts events/störningar fortsatt stora bboxar, men NVDB/Risk-lagren hålls till mindre ytor.
 
+## 2026-05-11 — Risklinjer och ÅDT-segmentpopup är pausade produktval
+
+**Valt:** Riskfärgning per segment och klickbar ÅDT-/segmentpopup visas inte i UI just nu.
+
+**Varför:** Olyckshistoriken är fortfarande för tunn för att en röd-orange riskbild ska upplevas statistiskt rättvisande. ÅDT-popupen gav dessutom ett för exakt och intensivt interaktionslager för användare som främst behöver en lättläst trafikintensitetssignal.
+
+**Konsekvens:** `addRiskLayer`, `/api/risk`, `risk_per_segment` och segmentpopup-koden får finnas kvar som vilande infrastruktur, men ska inte kopplas in av misstag. `Trafikflöde` läses via blå nyanser och liveflödespopup, inte segmentdetaljer.
+
+## 2026-05-11 — Olyckskartan dedupar innan visualisering
+
+**Valt:** `/api/events` läser via `events_in_bbox`, som dedupar snappade olyckor per `fid + message + road_number + first_seen-hour` innan heatmap/live-cirklar skapas. Orphans använder en geohash-fallback tills de snappas.
+
+**Varför:** Trafikverkets feed kan skapa flera tekniska rader för samma logiska incident. Heatmap och live-cirklar ska inte väga samma olycka flera gånger när popup/risklogiken redan räknar den som en.
+
+**Konsekvens:** Heatmapen visar historisk dedupad olyckstäthet. Pågående olyckor visas separat som live-cirklar och ingår inte samtidigt i heatmapens densitet.
+
 ## 2026-04-30 — ESLint via CLI, inte `next lint`
 
 **Valt:** `web` använder ESLint flat config (`eslint.config.mjs`) och scriptet `lint` kör `eslint .`.

@@ -3,6 +3,7 @@ import maplibregl, {
   type GeoJSONSource,
   type Map as MapLibreMap,
 } from "maplibre-gl";
+import { LIVE_EVENT_THRESHOLD_MS } from "@trafik/shared";
 import type { SegmentDetail } from "@/app/api/segment/route";
 import type { EventPoint } from "@/app/api/events/route";
 import type { DisturbancePoint } from "@/app/api/disturbances/route";
@@ -52,10 +53,6 @@ const HIT_TARGET_LAYER_ID = "events-hit-target";
 const LIVE_HALO_LAYER_ID = "events-live-halo";
 const LIVE_CORE_LAYER_ID = "events-live-core";
 
-// Pågående = senast sedd inom 90 min (3 polling-cykler à 30 min). Trafikverket
-// droppar olyckor ur feeden när de avslutas, så last_seen slutar uppdateras
-// och vi kan klassa dem som historiska.
-const LIVE_THRESHOLD_MS = 90 * 60 * 1000;
 const SWEDEN_EVENTS_BBOX: Bbox = {
   west: 10.5,
   south: 55,
@@ -386,7 +383,7 @@ export async function addEventsLayer(
   }
   const { points } = (await res.json()) as { points: EventPoint[] };
 
-  const liveCutoff = Date.now() - LIVE_THRESHOLD_MS;
+  const liveCutoff = Date.now() - LIVE_EVENT_THRESHOLD_MS;
   let liveCount = 0;
   const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
     type: "FeatureCollection",
@@ -424,6 +421,7 @@ export async function addEventsLayer(
     type: "heatmap",
     source: SOURCE_ID,
     maxzoom: 13,
+    filter: ["!=", ["get", "is_live"], true],
     paint: {
       "heatmap-weight": 1,
       "heatmap-intensity": [
@@ -547,7 +545,7 @@ export async function fetchLiveEvents(): Promise<EventPoint[]> {
   }
 
   const { points } = (await res.json()) as { points: EventPoint[] };
-  const liveCutoff = Date.now() - LIVE_THRESHOLD_MS;
+  const liveCutoff = Date.now() - LIVE_EVENT_THRESHOLD_MS;
   return points.filter((p) => Date.parse(p.last_seen) >= liveCutoff);
 }
 
@@ -2282,16 +2280,11 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
   };
 }
 
-// Risk-lager: olyckor per miljon fordon per nvdb-segment, från
-// materialiserad vy `risk_per_segment`. RPC:n returnerar bara segment där
-// events_count > 0 — tomma sträckor ritas inte alls.
-//
-// Färgskalan är preliminär: vi har bara 1-2 dagar data så värdena är
-// mycket högre än de blir när historiken växt (1 olycka på 1 dag på en
-// väg med ÅDT 200 → ~1.4M per miljon fordon, vilket är absurt men tekniskt
-// rätt för det smala datafönstret). Brytpunkterna nedan kommer behöva
-// kalibreras om när vi har 6+ månader data; tills dess är det viktigaste
-// att SE något hända i kartan, inte exakt magnitude.
+// Risk-lager: dormant product surface. Vi räknar fortfarande risk-MV och
+// behåller implementationen för senare datamognad, men visar inte lagret i UI
+// förrän olyckshistoriken är stor nog för en rimlig segmentriskbild.
+// Om lagret aktiveras igen ska segment-popupen nedan aktiveras via risklagrets
+// hit-target, inte via ÅDT-lagret.
 export function addRiskLayer(map: MapLibreMap): LayerController {
   if (map.getSource(RISK_SOURCE_ID)) {
     return { setVisible: () => {} };
@@ -2414,6 +2407,9 @@ export function addRiskLayer(map: MapLibreMap): LayerController {
 // escapeHtml() eftersom de kommer från Trafikverkets API och kan innehålla
 // godtyckliga strängar.
 export function addPopupHandler(map: MapLibreMap): void {
+  // ÅDT-linjer är medvetet inte klickbara: segmentpopupen gav för exakt
+  // signal för ett lager som främst ska läsas som blå trafikintensitet.
+  // Risklagrets popupväg är kvar vilande tills riskfärgningen aktiveras igen.
   const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID].filter((id) => map.getLayer(id));
   const disturbanceLayerIds = [DISTURBANCE_LAYER_ID, DISTURBANCE_HIT_LAYER_ID];
   const trafficFlowLayerIds = [TRAFFIC_FLOW_LAYER_ID, TRAFFIC_FLOW_HIT_LAYER_ID];

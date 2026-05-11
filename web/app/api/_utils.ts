@@ -52,6 +52,17 @@ export function serverErrorResponse(label: string, error: unknown) {
   return jsonResponse({ error: "server error" }, { status: 500 });
 }
 
+export function logApiObservation(route: string, fields: Record<string, unknown>): void {
+  console.info("api observability", { route, ...fields });
+}
+
+export function isMissingPostgrestFunctionError(error: unknown, functionName: string): boolean {
+  const err = error as { code?: unknown; message?: unknown };
+  const code = typeof err.code === "string" ? err.code : "";
+  const message = typeof err.message === "string" ? err.message : "";
+  return code === "PGRST202" || message.includes(functionName);
+}
+
 export function parseBboxParam(
   value: string | null,
   opts: BboxOptions,

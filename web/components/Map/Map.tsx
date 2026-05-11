@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { track } from "@vercel/analytics";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
@@ -119,6 +120,27 @@ function routeProviderNotice(provider: RouteProvider | null | undefined, avoids:
     return "Reservroutern saknar vägdetaljer, så hastigheter, broar, tunnlar och andra undvik-värden kan bara jämföras begränsat.";
   }
   return null;
+}
+
+function routeHasNullActiveAvoidScore(route: RouteLine, avoids: RouteAvoidState): boolean {
+  return (Object.keys(avoids) as RouteAvoidOption[]).some(
+    (option) => avoids[option] && route.avoidScores[option] === null,
+  );
+}
+
+function trackRouteResult(
+  routes: RouteLine[],
+  provider: RouteProvider | null | undefined,
+  avoids: RouteAvoidState,
+  source: "cache" | "network",
+): void {
+  track("route_result", {
+    provider: provider ?? "unknown",
+    avoidsActive: activeAvoidCount(avoids),
+    alternativeCount: routes.length,
+    hasNullScores: routes.some((route) => routeHasNullActiveAvoidScore(route, avoids)),
+    source,
+  });
 }
 
 function roundRouteCoordinate([lng, lat]: [number, number]): [number, number] {
@@ -1072,6 +1094,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
           setRouteProvider(cached.provider ?? null);
           applyRouteSelection(cached.routes, avoids, timeBudget, { focus: !opts.compare });
           setRouteNoticeText(routeProviderNotice(cached.provider, avoids));
+          trackRouteResult(cached.routes, cached.provider, avoids, "cache");
           return;
         }
         routeResponseCacheRef.current.delete(cacheKey);
@@ -1106,6 +1129,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       setRouteProvider(provider ?? null);
       applyRouteSelection(routes, avoids, timeBudget, { focus: !opts.compare });
       setRouteNoticeText(routeProviderNotice(provider, avoids));
+      trackRouteResult(routes, provider, avoids, "network");
     } catch (err) {
       console.warn("route planning failed", err);
       lastRouteKeyRef.current = null;

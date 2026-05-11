@@ -1,15 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import {
+  categoryFromDisturbanceMessageType,
+  LIVE_EVENT_THRESHOLD_MS,
+  type DisturbanceCategory,
+} from "@trafik/shared";
+import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-const ACTIVE_WINDOW_MS = 90 * 60 * 1000;
-
-export type DisturbanceCategory = "roadwork" | "traffic";
 
 export type DisturbancePoint = {
   id: string;
@@ -25,13 +26,6 @@ export type DisturbancePoint = {
   last_seen: string;
 };
 
-function categoryFromMessageType(messageType: string | null): DisturbanceCategory | null {
-  const t = (messageType ?? "").toLowerCase();
-  if (t.includes("vägarbete") || t.includes("roadwork")) return "roadwork";
-  if (t.includes("kö") || t.includes("trafik") || t.includes("queue")) return "traffic";
-  return null;
-}
-
 export async function GET(req: Request) {
   if (!url || !anon) {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
@@ -46,7 +40,8 @@ export async function GET(req: Request) {
   if (bboxError || !bbox) {
     return jsonResponse({ error: bboxError }, { status: 400 });
   }
-  const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
+  const startedAt = Date.now();
+  const activeSince = new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString();
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
 
@@ -68,11 +63,12 @@ export async function GET(req: Request) {
     return serverErrorResponse("disturbances query failed", error);
   }
 
-  const points: DisturbancePoint[] = (data ?? []).flatMap((row) => {
+  let unknownCategoryCount = 0;
+  const points: DisturbancePoint[] = (data ?? []).map((row) => {
     const messageType = (row.message_type ?? null) as string | null;
-    const category = categoryFromMessageType(messageType);
-    if (!category) return [];
-    return [{
+    const category = categoryFromDisturbanceMessageType(messageType);
+    if (category === "other") unknownCategoryCount += 1;
+    return {
       id: row.id as string,
       lng: row.lng as number,
       lat: row.lat as number,
@@ -84,7 +80,14 @@ export async function GET(req: Request) {
       severity: (row.severity ?? null) as string | null,
       first_seen: row.first_seen as string,
       last_seen: row.last_seen as string,
-    }];
+    };
+  });
+
+  logApiObservation("disturbances", {
+    bboxArea: Number(bbox.area.toFixed(4)),
+    durationMs: Date.now() - startedAt,
+    rowCount: points.length,
+    unknownCategoryCount,
   });
 
   return jsonResponse({ points }, { cacheSeconds: 30 });

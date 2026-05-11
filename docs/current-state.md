@@ -9,10 +9,12 @@ Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafi
 Aktiva UI-lager:
 
 - **Olyckor** — historiska och pågående olyckor. Default av.
-- **Trafikflöde** — ÅDT från NVDB/Lastkajen plus liveflöde från Trafikverket där mätdata finns. Default av.
+- **Trafikflöde** — ÅDT från NVDB/Lastkajen plus liveflöde från Trafikverket där mätdata finns. Default av. ÅDT-segment är medvetet inte klickbara; blå nyanser ska läsas som bakgrundssignal, inte som exakt segmentanalys.
 - **Trafikstörningar** — aktuella vägarbeten/köer/störningar. Default av.
 - **Höga hastigheter** — badges för 80 km/h och högre. Default av.
 - **Hjälp** — datakällor, legender, metodcopy och senaste uppdatering.
+
+Segmentrisk-färgning finns kvar i backend/kod som vilande infrastruktur men är pausad i UI tills olyckshistoriken är tillräckligt stor för att ge en rimlig riskbild. Olyckslagret visar därför punkter/heatmap, inte röd-orange risklinjer.
 
 Desktop har info/ruttplanerare i vänsterstacken, lagerknappar uppe till höger och zoom/location nere till höger. Mobil samlar lager bakom en `layers.svg`-knapp och visar hjälp som helskärm.
 
@@ -71,11 +73,12 @@ Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_
 ## Viktiga dataregler
 
 - Pågående olycka = `last_seen >= now() - 90 min`.
-- Risk och popup dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`.
+- Kartans olyckspunkter dedupas i `events_in_bbox`; snappade events använder `fid + message + road_number + first_seen-hour`, orphans använder vägnummer + geohash-fallback.
+- Riskinfrastrukturen och `segment_detail` dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`, men risklinjer och segmentpopup är pausade i UI.
 - Risk aggregeras per `fid`, inte `element_id`.
 - `nvdb_trafik_latest` väljer senaste mätperiod per `element_id` men behåller syskon-`fid`.
 - `events.raw`, `disturbances.raw` och `traffic_flow_measurements.raw` ska inte exponeras publikt.
-- ÅDT-/risk-/hastighetslager är bbox/tile-baserade för att undvika stora Supabase-svar.
+- ÅDT-/hastighetslager och vilande riskinfrastruktur är bbox/tile-baserade för att undvika stora Supabase-svar.
 
 ## Gotchas
 
@@ -86,6 +89,7 @@ Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_
 - Om GraphHopper-cache byggs om efter config/OSM-byte: stoppa service, flytta `/opt/graphhopper/graph-cache`, starta service och följ `journalctl -u graphhopper -f`.
 - Kör inte `next build` samtidigt som `next dev` om `.next` börjar bete sig konstigt.
 - Publik Nominatim är bara MVP-default; byt till dedikerad provider/self-host/avtalad instans före större publik trafik.
+- Risklagret (`addRiskLayer`) och segmentpopupen är dormant by design. Återaktivera inte dem som buggfix utan ett nytt produktbeslut om datamognad och kognitiv belastning.
 
 ## Nästa fokus
 

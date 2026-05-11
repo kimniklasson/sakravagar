@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +32,7 @@ export async function GET(req: Request) {
     return jsonResponse({ error: bboxError }, { status: 400 });
   }
 
+  const startedAt = Date.now();
   const client = createClient(url, anon, { auth: { persistSession: false } });
   const { data, error } = await client.rpc("risk_in_bbox", {
     min_lng: bbox.minLng,
@@ -51,6 +52,12 @@ export async function GET(req: Request) {
     risk_per_milj_fordon: row.risk_per_milj_fordon,
     geometry: row.geometry,
   }));
+
+  logApiObservation("risk", {
+    bboxArea: Number(bbox.area.toFixed(4)),
+    durationMs: Date.now() - startedAt,
+    rowCount: segments.length,
+  });
 
   return jsonResponse({ segments }, { cacheSeconds: 30 });
 }

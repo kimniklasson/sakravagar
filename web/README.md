@@ -56,9 +56,9 @@ web/
 
 ## Viktiga API-rutter
 
-- `/api/events` — olyckor från `events_public`; kräver `bbox`, stödjer `live=1`.
+- `/api/events` — dedupade olyckspunkter från `events_in_bbox`; kräver `bbox`, stödjer `live=1`.
 - `/api/events/stats` — datafönster/färskhet för UI-copy.
-- `/api/risk` — deduplicerad segmentrisk via `risk_in_bbox`.
+- `/api/risk` — vilande segmentrisk via `risk_in_bbox`; UI-lagret är pausat tills datan är mognare.
 - `/api/adt` — ÅDT/flöde via `adt_in_bbox`.
 - `/api/traffic-flow` — aktiva TrafficFlow-mätningar snappade till segment.
 - `/api/disturbances` — aktiva vägarbeten/kö-/trafikstörningar inom bbox.
@@ -67,7 +67,7 @@ web/
 - `/api/route` — GraphHopper/OSRM-routing via `POST`.
 - `/api/route-shares` — public route snapshots för `/r/[slug]`.
 - `/api/route-feedback` — tumme upp/ner och kommentar som kalibreringsunderlag.
-- `/api/segment` — popupdetaljer för vägsegment.
+- `/api/segment` — vilande popupdetaljer för vägsegment; ÅDT-lagret är inte klickbart i nuvarande UI.
 
 Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit.
 

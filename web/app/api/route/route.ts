@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse } from "../_utils";
+import {
+  categoryFromDisturbanceMessageType,
+  LIVE_EVENT_THRESHOLD_MS,
+  type DisturbanceCategory,
+} from "@trafik/shared";
+import { isMissingPostgrestFunctionError, jsonResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,7 +59,7 @@ export type RouteAnnotationSegment = {
 export type RouteAnnotationPoint = {
   kind: RouteAnnotationPointKind;
   coordinates: [number, number];
-  category?: "roadwork" | "traffic";
+  category?: DisturbanceCategory;
 };
 
 export type RouteAnnotations = {
@@ -1729,12 +1734,6 @@ function cityTrafficSegments(route: OsrmRoute): RouteAnnotationSegment[] {
   );
 }
 
-function disturbanceCategory(messageType: string | null): "roadwork" | "traffic" {
-  const t = (messageType ?? "").toLowerCase();
-  if (t.includes("vägarbete") || t.includes("roadwork")) return "roadwork";
-  return "traffic";
-}
-
 function disturbancePoints(route: OsrmRoute, rows: DisturbanceRow[]): RouteAnnotationPoint[] {
   if (!rows.length) return [];
   const line = route.geometry.coordinates;
@@ -1744,7 +1743,7 @@ function disturbancePoints(route: OsrmRoute, rows: DisturbanceRow[]): RouteAnnot
       ? [{
           kind: "disturbances" as const,
           coordinates: [row.lng, row.lat] as [number, number],
-          category: disturbanceCategory(row.message_type),
+          category: categoryFromDisturbanceMessageType(row.message_type),
         }]
       : []
   ));
@@ -2198,8 +2197,29 @@ async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidStat
   };
 
   try {
-    const activeSince = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+    const activeSince = new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString();
     const trafficFlowActiveSince = new Date(Date.now() - TRAFFIC_FLOW_ACTIVE_WINDOW_MS).toISOString();
+    const eventsRequest = bboxArea(bbox) <= 80
+      ? (async () => {
+          const result = await client.rpc("events_in_bbox", {
+            ...params,
+            p_since: null,
+            p_live_since: activeSince,
+          });
+          if (!result.error || !isMissingPostgrestFunctionError(result.error, "events_in_bbox")) {
+            return result;
+          }
+          return client
+            .from("events_public")
+            .select("id, lng, lat")
+            .gte("last_seen", activeSince)
+            .gte("lng", bbox.minLng)
+            .lte("lng", bbox.maxLng)
+            .gte("lat", bbox.minLat)
+            .lte("lat", bbox.maxLat)
+            .limit(500);
+        })()
+      : Promise.resolve({ data: [], error: null });
     const [largeRoadsResult, disturbancesResult, eventsResult, adtResult, trafficFlowResult] = await Promise.all([
       bboxArea(bbox) <= 40
         ? client.rpc("large_roads_in_bbox", params)
@@ -2213,17 +2233,7 @@ async function scoreRouteAlternatives(routes: OsrmRoute[], avoid: RouteAvoidStat
         .gte("lat", bbox.minLat)
         .lte("lat", bbox.maxLat)
         .limit(500),
-      bboxArea(bbox) <= 80
-        ? client
-            .from("events_public")
-            .select("id, lng, lat")
-            .gte("last_seen", activeSince)
-            .gte("lng", bbox.minLng)
-            .lte("lng", bbox.maxLng)
-            .gte("lat", bbox.minLat)
-            .lte("lat", bbox.maxLat)
-            .limit(500)
-        : Promise.resolve({ data: [], error: null }),
+      eventsRequest,
       avoid.trafficIntensity && bboxArea(bbox) <= 80
         ? client.rpc("adt_in_bbox", params).limit(TRAFFIC_INTENSITY_ADT_RPC_LIMIT)
         : Promise.resolve({ data: [], error: null }),

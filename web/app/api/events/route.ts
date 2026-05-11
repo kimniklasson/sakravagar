@@ -1,12 +1,19 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import { LIVE_EVENT_THRESHOLD_MS } from "@trafik/shared";
+import {
+  isMissingPostgrestFunctionError,
+  jsonResponse,
+  logApiObservation,
+  parseBboxParam,
+  serverErrorResponse,
+  SWEDEN_DATA_BOUNDS,
+} from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const LIVE_THRESHOLD_MS = 90 * 60 * 1000;
 
 export type EventPoint = {
   id: string;
@@ -52,35 +59,49 @@ export async function GET(req: Request) {
     return jsonResponse({ error: bboxError }, { status: 400 });
   }
 
+  const startedAt = Date.now();
   const client = createClient(url, anon, { auth: { persistSession: false } });
+  const liveSince = liveOnly
+    ? new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString()
+    : null;
 
-  let query = client
-    .from("events_public")
-    .select("id, lng, lat, icon_id, road_number, message, severity, first_seen, last_seen")
-    .order("last_seen", { ascending: false })
-    .limit(5000);
+  let resultSource = "events_in_bbox";
+  let { data, error } = await client.rpc("events_in_bbox", {
+    min_lng: bbox.minLng,
+    min_lat: bbox.minLat,
+    max_lng: bbox.maxLng,
+    max_lat: bbox.maxLat,
+    p_since: since,
+    p_live_since: liveSince,
+  });
 
-  // Filtrera på first_seen (när olyckan började) — matchar hur popupen
-  // presenterar datumet. last_seen är när scrapern senast såg raden, vilket
-  // skulle göra att gamla pågående olyckor felaktigt dyker upp i "senaste 7
-  // dagar".
-  if (since) query = query.gte("first_seen", since);
-  if (liveOnly) {
-    query = query.gte("last_seen", new Date(Date.now() - LIVE_THRESHOLD_MS).toISOString());
+  if (error && isMissingPostgrestFunctionError(error, "events_in_bbox")) {
+    resultSource = "events_public_fallback";
+    let fallbackQuery = client
+      .from("events_public")
+      .select("id, lng, lat, icon_id, road_number, message, severity, first_seen, last_seen")
+      .order("last_seen", { ascending: false })
+      .limit(5000);
+
+    if (since) fallbackQuery = fallbackQuery.gte("first_seen", since);
+    if (liveSince) fallbackQuery = fallbackQuery.gte("last_seen", liveSince);
+
+    fallbackQuery = fallbackQuery
+      .gte("lng", bbox.minLng)
+      .lte("lng", bbox.maxLng)
+      .gte("lat", bbox.minLat)
+      .lte("lat", bbox.maxLat);
+
+    const fallbackResult = await fallbackQuery;
+    data = fallbackResult.data;
+    error = fallbackResult.error;
   }
 
-  query = query
-    .gte("lng", bbox.minLng)
-    .lte("lng", bbox.maxLng)
-    .gte("lat", bbox.minLat)
-    .lte("lat", bbox.maxLat);
-
-  const { data, error } = await query;
   if (error) {
     return serverErrorResponse("events query failed", error);
   }
 
-  const points: EventPoint[] = (data ?? []).map((row) => ({
+  const points: EventPoint[] = ((data ?? []) as EventPoint[]).map((row) => ({
     id: row.id as string,
     lng: row.lng as number,
     lat: row.lat as number,
@@ -91,6 +112,15 @@ export async function GET(req: Request) {
     first_seen: row.first_seen as string,
     last_seen: row.last_seen as string,
   }));
+
+  logApiObservation("events", {
+    bboxArea: Number(bbox.area.toFixed(4)),
+    durationMs: Date.now() - startedAt,
+    liveOnly,
+    rowCount: points.length,
+    since: Boolean(since),
+    source: resultSource,
+  });
 
   return jsonResponse({ points }, { cacheSeconds: 30 });
 }

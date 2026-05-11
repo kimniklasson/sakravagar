@@ -14,7 +14,7 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 
 | Endpoint | Query | Returnerar | Cache |
 | --- | --- | --- | --- |
-| `GET /api/events` | `bbox`, ev. `live=1`, ev. `since` | Olyckspunkter från `events_public` | 30 s |
+| `GET /api/events` | `bbox`, ev. `live=1`, ev. `since` | Dedupade olyckspunkter från `events_in_bbox` | 30 s |
 | `GET /api/events/stats` | - | datafönster och färskhet för UI-copy | 30 s |
 | `GET /api/risk` | `bbox` | deduplicerad segmentrisk via `risk_in_bbox` | 30 s |
 | `GET /api/adt` | `bbox` | ÅDT-segment via `adt_in_bbox` | 60 s |
@@ -23,7 +23,9 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 | `GET /api/large-roads` | `bbox` | höghastighetssegment för 80+-badges | 300 s |
 | `GET /api/segment` | `fid` | `segment_detail(p_fid)` för popup | 120 s |
 
-Pågående olycka definieras som `last_seen >= now() - 90 min`. Risk och popup ska använda samma dedup-regel: `fid + message + road_number + first_seen-hour`.
+Pågående olycka definieras som `last_seen >= now() - 90 min`. `/api/events` dedupar kartpunkter innan visualisering; snappade events använder samma logiska regel som risk/popup: `fid + message + road_number + first_seen-hour`.
+
+Risklinjer och segmentpopup är pausade i UI tills olycksunderlaget är större. `/api/risk` och `/api/segment` finns kvar för framtida återaktivering och intern verifiering.
 
 ## Geocode
 

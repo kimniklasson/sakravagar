@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { jsonResponse, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +60,7 @@ export async function GET(req: Request) {
   if (bboxError || !bbox) {
     return jsonResponse({ error: bboxError }, { status: 400 });
   }
+  const startedAt = Date.now();
   const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
 
   const client = createClient(url, anon, { auth: { persistSession: false } });
@@ -90,6 +91,12 @@ export async function GET(req: Request) {
       snap_distance_m: row.snap_distance_m,
       geometry: row.geometry,
     };
+  });
+
+  logApiObservation("traffic-flow", {
+    bboxArea: Number(bbox.area.toFixed(4)),
+    durationMs: Date.now() - startedAt,
+    rowCount: segments.length,
   });
 
   return jsonResponse({ segments }, { cacheSeconds: 20 });
