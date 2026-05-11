@@ -106,6 +106,21 @@ function routeStateKey(stops: RouteStop[]): string {
     .join("|");
 }
 
+function replaceRouteStopById(
+  stops: RouteStop[],
+  id: string,
+  patch: Partial<Omit<RouteStop, "id">>,
+): RouteStop[] {
+  return stops.map((stop) => (stop.id === id ? { ...stop, ...patch } : stop));
+}
+
+function routeProviderNotice(provider: RouteProvider | null | undefined, avoids: RouteAvoidState): string | null {
+  if (provider === "osrm" && activeAvoidCount(avoids) > 0) {
+    return "Reservroutern saknar vägdetaljer, så hastigheter, broar, tunnlar och andra undvik-värden kan bara jämföras begränsat.";
+  }
+  return null;
+}
+
 function roundRouteCoordinate([lng, lat]: [number, number]): [number, number] {
   return [Number(lng.toFixed(6)), Number(lat.toFixed(6))];
 }
@@ -304,6 +319,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   const selectedRouteIdRef = useRef<string | null>(null);
   const routeProviderRef = useRef<RouteProvider | null>(null);
   const routeShareUrlsRef = useRef<globalThis.Map<string, string>>(new globalThis.Map());
+  const routeUserMutationVersionRef = useRef(0);
   const customRouteMarkersRef = useRef<maplibregl.Marker[]>([]);
   const clearRouteStopRef = useRef<(id: string) => void>(() => {});
   const dragRouteStopIdRef = useRef<string | null>(null);
@@ -321,6 +337,10 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   useEffect(() => { routeLinesRef.current = routeLines; }, [routeLines]);
   useEffect(() => { selectedRouteIdRef.current = selectedRouteId; }, [selectedRouteId]);
   useEffect(() => { routeProviderRef.current = routeProvider; }, [routeProvider]);
+
+  const markRouteUserMutation = useCallback(() => {
+    routeUserMutationVersionRef.current += 1;
+  }, []);
 
   const selectRouteById = useCallback((routeId: string) => {
     setRouteLines((current) => {
@@ -816,6 +836,8 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     if (!sharedRouteSlug) return;
 
     let cancelled = false;
+    const mutationVersion = routeUserMutationVersionRef.current;
+    const stillCurrent = () => !cancelled && routeUserMutationVersionRef.current === mutationVersion;
     const loadSharedRoute = async () => {
       setRouteLoading(true);
       setRouteError(null);
@@ -823,7 +845,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
 
       try {
         const res = await fetch(`/api/route-shares?slug=${encodeURIComponent(sharedRouteSlug)}`);
-        if (cancelled) return;
+        if (!stillCurrent()) return;
         if (res.status === 410) {
           clearRoute();
           setRouteError("Länken har gått ut. Sök rutten igen för att skapa en ny delningslänk.");
@@ -839,6 +861,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
         if (!res.ok) throw new Error(await res.text());
 
         const { payload } = (await res.json()) as { payload: RouteSharePayload };
+        if (!stillCurrent()) return;
         const selectedRoute = payload.selectedRoute;
         const stops = payload.stops;
         const routeAvoids = payload.routeAvoids;
@@ -880,18 +903,14 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   }, [sharedRouteSlug]);
 
   const setRouteStopLabel = (id: string, label: string) => {
+    markRouteUserMutation();
     clearRoute();
     setRouteStops((stops) =>
-      stops
-        .filter((stop, index) => stop.id === id || index === 0 || index === stops.length - 1)
-        .map((stop) =>
-        stop.id === id
-          ? { ...stop, label, coordinates: null, source: "manual" }
-          : stop,
-      ),
+      replaceRouteStopById(stops, id, { label, coordinates: null, source: "manual" }),
     );
   };
   const clearRouteStop = (id: string) => {
+    markRouteUserMutation();
     clearRoute();
     setGeocodeResultsByStop((byStop) => ({ ...byStop, [id]: [] }));
     setRouteStops((stops) => {
@@ -899,13 +918,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       if (index > 0 && index < stops.length - 1) {
         return stops.filter((stop) => stop.id !== id);
       }
-      return stops
-        .filter((stop, stopIndex) => stop.id === id || stopIndex === 0 || stopIndex === stops.length - 1)
-        .map((stop) =>
-          stop.id === id
-            ? { ...stop, label: "", coordinates: null, source: "manual" }
-            : stop,
-        );
+      return replaceRouteStopById(stops, id, { label: "", coordinates: null, source: "manual" });
     });
   };
   useEffect(() => {
@@ -949,6 +962,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
   }, [routeStops]);
   const reorderRouteStop = (sourceId: string, targetId: string) => {
     if (sourceId === targetId) return;
+    markRouteUserMutation();
     clearRoute();
     setRouteStops((stops) => {
       const sourceIndex = stops.findIndex((stop) => stop.id === sourceId);
@@ -962,15 +976,14 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     });
   };
   const selectGeocodeResult = (stopId: string, result: GeocodeResult) => {
+    markRouteUserMutation();
     clearRoute();
     setRouteStops((stops) =>
-      stops
-        .filter((stop, index) => stop.id === stopId || index === 0 || index === stops.length - 1)
-        .map((stop) =>
-        stop.id === stopId
-          ? { ...stop, label: result.shortLabel, coordinates: result.coordinates, source: "manual" }
-          : stop,
-      ),
+      replaceRouteStopById(stops, stopId, {
+        label: result.shortLabel,
+        coordinates: result.coordinates,
+        source: "manual",
+      }),
     );
     setGeocodeResultsByStop((byStop) => ({ ...byStop, [stopId]: [] }));
   };
@@ -1058,9 +1071,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
           setRouteCandidates(cached.routes);
           setRouteProvider(cached.provider ?? null);
           applyRouteSelection(cached.routes, avoids, timeBudget, { focus: !opts.compare });
-          if (cached.provider === "osrm" && activeAvoidCount(avoids) > 0) {
-            setRouteNoticeText("Lokal routing använder OSRM och kan bara jämföra ett fåtal standardalternativ.");
-          }
+          setRouteNoticeText(routeProviderNotice(cached.provider, avoids));
           return;
         }
         routeResponseCacheRef.current.delete(cacheKey);
@@ -1094,9 +1105,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       setRouteCandidates(routes);
       setRouteProvider(provider ?? null);
       applyRouteSelection(routes, avoids, timeBudget, { focus: !opts.compare });
-      if (provider === "osrm" && activeAvoidCount(avoids) > 0) {
-        setRouteNoticeText("Lokal routing använder OSRM och kan bara jämföra ett fåtal standardalternativ.");
-      }
+      setRouteNoticeText(routeProviderNotice(provider, avoids));
     } catch (err) {
       console.warn("route planning failed", err);
       lastRouteKeyRef.current = null;
@@ -1299,6 +1308,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       return;
     }
 
+    markRouteUserMutation();
     lastRouteKeyRef.current = null;
     setRouteStops(plan.stops);
     setRouteError(null);
@@ -1310,7 +1320,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       alternatives: 0,
       routeCoordinates: plan.coordinates,
     });
-  }, [buildRouteDragPlan, cancelRouteDragPreview, planRouteForStops]);
+  }, [buildRouteDragPlan, cancelRouteDragPreview, markRouteUserMutation, planRouteForStops]);
 
   useEffect(() => {
     routeDragHandlerRef.current = handlePrimaryRouteDrag;
@@ -1342,25 +1352,13 @@ export default function Map({ sharedRouteSlug }: MapProps) {
       const { results } = (await res.json()) as { results: GeocodeResult[] };
       const label = results[0]?.shortLabel ?? "Din position";
       setRouteStops((stops) =>
-        stops
-          .filter((stop, index) => stop.id === id || index === 0 || index === stops.length - 1)
-          .map((stop) =>
-            stop.id === id
-              ? { ...stop, label, coordinates, source: "gps" }
-              : stop,
-          ),
+        replaceRouteStopById(stops, id, { label, coordinates, source: "gps" }),
       );
       setRouteError(null);
     } catch (err) {
       console.warn("route reverse geocoding failed", err);
       setRouteStops((stops) =>
-        stops
-          .filter((stop, index) => stop.id === id || index === 0 || index === stops.length - 1)
-          .map((stop) =>
-            stop.id === id
-              ? { ...stop, label: "Din position", coordinates, source: "gps" }
-              : stop,
-          ),
+        replaceRouteStopById(stops, id, { label: "Din position", coordinates, source: "gps" }),
       );
       setRouteError("Hittade din plats, men kunde inte slå upp adressen.");
     } finally {
@@ -1368,6 +1366,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     }
   };
   const handleUsePositionForRouteStop = (id: string) => {
+    markRouteUserMutation();
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setRouteError("Din webbläsare stödjer inte platsdelning.");
       return;
@@ -1386,13 +1385,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
         clearRoute();
         const coordinates: [number, number] = [pos.coords.longitude, pos.coords.latitude];
         setRouteStops((stops) =>
-          stops
-            .filter((stop, index) => stop.id === id || index === 0 || index === stops.length - 1)
-            .map((stop) =>
-              stop.id === id
-                ? { ...stop, label: "Din position", coordinates, source: "gps" }
-                : stop,
-            ),
+          replaceRouteStopById(stops, id, { label: "Din position", coordinates, source: "gps" }),
         );
         void reverseGeocodeRouteStop(id, coordinates);
       },
@@ -1405,6 +1398,7 @@ export default function Map({ sharedRouteSlug }: MapProps) {
     );
   };
   const handleToggleRouteAvoid = (option: RouteAvoidOption) => {
+    markRouteUserMutation();
     setRouteAvoids((current) => {
       const next = { ...current, [option]: !current[option] };
       setRouteNoticeText(null);

@@ -1773,7 +1773,7 @@ function scoreHighSpeed(route: OsrmRoute, rows: LargeRoadRow[]): RouteMetric {
   const detailMetric = highSpeedMetricFromDetails(route);
   if (detailMetric) return detailMetric;
 
-  if (!rows.length) return { score: 0, exposure: 0 };
+  if (!rows.length) return { score: null, exposure: null };
   const line = route.geometry.coordinates;
   const originLat = routeOriginLat(route);
   let score = 0;

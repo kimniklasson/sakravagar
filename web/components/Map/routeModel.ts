@@ -482,8 +482,8 @@ function routeImprovesOption(route: RouteLine, baseline: RouteLine, option: Rout
   return base - current > 25;
 }
 
-function routeIsFastest(route: RouteLine, baseline: RouteLine): boolean {
-  return route.id === baseline.id || route.source === "fastest" || route.durationSeconds <= baseline.durationSeconds + 30;
+function routeIsBaseline(route: RouteLine, baseline: RouteLine): boolean {
+  return route.id === baseline.id || route.source === "fastest";
 }
 
 function routeAlternativeTitle(
@@ -497,7 +497,7 @@ function routeAlternativeTitle(
   if (isCustomRoute) return "Egen väg";
 
   const activeOptions = activeAvoidOptionsForUi(avoids);
-  if (!activeOptions.length || routeIsFastest(route, baseline)) return "Snabbaste";
+  if (!activeOptions.length || routeIsBaseline(route, baseline)) return "Snabbaste";
 
   const shortestDistance = Math.min(...routes.map((candidate) => candidate.distanceMeters));
   if (route.distanceMeters <= shortestDistance + 50) return "Kortast";
