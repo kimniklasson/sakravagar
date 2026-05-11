@@ -64,3 +64,14 @@ Komprimerad historik från tidigare sessionsloggar. Den här filen är arkiv och
 - Lade till ruttkort-actions: delningslänk, Google Maps-länk och tumme upp/ner med valfri kommentar.
 - Lade till migrationsspår för `route_snapshots` och `route_feedback`.
 - Dokumenterade framtidsidén att berika ÅDT/Flöde med kommunal trafikmängdsdata för innerstadsgator.
+
+## 2026-05-11
+
+- Genomförde fyra review-pass: säkerhet/ops, routing-korrekthet, data/visualisering/observability och prestanda. Sammanfattning och beslut finns i `docs/review-log.md`.
+- Hårdnade öppna route share/feedback-flöden med TTL, rate-limit/kostnadsskydd och cleanup-spår.
+- Fixade trust-breaking routingkontrakt: saknad höghastighetsdata är `null`, via-punkter bevaras vid stop-edit och OSRM-copy beskriver begränsad scoring.
+- Dokumenterade att risklinjer och ÅDT-segmentpopup är medvetet pausade produktval, inte aktiva buggar.
+- Dedupade olycksvisualisering via `events_in_bbox`, förbättrade disturbance-fallback och lade minimal observability på bbox-API:er.
+- Gjorde prestandastäd för route-scoring, bbox-RPC:er, cache headers och loader-refetch.
+- Testade men backade ett väg-shimmer-loadingexperiment eftersom det blev för hetsigt för produktens lugna känsla.
+- Bytte canonical domän till `sakravagar.se`, flyttade routing till `routing.sakravagar.se` och behöll gamla IDN-domänen som legacy redirect.

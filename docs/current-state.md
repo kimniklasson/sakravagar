@@ -1,6 +1,6 @@
-# Current state — 2026-05-10
+# Current state — 2026-05-11
 
-Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt och `docs/routing-ops.md` för GraphHopper-drift. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
+Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt, `docs/routing-ops.md` för GraphHopper-drift och `docs/review-log.md` för reviewspåret. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
 
 ## Produktläge
 
@@ -63,12 +63,19 @@ Detaljerade endpoint-kontrakt finns i `docs/api.md`.
 ## Infrastruktur
 
 - **App:** `https://sakravagar.se` på Vercel.
-- **DNS:** `sakravagar.se` hanteras i Loopia. Gamla IDN-domänen ligger kvar i Cloudflare tills redirect-migrationen är färdig.
+- **DNS:** Loopia är registrar. Cloudflare DNS hanterar både `sakravagar.se` och legacy-domänen `säkravägar.se` / `xn--skravgar-0zae.se`.
 - **Databas:** Supabase Postgres + PostGIS, migrations i `db/migrations/`.
 - **Routing:** Hetzner CPX32 med GraphHopper 11 bakom Caddy och `X-Routing-Token`. Drift i `docs/routing-ops.md`.
 - **Tiles:** MapLibre GL med OpenFreeMap.
 
 Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. Lokal routing utan GraphHopper-env faller tillbaka till OSRM och matchar inte production-routing.
+
+Canonical domains:
+
+- `https://sakravagar.se` är huvuddomän.
+- `https://www.sakravagar.se` redirectar till huvuddomänen.
+- `https://säkravägar.se` / `https://xn--skravgar-0zae.se` behålls som legacy redirect till huvuddomänen.
+- GraphHopper nås från serverkod via `https://routing.sakravagar.se`; gamla `routing.xn--skravgar-0zae.se` accepteras temporärt av Caddy under övergång.
 
 ## Viktiga dataregler
 
@@ -86,6 +93,7 @@ Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_
 - Lastkajen bulkimport ska använda Supabase session pooler på port `5432`, inte transaction pooler `6543`.
 - `Höga hastigheter` kräver att `scripts/import-large-roads.sh` körts efter 80+-ändringen; migrationen ensam skapar inte raderna.
 - GraphHopper custom model kräver `ch.disable: true`; snabbaste basrutten kan använda CH.
+- Efter domän-/env-ändringar i Vercel krävs redeploy för att `PUBLIC_SITE_ORIGIN`, `GRAPHHOPPER_BASE_URL`, redirects och CSP ska börja gälla i production.
 - Om GraphHopper-cache byggs om efter config/OSM-byte: stoppa service, flytta `/opt/graphhopper/graph-cache`, starta service och följ `journalctl -u graphhopper -f`.
 - Kör inte `next build` samtidigt som `next dev` om `.next` börjar bete sig konstigt.
 - Publik Nominatim är bara MVP-default; byt till dedikerad provider/self-host/avtalad instans före större publik trafik.

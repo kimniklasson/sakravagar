@@ -124,10 +124,10 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 **Konsekvens:** Vi äger nu en extra driftkomponent utanför Vercel/Supabase. Servern måste hållas uppdaterad och GraphHopper-grafen behöver byggas om när OSM/config ändras. Första setup: Ubuntu 24.04, Java 21, GraphHopper JAR i `/opt/graphhopper`, Sverige-PBF från Geofabrik, 4 GB swap, UFW med endast 22/80/443 publikt, Caddy med LetsEncrypt. Lokala devtester som ska matcha production måste sätta GraphHopper-env vars; annars faller `/api/route` tillbaka till OSRM.
 
-## 2026-05-01 — Domän och DNS: Loopia/Cloudflare + Vercel
+## 2026-05-11 — Domän och DNS: sakravagar.se som canonical
 
-**Valt:** `sakravagar.se` köpt via Loopia och används som canonical domän. Appen ligger på Vercel production (`sakravagar.se`), routing på `routing.sakravagar.se` mot Hetzner. DNS-poster: `A @ -> 76.76.21.21`, `CNAME www -> cname.vercel-dns.com`, `A routing -> 116.203.135.46`. Den gamla IDN-domänen ligger kvar i Cloudflare tills redirect-migrationen är färdig.
+**Valt:** `sakravagar.se` används som canonical domän. Loopia är registrar, Cloudflare hanterar DNS, Vercel hostar appen och Hetzner/Caddy hostar routing-subdomänen. Aktiva DNS-poster: `A @ -> 216.198.79.1`, `CNAME www -> 3ddc00e03f73de81.vercel-dns-017.com`, `A routing -> 116.203.135.46`, alla DNS-only.
 
 **Varför:** ASCII-domänen ger stabilare delningslänkar än `säkravägar.se`, som ofta behöver punycode i tekniska system. Vercel får fortsatt sköta appens certifikat/deploys, medan Caddy sköter routing-subdomänens certifikat på Hetzner.
 
-**Konsekvens:** `sakravagar.se` är canonical. Den gamla IDN-domänen `säkravägar.se` / `xn--skravgar-0zae.se` behålls som legacy redirect till `sakravagar.se`. DNS-posten för `routing` ska vara DNS-only om den hanteras i Cloudflare; i Loopia ska den vara en vanlig A-post så Caddy/Hetzner hanterar HTTPS direkt.
+**Konsekvens:** `sakravagar.se` är canonical. `www.sakravagar.se` redirectar till canonical. Den gamla IDN-domänen `säkravägar.se` / `xn--skravgar-0zae.se` behålls som legacy redirect till `sakravagar.se`. Caddy accepterar både `routing.sakravagar.se` och gamla `routing.xn--skravgar-0zae.se` under övergången. Vercel env ska vara `PUBLIC_SITE_ORIGIN=https://sakravagar.se` och `GRAPHHOPPER_BASE_URL=https://routing.sakravagar.se`.

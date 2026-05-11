@@ -21,6 +21,8 @@ Publik app anropar aldrig GraphHopper direkt från browsern. All trafik går via
 - IPv4: `116.203.135.46`.
 - Domän: `routing.sakravagar.se`.
 - Legacy-domän under övergång: `routing.xn--skravgar-0zae.se`.
+- Caddy site block ska innehålla båda hostarna tills legacy-hosten avvecklas:
+  `routing.sakravagar.se, routing.xn--skravgar-0zae.se`.
 - GraphHopper: `/opt/graphhopper/graphhopper-web-11.0.jar`.
 - OSM-data: `/opt/graphhopper/data/sweden-latest.osm.pbf`.
 - Graph-cache: `/opt/graphhopper/graph-cache`.
