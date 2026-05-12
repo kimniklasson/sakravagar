@@ -307,7 +307,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const [liveCount, setLiveCount] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("accidents");
+  const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("routeHighSpeed");
   const [accidentsOn, setAccidentsOn] = useState(false);
   const [trafficOn, setTrafficOn] = useState(false);
   const [disturbancesOn, setDisturbancesOn] = useState(false);

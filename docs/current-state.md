@@ -1,4 +1,4 @@
-# Current state — 2026-05-11
+# Current state — 2026-05-12
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt, `docs/routing-ops.md` för GraphHopper-drift och `docs/review-log.md` för reviewspåret. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
 
@@ -8,11 +8,11 @@ Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafi
 
 Aktiva UI-lager:
 
-- **Olyckor** — historiska och pågående olyckor. Default av.
-- **Trafikflöde** — ÅDT från NVDB/Lastkajen plus liveflöde från Trafikverket där mätdata finns. Default av. ÅDT-segment är medvetet inte klickbara; blå nyanser ska läsas som bakgrundssignal, inte som exakt segmentanalys.
-- **Trafikstörningar** — aktuella vägarbeten/köer/störningar. Default av.
+- **Olyckor** — historiska och pågående olyckor. Default av. Klick på olyckspunkter öppnar en kompakt popup med live/historisk etikett, väg, beskrivning och uppdateringstid.
+- **Trafikflöde** — ÅDT från NVDB/Lastkajen plus liveflöde från Trafikverket där mätdata finns. Default av. ÅDT-segment är medvetet inte klickbara; blå nyanser ska läsas som bakgrundssignal, inte som exakt segmentanalys. Liveflöde är klickbart och visar en kompakt popup med läge, fordon/timme, snitthastighet och uppdateringstid.
+- **Trafikstörningar** — aktuella vägarbeten/köer/störningar. Default av. Klick på störningspunkter öppnar en kompakt popup med påverkan, väg, beskrivning och uppdateringstid.
 - **Höga hastigheter** — badges för 80 km/h och högre. Default av.
-- **Hjälp** — datakällor, legender, metodcopy och senaste uppdatering.
+- **Hjälp** — ruttförslagens filterlogik, kartlager, legender, datakällor och senaste uppdatering.
 
 Segmentrisk-färgning finns kvar i backend/kod som vilande infrastruktur men är pausad i UI tills olyckshistoriken är tillräckligt stor för att ge en rimlig riskbild. Olyckslagret visar därför punkter/heatmap, inte röd-orange risklinjer.
 
@@ -31,6 +31,8 @@ Ruttplaneraren finns i `web/components/Map/RoutePlannerBox.tsx`, med state/orche
 - `Tunnlar`
 
 GraphHopper custom models påverkar vägkostnaden för dessa fem filter. Olyckshistorik och trafikstörningar är kontrollager/route-notices, inte planeringsfilter. Vald rutt visar pågående störningar och liveolyckor ovanpå ruttlinjen även när motsvarande kartlager är avstängt.
+
+Hjälppanelen har en egen ruttsektion som förklarar vad varje undvik-filter försöker ge användaren: lugnare hastigheter, mindre intensiv trafik, mindre stadskörning samt färre broar och tunnlar när rimliga alternativ finns. Den ligger före kartlagersektionen för att hjälpa användaren förstå ruttförslagen innan hen tolkar datalagren.
 
 Viktiga beteenden:
 
@@ -80,6 +82,7 @@ Canonical domains:
 ## Viktiga dataregler
 
 - Pågående olycka = `last_seen >= now() - 90 min`.
+- Trafikverkets `severity` exponeras för störningar men är ofta tomt i nuläget. Popupen faller därför tillbaka till neutral "Trafikstörning" när påverkan saknas; om `severity` fylls med t.ex. "mycket stor", "stor" eller "liten" påverkan mappas det till motsvarande badge.
 - Kartans olyckspunkter dedupas i `events_in_bbox`; snappade events använder `fid + message + road_number + first_seen-hour`, orphans använder vägnummer + geohash-fallback.
 - Riskinfrastrukturen och `segment_detail` dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`, men risklinjer och segmentpopup är pausade i UI.
 - Risk aggregeras per `fid`, inte `element_id`.

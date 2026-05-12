@@ -75,3 +75,9 @@ Komprimerad historik från tidigare sessionsloggar. Den här filen är arkiv och
 - Gjorde prestandastäd för route-scoring, bbox-RPC:er, cache headers och loader-refetch.
 - Testade men backade ett väg-shimmer-loadingexperiment eftersom det blev för hetsigt för produktens lugna känsla.
 - Bytte canonical domän till `sakravagar.se`, flyttade routing till `routing.sakravagar.se` och behöll gamla IDN-domänen som legacy redirect.
+
+## 2026-05-12
+
+- Gjorde hjälppanelen mer användarorienterad: en ny ruttsektion förklarar hur undvik-filtren vägs, medan kartlagersektionen beskriver värdet av olyckor, trafikflöde, störningar och höga hastigheter.
+- Tog bort ikoner från rutt-accordions, minskade accordion-höjd och gjorde datakällor-copy mindre visuellt tung.
+- Uppdaterade popups för olyckor, trafikstörningar och liveflöde till ett enklare tooltip-format med badge, huvudinfo och uppdateringstid. Segmentrisk-/ÅDT-förklaringar visas inte i dessa popups.

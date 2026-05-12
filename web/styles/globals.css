@@ -274,6 +274,134 @@ a:hover {
   margin-bottom: 4px;
 }
 
+.maplibregl-popup.event-popup .maplibregl-popup-content {
+  border-radius: 6px;
+  background: #555555;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  color: var(--color-white);
+  font-family: var(--font-univers);
+  font-size: var(--type-medium-size);
+  line-height: var(--type-medium-line);
+  letter-spacing: 0;
+}
+
+.maplibregl-popup.event-popup .maplibregl-popup-close-button {
+  top: 14px;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  color: var(--color-white);
+  font-size: 20px;
+  font-weight: 300;
+  line-height: 12px;
+  opacity: 0.9;
+}
+
+.maplibregl-popup.event-popup .maplibregl-popup-close-button:hover,
+.maplibregl-popup.event-popup .maplibregl-popup-close-button:focus-visible {
+  background: transparent;
+  color: var(--color-white);
+  opacity: 1;
+}
+
+.maplibregl-popup.event-popup .maplibregl-popup-tip {
+  border-width: 8px;
+}
+
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: #555555;
+}
+
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: #555555;
+}
+
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #555555;
+}
+
+.maplibregl-popup.event-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #555555;
+}
+
+.event-popup .seg-popup-body {
+  width: 252px;
+  min-width: 252px;
+  padding: 16px;
+}
+
+.event-popup-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  margin-bottom: 18px;
+  padding: 6px 6px 2px;
+  border-radius: 2px;
+  background: var(--color-white);
+  color: var(--color-dark);
+  font-size: var(--type-small-size);
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: var(--type-small-tracking);
+  white-space: nowrap;
+}
+
+.event-popup-badge-high {
+  background: var(--color-red);
+  color: var(--color-white);
+}
+
+.event-popup-badge-medium,
+.event-popup-badge-neutral {
+  background: var(--color-white);
+  color: var(--color-dark);
+}
+
+.event-popup-badge-low {
+  background: #c7c7c7;
+  color: var(--color-dark);
+}
+
+.event-popup-title {
+  margin: 0;
+  color: var(--color-white);
+  font-size: var(--type-medium-size);
+  font-weight: 400;
+  line-height: var(--type-medium-line);
+}
+
+.event-popup-message {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: var(--type-medium-size);
+  line-height: var(--type-medium-line);
+}
+
+.event-popup-updated {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.56);
+  font-size: var(--type-m-small-size);
+  line-height: var(--type-m-small-line);
+  letter-spacing: 0;
+}
+
+.event-popup .seg-popup-empty {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.54);
+  font-style: normal;
+}
+
+.traffic-flow-popup .event-popup-message {
+  margin-top: 2px;
+}
+
 /* === Maplibre attribution override (bottom-right info-button) ===
    Maplibre 4 renderar compact attribution som <details><summary>…</summary>
    <div class="…-inner">…</div></details>. Vi piggyback:ar på det — hörn-

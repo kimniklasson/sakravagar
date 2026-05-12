@@ -2533,7 +2533,7 @@ function openTrafficFlowPopup(
     closeButton: true,
     closeOnClick: true,
     maxWidth: "320px",
-    className: "seg-popup",
+    className: "seg-popup event-popup traffic-flow-popup",
   })
     .setLngLat(lngLat)
     .setHTML(renderTrafficFlow(props ?? {}))
@@ -2550,7 +2550,7 @@ function openDisturbancePopup(
     closeButton: true,
     closeOnClick: true,
     maxWidth: "320px",
-    className: "seg-popup",
+    className: "seg-popup event-popup",
   })
     .setLngLat(lngLat)
     .setHTML(renderDisturbance(props ?? {}))
@@ -2567,7 +2567,7 @@ function openEventPopup(
     closeButton: true,
     closeOnClick: true,
     maxWidth: "320px",
-    className: "seg-popup",
+    className: "seg-popup event-popup",
   })
     .setLngLat(lngLat)
     .setHTML(renderEvent(props ?? {}))
@@ -2721,77 +2721,103 @@ function renderSegment(s: SegmentDetail): string {
 // Event-popup. Datan kommer direkt från feature.properties (MapLibre
 // serialiserar properties-objektet) — ingen extra fetch behövs. Eftersom
 // MapLibre kan stringifiera nested values läser vi varje fält defensivt.
+function formatPopupTimestamp(raw: string): string {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  const dateText = date.toLocaleDateString("sv-SE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const timeText = date.toLocaleTimeString("sv-SE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${dateText}, ${timeText}`;
+}
+
+function booleanProperty(value: unknown): boolean {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function normalizedPopupMessage(message: string): string {
+  return message.trim();
+}
+
+function renderImpactBadge(label: string, tone: "high" | "medium" | "low" | "neutral"): string {
+  return `<div class="event-popup-badge event-popup-badge-${tone}">${escapeHtml(label)}</div>`;
+}
+
+function disturbanceImpactBadge(severity: string, fallback: string): string {
+  const normalized = severity.trim().toLocaleLowerCase("sv-SE");
+  if (normalized.includes("mycket") || normalized.includes("very") || normalized.includes("major")) {
+    return renderImpactBadge("MYCKET STOR PÅVERKAN", "high");
+  }
+  if (normalized.includes("stor") || normalized.includes("large")) {
+    return renderImpactBadge("STOR PÅVERKAN", "medium");
+  }
+  if (normalized.includes("liten") || normalized.includes("minor") || normalized.includes("small")) {
+    return renderImpactBadge("LITEN PÅVERKAN", "low");
+  }
+  const label = severity.trim() || fallback.trim() || "TRAFIKSTÖRNING";
+  return renderImpactBadge(label.toLocaleUpperCase("sv-SE"), "neutral");
+}
+
 function renderEvent(props: Record<string, unknown>): string {
   const message = typeof props.message === "string" ? props.message : "";
   const roadNumber = typeof props.road_number === "string" ? props.road_number : "";
-  const severity = typeof props.severity === "string" ? props.severity : "";
+  const lastSeenRaw = typeof props.last_seen === "string" ? props.last_seen : "";
   const firstSeenRaw = typeof props.first_seen === "string" ? props.first_seen : "";
-  const dateText = firstSeenRaw
-    ? new Date(firstSeenRaw).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
-    : "";
+  const dateText = formatPopupTimestamp(lastSeenRaw || firstSeenRaw);
+  const isLive = booleanProperty(props.is_live);
+  const badge = renderImpactBadge(isLive ? "LIVE-OLYCKA" : "HISTORISK OLYCKA", isLive ? "neutral" : "low");
 
   const headerRoad = roadNumber
-    ? `<div class="seg-popup-road">${escapeHtml(roadNumber)}</div>`
+    ? `<div class="event-popup-title">${escapeHtml(roadNumber)}</div>`
+    : `<div class="event-popup-title">Olycka</div>`;
+  const updatedLine = dateText
+    ? `<div class="event-popup-updated">Uppdaterad ${escapeHtml(dateText)}</div>`
     : "";
-  const dateLine = dateText
-    ? `<div class="seg-popup-date seg-popup-event-date">${escapeHtml(dateText)}</div>`
-    : "";
-  const severityLine = severity
-    ? `<div class="seg-popup-muted seg-popup-event-severity">${escapeHtml(severity)}</div>`
-    : "";
-  const messageBlock = message
-    ? `<div class="seg-popup-event-msg">${escapeHtml(message)}</div>`
+  const messageText = normalizedPopupMessage(message);
+  const messageBlock = messageText
+    ? `<div class="event-popup-message">${escapeHtml(messageText)}</div>`
     : `<div class="seg-popup-empty">Ingen beskrivning från Trafikverket.</div>`;
 
   return `
     <div class="seg-popup-body">
+      ${badge}
       ${headerRoad}
-      ${dateLine}
-      ${severityLine}
       ${messageBlock}
-      <div class="seg-popup-footer">
-        Klicka på vägsegmentet för aggregerad statistik. Saknas vägen i ÅDT-datasetet visas ingen färgning.
-      </div>
+      ${updatedLine}
     </div>
   `;
 }
 
 function renderDisturbance(props: Record<string, unknown>): string {
   const message = typeof props.message === "string" ? props.message : "";
-  const messageType = typeof props.message_type === "string" ? props.message_type : "";
   const roadNumber = typeof props.road_number === "string" ? props.road_number : "";
   const severity = typeof props.severity === "string" ? props.severity : "";
   const lastSeenRaw = typeof props.last_seen === "string" ? props.last_seen : "";
-  const dateText = lastSeenRaw
-    ? new Date(lastSeenRaw).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
-    : "";
+  const dateText = formatPopupTimestamp(lastSeenRaw);
+  const badge = disturbanceImpactBadge(severity, "Trafikstörning");
 
   const headerRoad = roadNumber
-    ? `<div class="seg-popup-road">${escapeHtml(roadNumber)}</div>`
+    ? `<div class="event-popup-title">${escapeHtml(roadNumber)}</div>`
+    : `<div class="event-popup-title">Trafikstörning</div>`;
+  const updatedLine = dateText
+    ? `<div class="event-popup-updated">Uppdaterad ${escapeHtml(dateText)}</div>`
     : "";
-  const typeLine = messageType
-    ? `<div class="seg-popup-muted seg-popup-event-severity">${escapeHtml(messageType)}</div>`
-    : "";
-  const dateLine = dateText
-    ? `<div class="seg-popup-date seg-popup-event-date">Uppdaterad ${escapeHtml(dateText)}</div>`
-    : "";
-  const severityLine = severity
-    ? `<div class="seg-popup-muted seg-popup-event-severity">${escapeHtml(severity)}</div>`
-    : "";
-  const messageBlock = message
-    ? `<div class="seg-popup-event-msg">${escapeHtml(message)}</div>`
-    : `<div class="seg-popup-empty">Ingen beskrivning från Trafikverket.</div>`;
+  const messageText = normalizedPopupMessage(message);
+  const messageBlock = messageText
+    ? `<div class="event-popup-message">${escapeHtml(messageText)}</div>`
+    : `<div class="seg-popup-empty">Ingen närmare beskrivning från Trafikverket.</div>`;
 
   return `
     <div class="seg-popup-body">
+      ${badge}
       ${headerRoad}
-      ${typeLine}
-      ${dateLine}
-      ${severityLine}
       ${messageBlock}
-      <div class="seg-popup-footer">
-        Aktuell trafikstörning från Trafikverket. Den ingår inte i riskhistoriken.
-      </div>
+      ${updatedLine}
     </div>
   `;
 }
@@ -2806,53 +2832,32 @@ function trafficFlowCategoryLabel(category: string): string {
   }
 }
 
+function trafficFlowBadgeTone(category: string): "high" | "neutral" {
+  return category === "slow" ? "high" : "neutral";
+}
+
 function renderTrafficFlow(props: Record<string, unknown>): string {
-  const siteId = typeof props.site_id === "number" || typeof props.site_id === "string"
-    ? String(props.site_id)
-    : "";
   const flow = typeof props.vehicle_flow_rate === "number"
     ? `${Math.round(props.vehicle_flow_rate).toLocaleString("sv-SE")} fordon/timme`
-    : "okänt";
+    : "Okänt flöde";
   const speed = typeof props.average_vehicle_speed === "number"
-    ? `${props.average_vehicle_speed.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} km/h`
-    : "okänd";
-  const quality = typeof props.data_quality === "string" ? props.data_quality : "";
+    ? `Snitthastighet ${props.average_vehicle_speed.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} km/h`
+    : "Snitthastighet okänd";
   const category = typeof props.category === "string" ? props.category : "";
-  const samples = typeof props.sample_count === "number" ? props.sample_count : null;
-  const snapDistance = typeof props.snap_distance_m === "number" ? Math.round(props.snap_distance_m) : null;
   const measurementRaw = typeof props.measurement_time === "string" ? props.measurement_time : "";
-  const dateText = measurementRaw
-    ? new Date(measurementRaw).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
-    : "";
-
-  const header = `<div class="seg-popup-road">${escapeHtml(trafficFlowCategoryLabel(category))}</div>`;
-  const dateLine = dateText
-    ? `<div class="seg-popup-date seg-popup-event-date">Mätt ${escapeHtml(dateText)}</div>`
-    : "";
-  const qualityLine = quality
-    ? `<div class="seg-popup-muted seg-popup-event-severity">Datakvalitet: ${escapeHtml(quality)}</div>`
-    : "";
-  const samplesLine = samples && samples > 1
-    ? `<dt>Mätpunkter</dt><dd>${samples.toLocaleString("sv-SE")} körfält/sensorer</dd>`
-    : "";
-  const snapLine = snapDistance !== null
-    ? `<dt>Snappning</dt><dd>${snapDistance.toLocaleString("sv-SE")} m från mätplats</dd>`
+  const lastSeenRaw = typeof props.last_seen === "string" ? props.last_seen : "";
+  const dateText = formatPopupTimestamp(measurementRaw || lastSeenRaw);
+  const badge = renderImpactBadge(trafficFlowCategoryLabel(category).toLocaleUpperCase("sv-SE"), trafficFlowBadgeTone(category));
+  const updatedLine = dateText
+    ? `<div class="event-popup-updated">Uppdaterad ${escapeHtml(dateText)}</div>`
     : "";
 
   return `
     <div class="seg-popup-body">
-      ${header}
-      ${dateLine}
-      ${qualityLine}
-      <dl class="seg-popup-stats">
-        <dt>Flöde nu</dt><dd>${escapeHtml(flow)}</dd>
-        <dt>Snitthastighet</dt><dd>${escapeHtml(speed)}</dd>
-        ${samplesLine}
-        ${snapLine}
-      </dl>
-      <div class="seg-popup-footer">
-        Trafikverkets TrafficFlow-data från mätplats${siteId ? ` ${escapeHtml(siteId)}` : ""}, visad på närmaste NVDB-segment. Färgen gäller mätplatsen, inte hela vägen.
-      </div>
+      ${badge}
+      <div class="event-popup-title">${escapeHtml(flow)}</div>
+      <div class="event-popup-message">${escapeHtml(speed)}</div>
+      ${updatedLine}
     </div>
   `;
 }

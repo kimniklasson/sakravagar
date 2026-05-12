@@ -327,6 +327,18 @@
   display: none;
 }
 
+.helpPanelGroup + .helpPanelGroup {
+  margin-top: 36px;
+}
+
+.helpPanelGroupNoIcons .helpAccordionButton {
+  grid-template-columns: 1fr auto;
+}
+
+.helpPanelGroupNoIcons .helpAccordionInner {
+  padding-left: 0;
+}
+
 .helpPanelHeader {
   padding-bottom: 28px;
 }
@@ -355,7 +367,7 @@
 
 .helpAccordionButton {
   width: 100%;
-  min-height: 58px;
+  min-height: 48px;
   display: grid;
   grid-template-columns: 17px 1fr auto;
   align-items: center;
@@ -492,7 +504,7 @@
 }
 
 .helpSources {
-  composes: type-medium from global;
+  composes: type-m-small from global;
   margin-top: 32px;
   padding: 16px;
   border-radius: 4px;
