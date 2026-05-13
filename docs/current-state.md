@@ -100,6 +100,7 @@ Canonical domains:
 ## Gotchas
 
 - Supabase PostGIS ligger i schemat `extensions`; `security definer` med explicit `search_path` behöver inkludera `extensions`.
+- Supabase Data API-exponering ska vara explicit i nya migrations. Alla nya `public`-tabeller, vyer, materialized views, funktioner och sekvenser behöver minsta nödvändiga `grant` i samma migration som objektet/RLS/policies; anta inte att default privileges gör objektet nåbart för `anon`, `authenticated` eller `service_role`.
 - Lastkajen bulkimport ska använda Supabase session pooler på port `5432`, inte transaction pooler `6543`.
 - `Höga hastigheter` kräver att `scripts/import-large-roads.sh` körts efter 80+-ändringen; migrationen ensam skapar inte raderna.
 - GraphHopper custom model kräver `ch.disable: true`; snabbaste basrutten kan använda CH.

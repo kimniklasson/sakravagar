@@ -53,6 +53,10 @@ Om vi senare vill extrahera ett fält vi inte tänkt på slipper vi scrapa om ga
 
 Numrera i ordning efter senaste filen i `migrations/`. En ADR-post i `docs/decisions.md` om valet är icke-trivialt.
 
+Supabase ändrar Data API-defaults under 2026: nya objekt i `public` ska inte antas bli nåbara via PostgREST/GraphQL utan explicita grants. Varje migration som skapar tabell, vy, materialized view, funktion eller sekvens i `public` ska därför också ange minsta nödvändiga behörigheter, t.ex. `grant select ... to anon, authenticated`, `grant execute on function ... to anon, authenticated` eller service-role-only grants för server-/Edge-kod. RLS/policies styr raderna, men `grant` styr om objektet alls är nåbart via Supabase Data API.
+
+Om objektet inte ska exponeras direkt, gör det tydligt i migrationen: enable RLS utan publik policy och använd en smal `security definer`-RPC eller server-side `service_role` i stället.
+
 ## Viktiga migrations
 
 - `0004_pg_cron_scrape.sql` — schemalägger Edge Function-scrape via `pg_cron`/`pg_net`.
@@ -82,5 +86,6 @@ Numrera i ordning efter senaste filen i `migrations/`. En ADR-post i `docs/decis
 ## Supabase-gotchas
 
 - PostGIS ligger i schemat `extensions`. `security definer`-funktioner med explicit `search_path` måste inkludera `extensions`.
+- Supabase Data API kräver framåt explicita grants för nya `public`-objekt. Lägg grants i samma migration som objektet och RLS/policies så ny tabell/vy/RPC inte tyst slutar fungera när default privileges ändras.
 - Supabase free tier har kort `statement_timeout`; undvik stora bboxar och globala risk-/NVDB-anrop.
 - Lastkajen bulkimport ska använda session pooler på port `5432`, inte transaction pooler `6543`.
