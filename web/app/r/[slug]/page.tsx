@@ -1,7 +1,7 @@
 import styles from "../../page.module.css";
 import { createClient } from "@supabase/supabase-js";
 import MapLoader from "@/components/Map/MapLoader";
-import type { RouteSharePayload } from "@/components/Map/Map";
+import type { RouteSharePayload } from "@/components/Map/routeSharing";
 
 export const dynamic = "force-dynamic";
 

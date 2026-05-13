@@ -32,10 +32,6 @@ const endpointRules: Record<string, Partial<Record<string, RateLimitRule[]>>> = 
       { id: "feedback-ten-minute", windowMs: 10 * 60_000, max: 20 },
       { id: "feedback-day", windowMs: 24 * 60 * 60_000, max: 80 },
     ],
-    PATCH: [
-      { id: "feedback-ten-minute", windowMs: 10 * 60_000, max: 20 },
-      { id: "feedback-day", windowMs: 24 * 60 * 60_000, max: 80 },
-    ],
     DELETE: [
       { id: "feedback-ten-minute", windowMs: 10 * 60_000, max: 20 },
       { id: "feedback-day", windowMs: 24 * 60 * 60_000, max: 80 },

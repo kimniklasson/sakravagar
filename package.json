@@ -8,8 +8,6 @@
     "node": ">=20"
   },
   "scripts": {
-    "scrape": "pnpm --filter @trafik/scraper run start",
-    "scrape:dev": "pnpm --filter @trafik/scraper run dev",
     "web": "pnpm --filter @trafik/web run dev",
     "build:web": "pnpm --filter @trafik/web run build",
     "typecheck": "pnpm -r run typecheck"

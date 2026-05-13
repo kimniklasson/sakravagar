@@ -1,32 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { track } from "@vercel/analytics";
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import styles from "./Map.module.css";
 import {
-  addAdtLayer,
-  addDisturbancesLayer,
-  addEventsLayer,
-  addRouteLayer,
-  fetchLiveEvents,
   focusRoute,
   focusLiveEvents,
-  addLargeRoadsLayer,
-  addTrafficFlowLayer,
-  addPopupHandler,
-  refreshDisturbancesLayer,
-  refreshTrafficFlowLayer,
-  setEventsLayerVisible,
   setRouteLayerData,
-  type LayerController,
-  type RouteDragCommit,
 } from "./layers";
-import type { EventStats } from "@/app/api/events/stats/route";
 import type { GeocodeResult } from "@/app/api/geocode/route";
-import type { RouteLine } from "@/app/api/route/route";
+import type { RouteLine } from "@/lib/routeTypes";
 import { HelpPanel, type HelpSectionId } from "./HelpPanel";
+import { useCustomRouteStopMarkers } from "./hooks/useCustomRouteStopMarkers";
+import { useLiveEventSummary } from "./hooks/useLiveEventSummary";
+import { useMapLibreLifecycle } from "./hooks/useMapLibreLifecycle";
+import { useRouteControlsBottom } from "./hooks/useRouteControlsBottom";
+import { useRouteStopSearch } from "./hooks/useRouteStopSearch";
+import { useViewportCssVars } from "./hooks/useViewportCssVars";
 import { LocationIcon, MinusIcon, PlusIcon, RoadOrXIcon } from "./MapIcons";
 import { RouteAlternativesTray } from "./RouteAlternativesTray";
 import { RouteLoadingIndicator, type RouteLoadingMode } from "./RouteLoadingIndicator";
@@ -34,9 +26,6 @@ import { RoutePlannerBox } from "./RoutePlannerBox";
 import {
   activeAvoidCount,
   activeRouteTimeBudget,
-  closestRouteCoordinateIndex,
-  customRouteStopIdPrefix,
-  dedupeRouteCoordinates,
   initialRouteAvoids,
   initialRouteStops,
   isCustomRouteStop,
@@ -47,41 +36,27 @@ import {
   selectRouteCandidates,
 } from "./routeModel";
 import type {
-  ResolvedRouteStop,
   RouteAvoidOption,
   RouteAvoidState,
   RouteCacheEntry,
-  RouteDragPlan,
   RouteProvider,
   RouteStop,
   RouteTimeBudget,
 } from "./routeModel";
-
-const SWEDEN_CENTER: [number, number] = [16.5, 62.5];
-const SWEDEN_ZOOM = 4.2;
-const SHARED_ROUTE_MAX_COORDINATES = 360;
-const SHARED_ROUTE_MAX_ANNOTATION_COORDINATES = 80;
-const SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS = 80;
-const SHARED_ROUTE_MAX_ANNOTATION_POINTS = 160;
+import {
+  buildGoogleMapsDirectionsUrl,
+  createRouteSharePayload,
+  routeStateKey,
+  writeClipboardText,
+  type RouteFeedbackVote,
+  type RouteSharePayload,
+} from "./routeSharing";
 
 const mobileInfoBoxQuery = "(max-width: 767px)";
 
 export type MapProps = {
   sharedRouteSlug?: string;
   initialSharedRoutePayload?: RouteSharePayload | null;
-};
-
-type RouteFeedbackVote = "up" | "down";
-
-export type RouteSharePayload = {
-  version: 1;
-  createdAt: string;
-  stops: RouteStop[];
-  routeAvoids: RouteAvoidState;
-  selectedRoute: RouteLine;
-  provider: RouteProvider | null;
-  selectedRouteRank: number;
-  presentedRouteCount: number;
 };
 
 function isMobileViewport(): boolean {
@@ -100,12 +75,6 @@ function liveUpdatedText(latestLastSeen: string | null, now: number): string {
   if (minutes === null) return "Uppdaterat nyligen";
   if (minutes < 1) return "Uppdaterat nyss";
   return `Uppdaterat ${minutes} min. sedan`;
-}
-
-function routeStateKey(stops: RouteStop[]): string {
-  return stops
-    .map((stop) => stop.coordinates?.join(",") ?? stop.label.trim().toLowerCase())
-    .join("|");
 }
 
 function replaceRouteStopById(
@@ -144,158 +113,6 @@ function trackRouteResult(
   });
 }
 
-function roundRouteCoordinate([lng, lat]: [number, number]): [number, number] {
-  return [Number(lng.toFixed(6)), Number(lat.toFixed(6))];
-}
-
-function compactRouteCoordinates(
-  coordinates: GeoJSON.Position[],
-  maxCoordinates: number,
-): [number, number][] {
-  const valid = coordinates.filter((coord): coord is [number, number] => (
-    Array.isArray(coord) &&
-    coord.length >= 2 &&
-    typeof coord[0] === "number" &&
-    typeof coord[1] === "number" &&
-    Number.isFinite(coord[0]) &&
-    Number.isFinite(coord[1])
-  ));
-
-  if (valid.length <= maxCoordinates) return valid.map(roundRouteCoordinate);
-  const sampled: [number, number][] = [];
-  const step = (valid.length - 1) / (maxCoordinates - 1);
-  for (let index = 0; index < maxCoordinates; index += 1) {
-    const coord = valid[Math.round(index * step)];
-    if (coord) sampled.push(roundRouteCoordinate(coord));
-  }
-  return dedupeRouteCoordinates(sampled);
-}
-
-function compactLineString(
-  geometry: GeoJSON.LineString,
-  maxCoordinates: number,
-): GeoJSON.LineString {
-  return {
-    type: "LineString",
-    coordinates: compactRouteCoordinates(geometry.coordinates, maxCoordinates),
-  };
-}
-
-function compactRouteForSnapshot(route: RouteLine): RouteLine {
-  return {
-    ...route,
-    geometry: compactLineString(route.geometry, SHARED_ROUTE_MAX_COORDINATES),
-    annotations: {
-      highSpeed: (route.annotations.highSpeed ?? [])
-        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
-        .map((segment) => ({
-          ...segment,
-          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
-        })),
-      trafficIntensity: (route.annotations.trafficIntensity ?? [])
-        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
-        .map((segment) => ({
-          ...segment,
-          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
-        })),
-      cityTraffic: (route.annotations.cityTraffic ?? [])
-        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
-        .map((segment) => ({
-          ...segment,
-          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
-        })),
-      bridges: (route.annotations.bridges ?? [])
-        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
-        .map((segment) => ({
-          ...segment,
-          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
-        })),
-      tunnels: (route.annotations.tunnels ?? [])
-        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
-        .map((segment) => ({
-          ...segment,
-          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
-        })),
-      disturbances: (route.annotations.disturbances ?? []).slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
-      liveAccidents: (route.annotations.liveAccidents ?? []).slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
-    },
-  };
-}
-
-function compactStopsForSnapshot(stops: RouteStop[]): RouteStop[] {
-  return stops.map((stop) => ({
-    ...stop,
-    coordinates: stop.coordinates ? roundRouteCoordinate(stop.coordinates) : null,
-  }));
-}
-
-function coordinateParam([lng, lat]: [number, number]): string {
-  return `${lat.toFixed(6)},${lng.toFixed(6)}`;
-}
-
-function routeGoogleWaypoints(route: RouteLine): [number, number][] {
-  const coordinates = route.geometry.coordinates.filter((coord): coord is [number, number] => (
-    Array.isArray(coord) &&
-    coord.length >= 2 &&
-    typeof coord[0] === "number" &&
-    typeof coord[1] === "number" &&
-    Number.isFinite(coord[0]) &&
-    Number.isFinite(coord[1])
-  ));
-  if (coordinates.length < 5) return [];
-
-  return [0.25, 0.5, 0.75]
-    .map((fraction) => coordinates[Math.round((coordinates.length - 1) * fraction)])
-    .filter((coord): coord is [number, number] => Boolean(coord))
-    .map(roundRouteCoordinate);
-}
-
-function buildGoogleMapsDirectionsUrl(route: RouteLine, stops: RouteStop[]): string | null {
-  const routeCoordinates = route.geometry.coordinates.filter((coord): coord is [number, number] => (
-    Array.isArray(coord) &&
-    coord.length >= 2 &&
-    typeof coord[0] === "number" &&
-    typeof coord[1] === "number" &&
-    Number.isFinite(coord[0]) &&
-    Number.isFinite(coord[1])
-  ));
-  const origin = stops[0]?.coordinates ?? routeCoordinates[0];
-  const destination = stops.at(-1)?.coordinates ?? routeCoordinates.at(-1);
-  if (!origin || !destination) return null;
-
-  const params = new URLSearchParams({
-    api: "1",
-    origin: coordinateParam(origin),
-    destination: coordinateParam(destination),
-    travelmode: "driving",
-    dir_action: "navigate",
-    utm_source: "sakravagar",
-    utm_campaign: "route_card",
-  });
-  const waypoints = routeGoogleWaypoints(route);
-  if (waypoints.length > 0) {
-    params.set("waypoints", waypoints.map(coordinateParam).join("|"));
-  }
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
-}
-
-async function writeClipboardText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
-}
-
 export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -304,9 +121,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const [infoBoxOpen, setInfoBoxOpen] = useState(false);
   const [infoBoxCompact, setInfoBoxCompact] = useState(isMobileViewport);
   const [layerMenuOpen, setLayerMenuOpen] = useState(false);
-  const [liveCount, setLiveCount] = useState(0);
-  const [eventStats, setEventStats] = useState<EventStats | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const { eventStats, liveCount, now, refreshLiveCount, setLiveCount } = useLiveEventSummary();
   const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("routeHighSpeed");
   const [accidentsOn, setAccidentsOn] = useState(false);
   const [trafficOn, setTrafficOn] = useState(false);
@@ -316,8 +131,11 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const [routeStops, setRouteStops] = useState<RouteStop[]>(initialRouteStops);
   const [activeRouteStopId, setActiveRouteStopId] = useState<string | null>(null);
   const [loadingRouteStopId, setLoadingRouteStopId] = useState<string | null>(null);
-  const [geocodingStopId, setGeocodingStopId] = useState<string | null>(null);
-  const [geocodeResultsByStop, setGeocodeResultsByStop] = useState<Record<string, GeocodeResult[]>>({});
+  const {
+    geocodeResultsByStop,
+    geocodingStopId,
+    setGeocodeResultsByStop,
+  } = useRouteStopSearch({ activeRouteStopId, routeStops });
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeCompareLoading, setRouteCompareLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -329,13 +147,6 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const [routeProvider, setRouteProvider] = useState<RouteProvider | null>(null);
   const routeStopsRef = useRef<RouteStop[]>(initialRouteStops);
   const routeAvoidsRef = useRef<RouteAvoidState>(initialRouteAvoids);
-  const routeDragHandlerRef = useRef<((commit: RouteDragCommit) => void) | null>(null);
-  const routeDragPreviewHandlerRef = useRef<((commit: RouteDragCommit) => void) | null>(null);
-  const routeDragPreviewLatestRef = useRef<RouteDragCommit | null>(null);
-  const routeDragPreviewTimerRef = useRef<number | null>(null);
-  const routeDragPreviewAbortRef = useRef<AbortController | null>(null);
-  const routeDragPreviewInFlightRef = useRef(false);
-  const routeDragPreviewRequestedKeyRef = useRef<string | null>(null);
   const routeControlsRef = useRef<HTMLDivElement | null>(null);
   const routeResponseCacheRef = useRef<globalThis.Map<string, RouteCacheEntry>>(new globalThis.Map());
   const routeLinesRef = useRef<RouteLine[]>([]);
@@ -343,18 +154,10 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const routeProviderRef = useRef<RouteProvider | null>(null);
   const routeShareUrlsRef = useRef<globalThis.Map<string, string>>(new globalThis.Map());
   const routeUserMutationVersionRef = useRef(0);
-  const customRouteMarkersRef = useRef<maplibregl.Marker[]>([]);
-  const clearRouteStopRef = useRef<(id: string) => void>(() => {});
   const dragRouteStopIdRef = useRef<string | null>(null);
   const lastRouteKeyRef = useRef<string | null>(null);
   const routeCompareTimerRef = useRef<number | null>(null);
   const shouldRevealSelectedRouteRef = useRef(false);
-  const layerCtrlRef = useRef<{
-    adt?: LayerController;
-    disturbances?: LayerController;
-    trafficFlow?: LayerController;
-    largeRoads?: LayerController;
-  }>({});
   useEffect(() => { routeStopsRef.current = routeStops; }, [routeStops]);
   useEffect(() => { routeAvoidsRef.current = routeAvoids; }, [routeAvoids]);
   useEffect(() => { routeLinesRef.current = routeLines; }, [routeLines]);
@@ -388,206 +191,23 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     setRouteLayerData(map, routeLines, routeId ?? selectedRouteId, routeAvoids);
   }, [routeAvoids, routeLines, selectedRouteId]);
 
-  const refreshEventStats = async () => {
-    const res = await fetch("/api/events/stats");
-    if (!res.ok) {
-      console.warn("failed to fetch event stats", await res.text());
-      return;
-    }
-    setEventStats((await res.json()) as EventStats);
-  };
-
-  const refreshLiveCount = async () => {
-    const liveEvents = await fetchLiveEvents();
-    setLiveCount(liveEvents.length);
-  };
-
-  useEffect(() => {
-    void refreshEventStats();
-    void refreshLiveCount();
-    const id = window.setInterval(() => {
-      setNow(Date.now());
-      void refreshEventStats();
-      void refreshLiveCount();
-    }, 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    let frame = 0;
-    let stableViewportHeight = window.innerHeight;
-    let stableViewportWidth = window.innerWidth;
-    let appliedViewportHeight: number | null = null;
-    let appliedViewportWidth: number | null = null;
-
-    const textInputFocused = () => {
-      const el = document.activeElement;
-      return el instanceof HTMLInputElement ||
-        el instanceof HTMLTextAreaElement ||
-        el instanceof HTMLSelectElement ||
-        Boolean(el instanceof HTMLElement && el.isContentEditable);
-    };
-
-    const updateViewportVars = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const focused = textInputFocused();
-        const widthChanged = Math.abs(window.innerWidth - stableViewportWidth) > 24;
-        if (!focused || widthChanged) {
-          stableViewportHeight = window.innerHeight;
-          stableViewportWidth = window.innerWidth;
-        }
-
-        root.style.setProperty("--app-visual-height", `${stableViewportHeight}px`);
-        root.style.setProperty("--app-visual-top", "0px");
-        root.style.setProperty("--app-visual-bottom", "0px");
-        const viewportChanged =
-          appliedViewportHeight !== stableViewportHeight ||
-          appliedViewportWidth !== stableViewportWidth;
-        appliedViewportHeight = stableViewportHeight;
-        appliedViewportWidth = stableViewportWidth;
-        if (viewportChanged) mapRef.current?.resize();
-      });
-    };
-
-    updateViewportVars();
-    window.addEventListener("resize", updateViewportVars);
-    window.addEventListener("focusin", updateViewportVars);
-    window.addEventListener("focusout", updateViewportVars);
-    window.visualViewport?.addEventListener("resize", updateViewportVars);
-    window.visualViewport?.addEventListener("scroll", updateViewportVars);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("resize", updateViewportVars);
-      window.removeEventListener("focusin", updateViewportVars);
-      window.removeEventListener("focusout", updateViewportVars);
-      window.visualViewport?.removeEventListener("resize", updateViewportVars);
-      window.visualViewport?.removeEventListener("scroll", updateViewportVars);
-      root.style.removeProperty("--app-visual-height");
-      root.style.removeProperty("--app-visual-top");
-      root.style.removeProperty("--app-visual-bottom");
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    const element = routeControlsRef.current;
-    if (!element) return;
-
-    const update = () => {
-      const rect = element.getBoundingClientRect();
-      document.documentElement.style.setProperty("--route-controls-bottom", `${Math.ceil(rect.bottom)}px`);
-    };
-
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    for (const child of Array.from(element.children)) observer.observe(child);
-    window.addEventListener("resize", update);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-      document.documentElement.style.removeProperty("--route-controls-bottom");
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: "/styles/sakravagar_dark.json",
-      center: SWEDEN_CENTER,
-      zoom: SWEDEN_ZOOM,
-      attributionControl: { compact: false },
-    });
-
-    // dragend räcker som "användar-pan"-signal — zoom (knappar/scroll/pinch)
-    // ändrar inte centrum så locate-state ska inte växla av av zoom.
-    map.on("dragend", () => setAtUserLocation(false));
-    map.on("moveend", () => {
-      if (!mapLoadedRef.current) return;
-      void addEventsLayer(map);
-    });
-
-    map.on("load", () => {
-      layerCtrlRef.current.largeRoads = addLargeRoadsLayer(map);
-      layerCtrlRef.current.adt = addAdtLayer(map);
-      layerCtrlRef.current.adt.setVisible(trafficOn);
-      layerCtrlRef.current.largeRoads.setVisible(largeRoadsOn);
-      void addEventsLayer(map)
-        .then(() => {
-          void refreshLiveCount();
-          setEventsLayerVisible(map, accidentsOn);
-          layerCtrlRef.current.disturbances = addDisturbancesLayer(map);
-          layerCtrlRef.current.disturbances.setVisible(disturbancesOn);
-          layerCtrlRef.current.trafficFlow = addTrafficFlowLayer(map);
-          layerCtrlRef.current.trafficFlow.setVisible(trafficOn);
-          addRouteLayer(
-            map,
-            selectRouteById,
-            (commit) => routeDragHandlerRef.current?.(commit),
-            (commit) => routeDragPreviewHandlerRef.current?.(commit),
-          );
-          if (routeLinesRef.current.length > 0) {
-            setRouteLayerData(
-              map,
-              routeLinesRef.current,
-              selectedRouteIdRef.current,
-              routeAvoidsRef.current,
-            );
-            focusRoute(map, routeLinesRef.current);
-          }
-          return Promise.all([
-            refreshDisturbancesLayer(map),
-            refreshTrafficFlowLayer(map),
-          ]);
-        })
-        .finally(() => {
-          addPopupHandler(map);
-          mapLoadedRef.current = true;
-        });
-    });
-
-    mapRef.current = map;
-    return () => {
-      map.remove();
-      mapRef.current = null;
-      mapLoadedRef.current = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (map && mapLoadedRef.current) setEventsLayerVisible(map, accidentsOn);
-  }, [accidentsOn]);
-
-  useEffect(() => {
-    layerCtrlRef.current.adt?.setVisible(trafficOn);
-    layerCtrlRef.current.trafficFlow?.setVisible(trafficOn);
-  }, [trafficOn]);
-
-  useEffect(() => {
-    layerCtrlRef.current.disturbances?.setVisible(disturbancesOn);
-  }, [disturbancesOn]);
-
-  useEffect(() => {
-    layerCtrlRef.current.largeRoads?.setVisible(largeRoadsOn);
-  }, [largeRoadsOn]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const map = mapRef.current;
-      if (!map || !mapLoadedRef.current) return;
-      void addEventsLayer(map, { force: true });
-      void refreshDisturbancesLayer(map);
-      void refreshTrafficFlowLayer(map);
-    }, 60_000);
-    return () => window.clearInterval(id);
-  }, []);
+  useViewportCssVars(mapRef);
+  useRouteControlsBottom(routeControlsRef);
+  useMapLibreLifecycle({
+    accidentsOn,
+    containerRef,
+    disturbancesOn,
+    largeRoadsOn,
+    mapLoadedRef,
+    mapRef,
+    refreshLiveCount,
+    routeAvoidsRef,
+    routeLinesRef,
+    selectedRouteIdRef,
+    selectRouteById,
+    setAtUserLocation,
+    trafficOn,
+  });
 
   useEffect(() => {
     if (!routeNoticeText) return;
@@ -605,65 +225,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     if (routeCompareTimerRef.current !== null) {
       window.clearTimeout(routeCompareTimerRef.current);
     }
-    if (routeDragPreviewTimerRef.current !== null) {
-      window.clearTimeout(routeDragPreviewTimerRef.current);
-    }
-    routeDragPreviewAbortRef.current?.abort();
   }, []);
-
-  useEffect(() => {
-    const activeStop = routeStops.find((stop) => stop.id === activeRouteStopId);
-    if (!activeStop || activeStop.coordinates || activeStop.source === "gps") {
-      setGeocodingStopId(null);
-      return;
-    }
-
-    const query = activeStop.label.trim();
-    if (query.length < 2) {
-      setGeocodeResultsByStop((byStop) => ({ ...byStop, [activeStop.id]: [] }));
-      setGeocodingStopId(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    setGeocodingStopId(activeStop.id);
-    const timeout = window.setTimeout(() => {
-      const params = new URLSearchParams({
-        q: query,
-        limit: "5",
-        t: String(Date.now()),
-      });
-      void fetch(`/api/geocode?${params.toString()}`, {
-        signal: controller.signal,
-      })
-        .then(async (res) => {
-          if (!res.ok) throw new Error(await res.text());
-          return res.json() as Promise<{ results: GeocodeResult[] }>;
-        })
-        .then(({ results }) => {
-          if (results.length > 0) {
-            setGeocodeResultsByStop((byStop) => ({ ...byStop, [activeStop.id]: results }));
-          } else {
-            setGeocodeResultsByStop((byStop) => {
-              const previous = byStop[activeStop.id] ?? [];
-              return previous.length > 0 ? byStop : { ...byStop, [activeStop.id]: [] };
-            });
-          }
-        })
-        .catch((err) => {
-          if (controller.signal.aborted) return;
-          console.warn("geocode lookup failed", err);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setGeocodingStopId(null);
-        });
-    }, 260);
-
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [activeRouteStopId, routeStops]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -733,17 +295,13 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     if (map && mapLoadedRef.current) setRouteLayerData(map, []);
   };
   const routeSnapshotPayload = (route: RouteLine): RouteSharePayload => {
-    const routeRank = routeLinesRef.current.findIndex((candidate) => candidate.id === route.id);
-    return {
-      version: 1,
-      createdAt: new Date().toISOString(),
-      stops: compactStopsForSnapshot(routeStopsRef.current),
-      routeAvoids: { ...routeAvoidsRef.current },
-      selectedRoute: compactRouteForSnapshot(route),
+    return createRouteSharePayload({
       provider: routeProviderRef.current,
-      selectedRouteRank: routeRank >= 0 ? routeRank : 0,
-      presentedRouteCount: routeLinesRef.current.length,
-    };
+      route,
+      routeAvoids: routeAvoidsRef.current,
+      routeLines: routeLinesRef.current,
+      stops: routeStopsRef.current,
+    });
   };
 
   const routeById = (routeId: string): RouteLine => {
@@ -790,7 +348,6 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const handleSubmitRouteFeedback = async (
     routeId: string,
     vote: RouteFeedbackVote,
-    comment: string,
   ): Promise<string> => {
     const route = routeById(routeId);
     const routeRank = routeLinesRef.current.findIndex((candidate) => candidate.id === route.id);
@@ -800,7 +357,6 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         vote,
-        comment,
         snapshot: routeSnapshotPayload(route),
         routeMeta: {
           routeId: route.id,
@@ -828,21 +384,6 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
 
     const { id } = (await res.json()) as { id: string };
     return id;
-  };
-
-  const handleUpdateRouteFeedbackComment = async (
-    feedbackId: string,
-    comment: string,
-  ): Promise<void> => {
-    const res = await fetch("/api/route-feedback", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: feedbackId, comment }),
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(body?.error ?? "Kunde inte uppdatera feedback.");
-    }
   };
 
   const handleClearRouteFeedback = async (feedbackId: string): Promise<void> => {
@@ -951,45 +492,13 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       return replaceRouteStopById(stops, id, { label: "", coordinates: null, source: "manual" });
     });
   };
-  useEffect(() => {
-    clearRouteStopRef.current = clearRouteStop;
+  useCustomRouteStopMarkers({
+    mapLoadedRef,
+    mapRef,
+    markerClassName: styles.routeCustomStopMarker,
+    onClearStop: clearRouteStop,
+    routeStops,
   });
-  useEffect(() => {
-    const map = mapRef.current;
-    const customStops = routeStops.filter((stop): stop is ResolvedRouteStop => (
-      isCustomRouteStop(stop) && stop.coordinates !== null
-    ));
-
-    customRouteMarkersRef.current.forEach((marker) => marker.remove());
-    customRouteMarkersRef.current = [];
-
-    if (!map || !mapLoadedRef.current || !customStops.length) return;
-
-    const markers = customStops.map((customStop) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = styles.routeCustomStopMarker ?? "";
-      button.setAttribute("aria-label", "Ta bort via-punkt");
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        clearRouteStopRef.current(customStop.id);
-      });
-      button.addEventListener("mousedown", (event) => event.stopPropagation());
-      button.addEventListener("touchstart", (event) => event.stopPropagation());
-
-      return new maplibregl.Marker({ element: button, anchor: "center" })
-        .setLngLat(customStop.coordinates)
-        .addTo(map);
-    });
-
-    customRouteMarkersRef.current = markers;
-
-    return () => {
-      customRouteMarkersRef.current.forEach((marker) => marker.remove());
-      customRouteMarkersRef.current = [];
-    };
-  }, [routeStops]);
   const reorderRouteStop = (sourceId: string, targetId: string) => {
     if (sourceId === targetId) return;
     markRouteUserMutation();
@@ -1045,7 +554,6 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       avoids?: RouteAvoidState;
       timeBudget?: RouteTimeBudget;
       alternatives?: number;
-      routeCoordinates?: [number, number][];
     } = {},
   ) => {
     const avoids = opts.avoids ?? routeAvoids;
@@ -1066,10 +574,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       const stopCoordinates = resolvedStops
         .map((stop) => stop.coordinates)
         .filter((coord): coord is [number, number] => coord !== null);
-      const routeCoordinates = opts.routeCoordinates
-        ? dedupeRouteCoordinates(opts.routeCoordinates)
-        : stopCoordinates;
-      if (stopCoordinates.length !== resolvedStops.length || routeCoordinates.length < 2) {
+      if (stopCoordinates.length !== resolvedStops.length || stopCoordinates.length < 2) {
         throw new Error("Fyll i både från och till.");
       }
 
@@ -1090,7 +595,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
 
       const alternatives = opts.alternatives ?? 3;
       const cacheKey = routeCacheKey({
-        coordinates: routeCoordinates,
+        coordinates: stopCoordinates,
         alternatives,
         avoids,
         timeBudget,
@@ -1112,7 +617,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          coordinates: routeCoordinates,
+          coordinates: stopCoordinates,
           alternatives,
           avoid: avoids,
           maxExtraMinutes: timeBudget === "unlimited" ? null : timeBudget,
@@ -1156,209 +661,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
         setRouteLoading(false);
       }
     }
-  }, [applyRouteSelection, geocodeRouteStop, routeAvoids]);
-  const cancelRouteDragPreview = useCallback(() => {
-    routeDragPreviewLatestRef.current = null;
-    if (routeDragPreviewTimerRef.current !== null) {
-      window.clearTimeout(routeDragPreviewTimerRef.current);
-      routeDragPreviewTimerRef.current = null;
-    }
-    routeDragPreviewAbortRef.current?.abort();
-    routeDragPreviewAbortRef.current = null;
-    routeDragPreviewInFlightRef.current = false;
-    routeDragPreviewRequestedKeyRef.current = null;
-  }, []);
-
-  const selectedRouteCoordinates = useCallback((): [number, number][] => {
-    const routes = routeLinesRef.current;
-    const selected = routes.find((route) => route.id === selectedRouteIdRef.current) ?? routes[0];
-    return selected?.geometry.coordinates.filter((coord): coord is [number, number] => (
-      Array.isArray(coord) &&
-      coord.length >= 2 &&
-      typeof coord[0] === "number" &&
-      typeof coord[1] === "number" &&
-      Number.isFinite(coord[0]) &&
-      Number.isFinite(coord[1])
-    )) ?? [];
-  }, []);
-
-  const buildRouteDragPlan = useCallback((commit: RouteDragCommit): RouteDragPlan | null => {
-    const currentStops = routeStopsRef.current;
-    const resolvedStops = currentStops.filter((stop): stop is ResolvedRouteStop => stop.coordinates !== null);
-    if (resolvedStops.length !== currentStops.length || resolvedStops.length < 2) return null;
-
-    const routeCoordinates = selectedRouteCoordinates();
-    let insertIndex = Math.max(1, resolvedStops.length - 1);
-    let previousRouteIndex = 0;
-
-    if (routeCoordinates.length > 0) {
-      const indexedStops = resolvedStops.map((stop, index) => ({
-        index,
-        routeIndex: closestRouteCoordinateIndex(routeCoordinates, stop.coordinates),
-      }));
-      const firstStop = indexedStops[0];
-      const previousStop = indexedStops
-        .filter((item) => item.index < resolvedStops.length - 1 && item.routeIndex <= commit.segmentIndex)
-        .sort((a, b) => b.routeIndex - a.routeIndex)[0] ?? firstStop;
-
-      if (previousStop) {
-        insertIndex = Math.min(resolvedStops.length - 1, previousStop.index + 1);
-        previousRouteIndex = previousStop.routeIndex;
-      }
-    }
-
-    const viaStop: RouteStop = {
-      id: `${customRouteStopIdPrefix}${Date.now()}`,
-      label: "Via vald väg",
-      coordinates: commit.lngLat,
-      source: "manual",
-    };
-    const stops = [
-      ...resolvedStops.slice(0, insertIndex),
-      viaStop,
-      ...resolvedStops.slice(insertIndex),
-    ];
-    const beforeCoordinates = resolvedStops.slice(0, insertIndex).map((stop) => stop.coordinates);
-    const afterCoordinates = resolvedStops.slice(insertIndex).map((stop) => stop.coordinates);
-    const fallbackCoordinates = dedupeRouteCoordinates([
-      ...beforeCoordinates,
-      commit.lngLat,
-      ...afterCoordinates,
-    ]);
-
-    if (fallbackCoordinates.length > 10) return null;
-
-    const availableAnchorCount = Math.max(0, 10 - fallbackCoordinates.length);
-    const anchoredSegment = routeCoordinates.length > 0
-      ? commit.anchorCoordinates.filter((coord) => {
-        const index = closestRouteCoordinateIndex(routeCoordinates, coord);
-        return index >= previousRouteIndex && index <= commit.segmentIndex;
-      })
-      : commit.anchorCoordinates;
-    const anchorCoordinates = anchoredSegment.slice(Math.max(0, anchoredSegment.length - availableAnchorCount));
-    const coordinates = dedupeRouteCoordinates([
-      ...beforeCoordinates,
-      ...anchorCoordinates,
-      commit.lngLat,
-      ...afterCoordinates,
-    ]);
-
-    return { stops, coordinates, fallbackCoordinates };
-  }, [selectedRouteCoordinates]);
-
-  const routeDragPreviewRequest = useCallback((commit: RouteDragCommit) => {
-    const plan = buildRouteDragPlan(commit);
-    if (!plan) return null;
-    return {
-      coordinates: plan.coordinates,
-      fallbackCoordinates: plan.fallbackCoordinates,
-      key: plan.coordinates.map((coord) => coord.join(",")).join("|"),
-    };
-  }, [buildRouteDragPlan]);
-
-  const runRouteDragPreview = useCallback(() => {
-    if (routeDragPreviewInFlightRef.current) return;
-
-    const latest = routeDragPreviewLatestRef.current;
-    if (!latest) return;
-    const request = routeDragPreviewRequest(latest);
-    if (!request || request.key === routeDragPreviewRequestedKeyRef.current) return;
-
-    routeDragPreviewInFlightRef.current = true;
-    routeDragPreviewRequestedKeyRef.current = request.key;
-    const controller = new AbortController();
-    routeDragPreviewAbortRef.current = controller;
-
-    const fetchPreview = async (coordinates: [number, number][]): Promise<{ routes: RouteLine[] }> => {
-      const res = await fetch("/api/route", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          coordinates,
-          alternatives: 0,
-          preview: true,
-        }),
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-      return res.json() as Promise<{ routes: RouteLine[] }>;
-    };
-
-    void fetchPreview(request.coordinates)
-      .catch((err) => {
-        if (controller.signal.aborted || request.fallbackCoordinates.length === request.coordinates.length) {
-          throw err;
-        }
-        return fetchPreview(request.fallbackCoordinates);
-      })
-      .then(({ routes }) => {
-        if (controller.signal.aborted || !routes[0]) return;
-        const previewRoutes = [routes[0]];
-        setSelectedRouteId(previewRoutes[0]?.id ?? null);
-        setRouteLines(previewRoutes);
-        const map = mapRef.current;
-        if (map && mapLoadedRef.current) {
-          setRouteLayerData(map, previewRoutes, previewRoutes[0]?.id ?? null, routeAvoidsRef.current);
-        }
-      })
-      .catch((err) => {
-        if (!controller.signal.aborted) console.warn("route drag preview failed", err);
-      })
-      .finally(() => {
-        if (routeDragPreviewAbortRef.current === controller) {
-          routeDragPreviewAbortRef.current = null;
-        }
-        routeDragPreviewInFlightRef.current = false;
-
-        const next = routeDragPreviewLatestRef.current;
-        const nextRequest = next ? routeDragPreviewRequest(next) : null;
-        if (nextRequest && nextRequest.key !== routeDragPreviewRequestedKeyRef.current) {
-          routeDragPreviewTimerRef.current = window.setTimeout(() => {
-            routeDragPreviewTimerRef.current = null;
-            runRouteDragPreview();
-          }, 60);
-        }
-      });
-  }, [routeDragPreviewRequest]);
-
-  const handlePrimaryRoutePreview = useCallback((commit: RouteDragCommit) => {
-    routeDragPreviewLatestRef.current = commit;
-    if (routeDragPreviewTimerRef.current !== null || routeDragPreviewInFlightRef.current) return;
-
-    routeDragPreviewTimerRef.current = window.setTimeout(() => {
-      routeDragPreviewTimerRef.current = null;
-      runRouteDragPreview();
-    }, 180);
-  }, [runRouteDragPreview]);
-
-  const handlePrimaryRouteDrag = useCallback((commit: RouteDragCommit) => {
-    cancelRouteDragPreview();
-    const plan = buildRouteDragPlan(commit);
-    if (!plan) {
-      setRouteNoticeText("Du kan lägga till max 8 egna via-punkter.");
-      return;
-    }
-
-    markRouteUserMutation();
-    lastRouteKeyRef.current = null;
-    setRouteStops(plan.stops);
-    setRouteError(null);
-    setRouteNoticeText("Räknar om rutten...");
-    void planRouteForStops(plan.stops, {
-      compare: true,
-      avoids: routeAvoidsRef.current,
-      timeBudget: activeRouteTimeBudget,
-      alternatives: 0,
-      routeCoordinates: plan.coordinates,
-    });
-  }, [buildRouteDragPlan, cancelRouteDragPreview, markRouteUserMutation, planRouteForStops]);
-
-  useEffect(() => {
-    routeDragHandlerRef.current = handlePrimaryRouteDrag;
-    routeDragPreviewHandlerRef.current = handlePrimaryRoutePreview;
-  }, [handlePrimaryRouteDrag, handlePrimaryRoutePreview]);
-
+  }, [applyRouteSelection, geocodeRouteStop, routeAvoids, setGeocodeResultsByStop]);
   useEffect(() => {
     const readyForRoute = routeStops.length >= 2 && routeStops.every((stop) => stop.coordinates !== null);
     if (!readyForRoute || loadingRouteStopId || geocodingStopId || routeLoading || routeCompareLoading) return;
@@ -1560,7 +863,6 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
         onCopyRouteUrl={handleCopyRouteUrl}
         onOpenRouteInGoogleMaps={handleOpenRouteInGoogleMaps}
         onSubmitRouteFeedback={handleSubmitRouteFeedback}
-        onUpdateRouteFeedbackComment={handleUpdateRouteFeedbackComment}
         onClearRouteFeedback={handleClearRouteFeedback}
       />
       <HelpPanel

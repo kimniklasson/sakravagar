@@ -23,6 +23,13 @@ const eslintConfig = [
   {
     rules: {
       "@next/next/no-img-element": "off",
+      "no-restricted-imports": ["error", {
+        paths: [{
+          name: "./layers",
+          importNames: ["addRiskLayer"],
+          message: "Risklagret är dormant by design. Se docs/decisions.md 2026-05-11 och 2026-05-13 innan återaktivering.",
+        }],
+      }],
     },
   },
 ];

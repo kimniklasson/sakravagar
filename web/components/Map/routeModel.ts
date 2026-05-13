@@ -1,10 +1,9 @@
-import type { RouteLine } from "@/app/api/route/route";
+import type { RouteAvoidOption, RouteAvoidState, RouteLine } from "@/lib/routeTypes";
 
 export type RouteStopSource = "manual" | "gps";
-export type RouteAvoidOption = "highSpeed" | "trafficIntensity" | "cityTraffic" | "bridges" | "tunnels";
-export type RouteAvoidState = Record<RouteAvoidOption, boolean>;
 export type RouteTimeBudget = number | "unlimited";
 export type RouteProvider = "graphhopper" | "osrm";
+export type { RouteAvoidOption, RouteAvoidState };
 
 export type RouteStop = {
   id: string;
@@ -14,12 +13,6 @@ export type RouteStop = {
 };
 
 export type ResolvedRouteStop = RouteStop & { coordinates: [number, number] };
-
-export type RouteDragPlan = {
-  stops: RouteStop[];
-  coordinates: [number, number][];
-  fallbackCoordinates: [number, number][];
-};
 
 export type RouteCacheEntry = {
   routes: RouteLine[];
@@ -179,29 +172,6 @@ export function dedupeRouteCoordinates(coordinates: [number, number][]): [number
     const prev = list[index - 1];
     return !prev || prev[0] !== coord[0] || prev[1] !== coord[1];
   });
-}
-
-function coordinateDistanceSquared(a: [number, number], b: [number, number]): number {
-  const lngScale = Math.cos((((a[1] + b[1]) / 2) * Math.PI) / 180);
-  return ((a[0] - b[0]) * lngScale) ** 2 + (a[1] - b[1]) ** 2;
-}
-
-export function closestRouteCoordinateIndex(routeCoordinates: [number, number][], coordinate: [number, number]): number {
-  if (!routeCoordinates.length) return 0;
-  let bestIndex = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (let index = 0; index < routeCoordinates.length; index += 1) {
-    const routeCoordinate = routeCoordinates[index];
-    if (!routeCoordinate) continue;
-    const distance = coordinateDistanceSquared(routeCoordinate, coordinate);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestIndex = index;
-    }
-  }
-
-  return bestIndex;
 }
 
 export function activeAvoidCount(avoids: RouteAvoidState): number {

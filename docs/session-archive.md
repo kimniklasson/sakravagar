@@ -61,7 +61,7 @@ Komprimerad historik från tidigare sessionsloggar. Den här filen är arkiv och
 - Tog bort `Olycksrisk` och `Störningar` som planeringsfilter; de är nu kontrollager/route-notices.
 - Lade till `Stadstrafik` som GraphHopper-filter baserat på statiska stadszoner samt `road_class`/`max_speed`, inte `urban_density`.
 - Införde svenska bbox-guards i tunga API:er och frontendens lagerloaders.
-- Lade till ruttkort-actions: delningslänk, Google Maps-länk och tumme upp/ner med valfri kommentar.
+- Lade till ruttkort-actions: delningslänk, Google Maps-länk och tumme upp/ner.
 - Lade till migrationsspår för `route_snapshots` och `route_feedback`.
 - Dokumenterade framtidsidén att berika ÅDT/Flöde med kommunal trafikmängdsdata för innerstadsgator.
 

@@ -2,7 +2,8 @@ name: Scrape Trafikverket
 
 # Schemaläggning sker numera via Supabase pg_cron → Edge Function `scrape`
 # (se db/migrations/0004_pg_cron_scrape.sql och supabase/functions/scrape/).
-# Detta workflow finns kvar som manuell nödknapp (workflow_dispatch).
+# Detta workflow finns kvar som manuell nödknapp och triggar samma Edge
+# Function direkt, så ingen separat Node-scraper behöver hållas i sync.
 on:
   workflow_dispatch:
 
@@ -13,22 +14,16 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Run scraper
+      - name: Trigger Supabase Edge scrape
         env:
-          TRAFIKVERKET_API_KEY: ${{ secrets.TRAFIKVERKET_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: pnpm --filter @trafik/scraper run start
+          SCRAPE_SHARED_SECRET: ${{ secrets.SCRAPE_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body \
+            -X POST "${SUPABASE_URL%/}/functions/v1/scrape" \
+            -H "Authorization: Bearer ${SCRAPE_SHARED_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}'

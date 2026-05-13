@@ -29,11 +29,6 @@ function normalizeVote(value: unknown): FeedbackVote | null {
   return value === "up" || value === "down" ? value : null;
 }
 
-function normalizeComment(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value.trim().slice(0, 200);
-}
-
 function normalizeUuid(value: unknown): string | null {
   if (typeof value !== "string") return null;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
@@ -57,7 +52,6 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => null)) as {
     vote?: unknown;
-    comment?: unknown;
     snapshot?: unknown;
     routeMeta?: unknown;
     searchMeta?: unknown;
@@ -66,7 +60,6 @@ export async function POST(req: Request) {
   const vote = normalizeVote(body?.vote);
   if (!vote) return jsonResponse({ error: "invalid vote" }, { status: 400 });
 
-  const comment = normalizeComment(body?.comment);
   const snapshot = body?.snapshot;
   const snapshotError = validateSnapshotPayload(snapshot);
   if (snapshotError) return jsonResponse({ error: snapshotError }, { status: 400 });
@@ -94,7 +87,7 @@ export async function POST(req: Request) {
   const { data: feedbackId, error: feedbackError } = await client.rpc("create_route_feedback", {
     p_snapshot_id: snapshotRow.id,
     p_vote: vote,
-    p_comment: comment,
+    p_comment: null,
     p_route_meta: routeMeta,
     p_search_meta: searchMeta,
   });
@@ -103,29 +96,6 @@ export async function POST(req: Request) {
   }
 
   return jsonResponse({ id: feedbackId, expiresAt: snapshotRow.expires_at });
-}
-
-export async function PATCH(req: Request) {
-  if (!url || !serviceKey) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
-  }
-
-  const body = (await req.json().catch(() => null)) as {
-    id?: unknown;
-    comment?: unknown;
-  } | null;
-  const id = normalizeUuid(body?.id);
-  if (!id) return jsonResponse({ error: "invalid feedback id" }, { status: 400 });
-
-  const comment = normalizeComment(body?.comment);
-  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
-  const { data, error } = await client.rpc("update_route_feedback_comment", {
-    p_feedback_id: id,
-    p_comment: comment,
-  });
-  if (error) return serverErrorResponse("route feedback update failed", error);
-
-  return jsonResponse({ id: data });
 }
 
 export async function DELETE(req: Request) {

@@ -4,6 +4,11 @@ import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, S
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Dormant by design. Segmentrisk är pausad i UI sedan 2026-05-11 och
+// riskrelaterade cronjobb är pausade i prod sedan 2026-05-13 för att skydda
+// Supabase Disk IO. Behåll endpointen som vilande infrastruktur tills nytt
+// produktbeslut tas, men koppla inte in den som buggfix.
+
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -17,6 +22,9 @@ type RiskSegment = {
 
 type RiskRow = RiskSegment;
 
+/**
+ * @deprecated Dormant by design — see docs/decisions.md 2026-05-11 and 2026-05-13.
+ */
 export async function GET(req: Request) {
   if (!url || !anon) {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));

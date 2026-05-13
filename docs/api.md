@@ -55,8 +55,7 @@ Body:
     "tunnels": false
   },
   "alternatives": 2,
-  "maxExtraMinutes": null,
-  "preview": false
+  "maxExtraMinutes": null
 }
 ```
 
@@ -64,7 +63,6 @@ Regler:
 
 - `coordinates` kräver 2-10 svenska koordinater.
 - `alternatives` clampas till 0-3.
-- `preview: true` används för kartdragning och hoppar över Supabase-scoring.
 - GraphHopper används när `GRAPHHOPPER_BASE_URL` finns; annars OSRM.
 
 Svar:
@@ -81,10 +79,9 @@ Performance:
 - `maxDuration = 60` på Vercel.
 - snabbaste/ofiltrerad routing timeoutar efter 20 s.
 - filtrerade alternativ timeoutar efter 55 s.
-- drag-preview timeoutar efter 7 s.
 - timeout returnerar `504` med användarcopy.
 
-Observability-loggen innehåller filter, antal koordinatstopp, alternativ-count, tidsbudget, preview, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Den ska inte logga koordinater, adresser eller geometrier.
+Observability-loggen innehåller filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Den ska inte logga koordinater, adresser eller geometrier.
 
 ## Route shares
 
@@ -106,14 +103,10 @@ Direkt tabellåtkomst är inte publik; API:t går via Supabase RPC.
 
 Skapar en feedbackröst (`up`/`down`) och sparar en privat route snapshot med metadata. Returnerar feedback-id och snapshot-expiry. Feedback-snapshots har 90 dagars TTL.
 
-`PATCH /api/route-feedback`
-
-Uppdaterar kommentaren på en befintlig feedbackrad. Kommentar är frivillig och max 200 tecken.
-
 `DELETE /api/route-feedback?id=...`
 
 Tar bort en feedbackröst när användaren klickar på samma tumme igen.
 
 Feedback är batchunderlag för routingkalibrering och ska inte påverka routing automatiskt i MVP-flödet.
 
-Feedback-id fungerar som en kortlivad capability för att uppdatera kommentar eller ta bort rösten från samma klientflöde. Write-RPC:erna körs server-side med service-role; direkt anonym RPC-write är stängd.
+Feedback-id fungerar som en kortlivad capability för att ta bort rösten från samma klientflöde. Write-RPC:erna körs server-side med service-role; direkt anonym RPC-write är stängd.

@@ -97,48 +97,6 @@ a:hover {
   color: var(--color-text-muted);
 }
 
-.route-drag-popup .maplibregl-popup-content {
-  padding: 0;
-  border-radius: 8px;
-  background: #555555;
-  color: var(--color-white);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
-  font-family: var(--font-univers);
-  font-size: var(--type-m-small-size);
-  font-weight: 400;
-  line-height: var(--type-m-small-line);
-  letter-spacing: var(--type-m-small-tracking);
-}
-
-.route-drag-popup-body {
-  padding: 6px 8px;
-  white-space: nowrap;
-}
-
-.maplibregl-popup.route-drag-popup .maplibregl-popup-tip {
-  border-width: 6px;
-}
-
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
-  border-bottom-color: #555555;
-}
-
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
-  border-top-color: #555555;
-}
-
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
-  border-right-color: #555555;
-}
-
-.maplibregl-popup.route-drag-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
-  border-left-color: #555555;
-}
-
 .seg-popup-body {
   padding: 12px 14px;
   min-width: 240px;

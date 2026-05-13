@@ -60,13 +60,21 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 
 ## 2026-04-25 — Cron flyttad från GH Actions till Supabase pg_cron
 
-**Valt:** Schemalägg scrapen via `pg_cron` + `pg_net` direkt i Supabase, som anropar en Edge Function `scrape` (Deno-port av Node-scrapern). GH Actions-workflowen behållen som manuell `workflow_dispatch`-knapp.
+**Valt:** Schemalägg scrapen via `pg_cron` + `pg_net` direkt i Supabase, som anropar en Edge Function `scrape` (Deno-port av den ursprungliga Node-scrapern). GH Actions-workflowen behållen som manuell `workflow_dispatch`-knapp.
 
 **Varför:** GitHub Actions schedule är beryktat opålitlig under hög last — observerade 1–2 timmars gap över natten trots `*/30 * * * *`-schema. För en heatmap som lever på färska data är missade fönster värre än lite extra setup. pg_cron kör i databasen och triggar ändå konsekvent. Allt ligger nu inom Supabase = enklare ops, samma stack.
 
 **Övervägt:** External cron (cron-job.org) → `workflow_dispatch` via GitHub API. Fungerar men flyttar bara opålitligheten ett steg — och det är ett extra system att hålla koll på. Cloudflare Workers Cron Triggers — pålitligast men kräver port av scrapern till Workers-runtime utan stark Postgres-klient.
 
-**Konsekvens:** Scraper-koden finns nu i två versioner — `scraper/` (Node, lokal/manuell körning och `workflow_dispatch`) och `supabase/functions/scrape/` (Deno, prod). Håll dem i sync vid förändringar; eller på sikt ta bort Node-versionen om den inte används.
+**Konsekvens:** Scraper-koden flyttade först till två versioner, men Node-versionen togs bort 2026-05-13. `supabase/functions/scrape/` är nu source of truth, och manuell GitHub Actions-nödknapp triggar samma Edge Function via HTTP med `SCRAPE_SHARED_SECRET`.
+
+## 2026-05-13 — Node-scrapern avvecklad
+
+**Valt:** Ta bort `scraper/` och root-scripten `pnpm scrape`/`pnpm scrape:dev`. GitHub Actions `workflow_dispatch` finns kvar men gör bara ett auktoriserat `curl`-anrop mot Supabase Edge Function `scrape`.
+
+**Varför:** Production-scrapen kör redan via Supabase Edge Function. Node-scrapern var en historisk lokal/manuell fallback som riskerade att hamna ur sync med Edge Function-koden, särskilt vid schema- eller transformändringar.
+
+**Konsekvens:** Det finns en enda scraper-runtime att underhålla. Manuell körning sker genom Edge Function URL + `SCRAPE_SHARED_SECRET`, samma väg som `pg_cron` använder.
 
 ## 2026-04-24 — Dedupe-strategi
 
@@ -97,6 +105,14 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 **Varför:** Olyckshistoriken är fortfarande för tunn för att en röd-orange riskbild ska upplevas statistiskt rättvisande. ÅDT-popupen gav dessutom ett för exakt och intensivt interaktionslager för användare som främst behöver en lättläst trafikintensitetssignal.
 
 **Konsekvens:** `addRiskLayer`, `/api/risk`, `risk_per_segment` och segmentpopup-koden får finnas kvar som vilande infrastruktur, men ska inte kopplas in av misstag. `Trafikflöde` läses via blå nyanser och liveflödespopup, inte segmentdetaljer.
+
+## 2026-05-13 — Riskrelaterade cronjobb pausade för att skydda Supabase Disk IO
+
+**Valt:** Pausa produktionens `pg_cron`-jobb `resnap-orphan-events`, `snap-event-segments` och `refresh-risk-mv`. Scrape-jobbet för Trafikverket-data ska fortsatt vara aktivt.
+
+**Varför:** Supabase Nano började varna för förbrukad Disk IO-budget den 13 maj 2026. Graferna visade återkommande IO-spikar, bland annat runt `xx:17-xx:20`, vilket matchar `resnap-orphan-events`-schemat från migration `0030`. Eftersom segmentrisk och segmentpopup redan är pausade i UI ger dessa jobb låg MVP-nytta men kan fortfarande skapa tung PostGIS- och materialized-view-belastning.
+
+**Konsekvens:** Olyckor fortsätter visas via `events_in_bbox`; orphans använder fallback på vägnummer + geohash när segmentkoppling saknas. `risk_per_segment`, `event_segments`, `segment_detail` och tillhörande funktioner finns kvar för framtida återaktivering, men hålls inte löpande färska av cron. Vid återstart av riskdelen ska cronjobben schemaläggas om med tydlig IO-budget och helst glesare/intervallstyrd körning än tidigare.
 
 ## 2026-05-11 — Olyckskartan dedupar innan visualisering
 

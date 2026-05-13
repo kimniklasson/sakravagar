@@ -1,0 +1,197 @@
+import { describe, expect, it } from "vitest";
+import type { RouteLine } from "@/lib/routeTypes";
+import {
+  dedupeRouteCoordinates,
+  formatRouteDistance,
+  formatRouteDuration,
+  initialRouteAvoids,
+  isFreshRouteCacheEntry,
+  rememberRouteCacheEntry,
+  routeAlternativeCopy,
+  routeCacheKey,
+  selectRouteCandidates,
+  type RouteAvoidState,
+} from "./routeModel";
+
+function avoids(overrides: Partial<RouteAvoidState> = {}): RouteAvoidState {
+  return { ...initialRouteAvoids, ...overrides };
+}
+
+function route(id: string, overrides: Partial<RouteLine> = {}): RouteLine {
+  return {
+    id,
+    source: id === "fastest" ? "fastest" : "alternative",
+    distanceMeters: 10_000,
+    durationSeconds: 600,
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [18, 59],
+        [18.1, 59.1],
+      ],
+    },
+    safetyScore: null,
+    avoidScores: {
+      highSpeed: null,
+      trafficIntensity: null,
+      cityTraffic: null,
+      bridges: null,
+      tunnels: null,
+    },
+    exposure: {
+      highSpeedMeters: null,
+      trafficIntensityMeters: null,
+      cityTrafficMeters: null,
+      disturbances: null,
+      liveAccidents: null,
+      bridgeMeters: null,
+      tunnelMeters: null,
+    },
+    annotations: {
+      highSpeed: [],
+      trafficIntensity: [],
+      cityTraffic: [],
+      bridges: [],
+      tunnels: [],
+      disturbances: [],
+      liveAccidents: [],
+    },
+    ...overrides,
+  };
+}
+
+describe("route cache helpers", () => {
+  it("creates stable keys with rounded coordinates and sorted avoid options", () => {
+    const key = routeCacheKey({
+      coordinates: [
+        [18.123456, 59.987654],
+        [19.000004, 60.000006],
+      ],
+      alternatives: 3,
+      avoids: avoids({ tunnels: true, highSpeed: true }),
+      timeBudget: "unlimited",
+    });
+
+    expect(key).toBe("18.12346,59.98765|19.00000,60.00001;alt:3;avoid:highSpeed,tunnels;budget:unlimited");
+  });
+
+  it("uses longer cache TTL for traffic intensity routes", () => {
+    const entry = { routes: [], createdAt: 1_000 };
+
+    expect(isFreshRouteCacheEntry(entry, avoids(), 1_000 + 2 * 60 * 1000 + 1)).toBe(false);
+    expect(isFreshRouteCacheEntry(entry, avoids({ trafficIntensity: true }), 1_000 + 2 * 60 * 1000 + 1)).toBe(true);
+    expect(isFreshRouteCacheEntry(entry, avoids({ trafficIntensity: true }), 1_000 + 5 * 60 * 1000 + 1)).toBe(false);
+  });
+
+  it("evicts the oldest route cache entry after the max size", () => {
+    const cache = new Map<string, { routes: RouteLine[]; createdAt: number }>();
+    for (let index = 0; index < 25; index += 1) {
+      rememberRouteCacheEntry(cache, `key-${index}`, { routes: [], createdAt: index });
+    }
+
+    expect(cache.size).toBe(24);
+    expect(cache.has("key-0")).toBe(false);
+    expect(cache.has("key-24")).toBe(true);
+  });
+});
+
+describe("route geometry helpers", () => {
+  it("deduplicates only adjacent duplicate coordinates", () => {
+    expect(dedupeRouteCoordinates([
+      [18, 59],
+      [18, 59],
+      [18.1, 59.1],
+      [18, 59],
+    ])).toEqual([
+      [18, 59],
+      [18.1, 59.1],
+      [18, 59],
+    ]);
+  });
+});
+
+describe("selectRouteCandidates", () => {
+  it("returns only the fastest route when no avoid filters are active", () => {
+    const result = selectRouteCandidates([
+      route("fastest"),
+      route("calm"),
+    ], avoids(), "unlimited");
+
+    expect(result).toMatchObject({
+      routes: [expect.objectContaining({ id: "fastest" })],
+      selectedIndex: 0,
+      active: false,
+      hasComparableScores: false,
+      hiddenByBudget: 0,
+    });
+  });
+
+  it("selects a slower route that avoids high-speed exposure", () => {
+    const fastest = route("fastest", {
+      avoidScores: { ...route("x").avoidScores, highSpeed: 1 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 8_000 },
+    });
+    const calm = route("calm", {
+      durationSeconds: 720,
+      distanceMeters: 10_500,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0 },
+    });
+
+    const result = selectRouteCandidates([fastest, calm], avoids({ highSpeed: true }), "unlimited");
+
+    expect(result.routes.map((candidate) => candidate.id)).toEqual(["calm", "fastest"]);
+    expect(result.selectedIndex).toBe(1);
+    expect(result.active).toBe(true);
+    expect(result.hasComparableScores).toBe(true);
+  });
+
+  it("hides non-baseline routes outside a finite time budget", () => {
+    const result = selectRouteCandidates([
+      route("fastest", { avoidScores: { ...route("x").avoidScores, trafficIntensity: 1 } }),
+      route("too-slow", {
+        durationSeconds: 1_800,
+        avoidScores: { ...route("x").avoidScores, trafficIntensity: 0 },
+      }),
+    ], avoids({ trafficIntensity: true }), 10);
+
+    expect(result.routes.map((candidate) => candidate.id)).toEqual(["fastest"]);
+    expect(result.hiddenByBudget).toBe(1);
+  });
+});
+
+describe("routeAlternativeCopy", () => {
+  it("labels a route that removes high-speed exposure", () => {
+    const fastest = route("fastest", {
+      avoidScores: { ...route("x").avoidScores, highSpeed: 1 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 5_000 },
+    });
+    const calm = route("calm", {
+      durationSeconds: 720,
+      distanceMeters: 10_500,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0 },
+    });
+
+    const copy = routeAlternativeCopy(calm, 1, fastest, avoids({ highSpeed: true }), [fastest, calm], false);
+
+    expect(copy.title).toBe("Lägre hastigheter");
+    expect(copy.rows).toEqual([
+      { kind: "highSpeed", label: "Höga hastigheter", value: "Undviker", tone: "positive" },
+    ]);
+  });
+});
+
+describe("route formatting", () => {
+  it("formats route distances", () => {
+    expect(formatRouteDistance(994)).toBe("990 m");
+    expect(formatRouteDistance(1_250)).toBe("1,3 km");
+    expect(formatRouteDistance(12_500)).toBe("13 km");
+  });
+
+  it("formats route durations", () => {
+    expect(formatRouteDuration(45)).toBe("1 min");
+    expect(formatRouteDuration(3_600)).toBe("1 h");
+    expect(formatRouteDuration(4_260)).toBe("1 h 11 min");
+  });
+});

@@ -40,10 +40,15 @@ web/
 │   ├── RouteLoadingIndicator.tsx
 │   ├── HelpPanel.tsx
 │   ├── MapIcons.tsx
-│   ├── routeModel.ts         # route-typer, ranking, cache
-│   ├── layers.ts             # MapLibre-källor/lager
+│   ├── hooks/                # MapLibre-livscykel, viewport, liveevent och ruttstopp
+│   ├── routeModel.ts         # klientranking, labels, cache
+│   ├── routeSharing.ts       # delning, feedback och externa ruttlänkar
+│   ├── layers.ts             # export-yta för MapLibre-lager
+│   ├── layers/               # rutt, ÅDT, hastighet, risk, live/störningar, popup
 │   └── Map.module.css
 ├── lib/
+│   └── routeTypes.ts         # delade ruttsvarstyper
+├── app/api/route/_routing/   # serverhjälpare för routing
 ├── public/icons/
 └── styles/
 ```
@@ -66,7 +71,7 @@ web/
 - `/api/geocode` — Nominatim-proxy för svensk search/reverse.
 - `/api/route` — GraphHopper/OSRM-routing via `POST`.
 - `/api/route-shares` — public route snapshots för `/r/[slug]`.
-- `/api/route-feedback` — tumme upp/ner och kommentar som kalibreringsunderlag.
+- `/api/route-feedback` — tumme upp/ner som kalibreringsunderlag.
 - `/api/segment` — vilande popupdetaljer för vägsegment; ÅDT-lagret är inte klickbart i nuvarande UI.
 
 Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit.

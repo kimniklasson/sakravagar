@@ -10,7 +10,6 @@ Praktisk startguide för nya sessioner och nya utvecklare.
 4. Relevant subsystem-README:
    - `web/README.md`
    - `db/README.md`
-   - `scraper/README.md`
    - `scripts/README.md`
 
 ## Lokal start
@@ -42,6 +41,7 @@ Utan GraphHopper-env använder `/api/route` OSRM-fallback, vilket är bra för g
 
 ```sh
 pnpm --filter @trafik/web run lint
+pnpm --filter @trafik/web run test
 pnpm --filter @trafik/web run typecheck
 pnpm -r run typecheck
 ```
@@ -67,11 +67,15 @@ När ett beteende ändras:
 ## Viktiga ytor
 
 - `web/components/Map/Map.tsx` — MapLibre-init, orchestration och karta/UI-interaktion.
+- `web/components/Map/hooks/` — extraherade Map-side-effects för MapLibre-livscykel, viewportmått, liveevent-summary, ruttstopp-sök och egna stoppmarkörer.
 - `web/components/Map/RoutePlannerBox.tsx` — Från/Till, geocoding-resultat och undvik-pills.
 - `web/components/Map/RouteAlternativesTray.tsx` — ruttkort, delning, Google Maps och feedback.
-- `web/components/Map/routeModel.ts` — route-typer, ranking, labels och session-cache.
-- `web/components/Map/layers.ts` — MapLibre-källor/lager, bbox-laddning och popup.
-- `web/app/api/route/route.ts` — GraphHopper/OSRM, kandidater och `avoidScores`.
+- `web/components/Map/routeModel.ts` — klientranking, labels och session-cache.
+- `web/components/Map/routeSharing.ts` — route snapshot-payloads, feedback-payloads och externa ruttlänkar.
+- `web/components/Map/layers.ts` — tunn export-yta för MapLibre-lager.
+- `web/components/Map/layers/` — ruttlager, ÅDT, höga hastigheter, vilande risk, olyckor/live, störningar/trafikflöde, bbox-loader och popup.
+- `web/lib/routeTypes.ts` — delade ruttsvarstyper för API och klient.
+- `web/app/api/route/route.ts` — request handler, deadline/logging och response mapping för routing.
+- `web/app/api/route/_routing/` — rena routinghjälpare för typer, request parsing, timeout, telemetry, geometri, custom models, provider-anrop, provider-fanout, route-detaljer, dedupe, hybridkandidater, scoring och high-speed selection.
 - `db/migrations/` — schema, RPC:er, grants och cron.
 - `supabase/functions/scrape/index.ts` — production-scraper.
-- `scraper/` — lokal/manuell Node-scraper.

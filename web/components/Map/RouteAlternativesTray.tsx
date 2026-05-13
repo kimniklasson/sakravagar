@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { createPortal } from "react-dom";
-import type { RouteLine } from "@/app/api/route/route";
+import type { RouteLine } from "@/lib/routeTypes";
 import styles from "./Map.module.css";
 import {
   formatRouteDistance,
@@ -49,7 +49,6 @@ export function RouteAlternativesTray({
   onCopyRouteUrl,
   onOpenRouteInGoogleMaps,
   onSubmitRouteFeedback,
-  onUpdateRouteFeedbackComment,
   onClearRouteFeedback,
 }: {
   routes: RouteLine[];
@@ -62,8 +61,7 @@ export function RouteAlternativesTray({
   onPreviewRoute: (routeId: string | null) => void;
   onCopyRouteUrl: (routeId: string) => Promise<void>;
   onOpenRouteInGoogleMaps: (routeId: string) => void;
-  onSubmitRouteFeedback: (routeId: string, vote: "up" | "down", comment: string) => Promise<string>;
-  onUpdateRouteFeedbackComment: (feedbackId: string, comment: string) => Promise<void>;
+  onSubmitRouteFeedback: (routeId: string, vote: "up" | "down") => Promise<string>;
   onClearRouteFeedback: (feedbackId: string) => Promise<void>;
 }) {
   const routeAlternativesRef = useRef<HTMLDivElement | null>(null);
@@ -74,9 +72,6 @@ export function RouteAlternativesTray({
     captured: boolean;
   } | null>(null);
   const wasDraggingRef = useRef(false);
-  const feedbackRegionRef = useRef<HTMLDivElement | null>(null);
-  const feedbackPopoverRef = useRef<HTMLFormElement | null>(null);
-  const feedbackInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [copiedRouteId, setCopiedRouteId] = useState<string | null>(null);
   const [copyingRouteId, setCopyingRouteId] = useState<string | null>(null);
   const [copyErrorRouteId, setCopyErrorRouteId] = useState<string | null>(null);
@@ -91,23 +86,6 @@ export function RouteAlternativesTray({
     pending: boolean;
     error: string | null;
   }>>({});
-  const [feedbackDraft, setFeedbackDraft] = useState<{
-    routeId: string;
-    vote: "up" | "down";
-    comment: string;
-    submitting: boolean;
-    error: string | null;
-    anchor: { right: number; bottom: number };
-  } | null>(null);
-  const feedbackFocusKey = feedbackDraft ? `${feedbackDraft.routeId}:${feedbackDraft.vote}` : null;
-
-  const feedbackAnchorFromButton = (button: HTMLButtonElement) => {
-    const rect = button.getBoundingClientRect();
-    return {
-      right: Math.max(16, window.innerWidth - rect.right - 14),
-      bottom: Math.max(16, window.innerHeight - rect.top + 18),
-    };
-  };
 
   const showNoticeTooltip = (element: HTMLElement, label: string) => {
     const rect = element.getBoundingClientRect();
@@ -171,33 +149,13 @@ export function RouteAlternativesTray({
     return () => window.clearTimeout(id);
   }, [copiedRouteId, copyErrorRouteId]);
 
-  useEffect(() => {
-    if (!feedbackFocusKey) return;
-    const id = window.setTimeout(() => feedbackInputRef.current?.focus(), 0);
-    return () => window.clearTimeout(id);
-  }, [feedbackFocusKey]);
-
-  useEffect(() => {
-    if (!feedbackDraft) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && feedbackRegionRef.current?.contains(target)) return;
-      if (target instanceof Node && feedbackPopoverRef.current?.contains(target)) return;
-      setFeedbackDraft(null);
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [feedbackDraft]);
-
   const handleRouteFeedbackClick = async (
     routeId: string,
     vote: "up" | "down",
-    button: HTMLButtonElement,
   ) => {
     const current = routeFeedbackByRoute[routeId] ?? null;
 
     if (current?.vote === vote) {
-      setFeedbackDraft(null);
       setRouteFeedbackByRoute((byRoute) => {
         const next = { ...byRoute };
         delete next[routeId];
@@ -217,7 +175,6 @@ export function RouteAlternativesTray({
       return;
     }
 
-    const anchor = feedbackAnchorFromButton(button);
     setRouteFeedbackByRoute((byRoute) => ({
       ...byRoute,
       [routeId]: {
@@ -227,18 +184,10 @@ export function RouteAlternativesTray({
         error: null,
       },
     }));
-    setFeedbackDraft({
-      routeId,
-      vote,
-      comment: "",
-      submitting: false,
-      error: null,
-      anchor,
-    });
 
     try {
       if (current?.feedbackId) await onClearRouteFeedback(current.feedbackId);
-      const feedbackId = await onSubmitRouteFeedback(routeId, vote, "");
+      const feedbackId = await onSubmitRouteFeedback(routeId, vote);
       setRouteFeedbackByRoute((byRoute) => ({
         ...byRoute,
         [routeId]: {
@@ -259,39 +208,6 @@ export function RouteAlternativesTray({
           error: "Kunde inte spara.",
         },
       }));
-      setFeedbackDraft((currentDraft) => currentDraft?.routeId === routeId
-        ? { ...currentDraft, error: "Kunde inte spara." }
-        : currentDraft);
-    }
-  };
-
-  const submitFeedbackComment = async () => {
-    if (!feedbackDraft) return;
-
-    setFeedbackDraft((current) => current ? { ...current, submitting: true, error: null } : current);
-    try {
-      const currentFeedback = routeFeedbackByRoute[feedbackDraft.routeId];
-      const feedbackId = currentFeedback?.feedbackId
-        ? currentFeedback.feedbackId
-        : await onSubmitRouteFeedback(feedbackDraft.routeId, feedbackDraft.vote, "");
-      await onUpdateRouteFeedbackComment(feedbackId, feedbackDraft.comment);
-      setRouteFeedbackByRoute((byRoute) => ({
-        ...byRoute,
-        [feedbackDraft.routeId]: {
-          vote: feedbackDraft.vote,
-          feedbackId,
-          pending: false,
-          error: null,
-        },
-      }));
-      setFeedbackDraft(null);
-    } catch (err) {
-      console.warn("route feedback comment failed", err);
-      setFeedbackDraft((current) => current ? {
-        ...current,
-        submitting: false,
-        error: "Kunde inte spara.",
-      } : current);
     }
   };
 
@@ -446,7 +362,6 @@ export function RouteAlternativesTray({
               </span>
             )}
             <div
-              ref={feedbackDraft?.routeId === route.id ? feedbackRegionRef : undefined}
               className={styles.routeAlternativeActions}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
@@ -493,12 +408,13 @@ export function RouteAlternativesTray({
                   className={`${styles.routeActionBtn} ${
                     feedbackVote === "down" ? styles.routeActionBtnBad : ""
                   }`}
-                  onClick={(event) => {
-                    void handleRouteFeedbackClick(route.id, "down", event.currentTarget);
+                  onClick={() => {
+                    void handleRouteFeedbackClick(route.id, "down");
                   }}
                   aria-label="Sämre rutt"
                   aria-pressed={feedbackVote === "down"}
                   data-tooltip="Sämre rutt"
+                  disabled={routeFeedback?.pending === true}
                 >
                   <span
                     className={`${styles.routeActionGlyph} ${styles.routeActionGlyph_thumbdown}`}
@@ -510,12 +426,13 @@ export function RouteAlternativesTray({
                   className={`${styles.routeActionBtn} ${
                     feedbackVote === "up" ? styles.routeActionBtnGood : ""
                   }`}
-                  onClick={(event) => {
-                    void handleRouteFeedbackClick(route.id, "up", event.currentTarget);
+                  onClick={() => {
+                    void handleRouteFeedbackClick(route.id, "up");
                   }}
                   aria-label="Bra rutt"
                   aria-pressed={feedbackVote === "up"}
                   data-tooltip="Bra rutt"
+                  disabled={routeFeedback?.pending === true}
                 >
                   <span
                     className={`${styles.routeActionGlyph} ${styles.routeActionGlyph_thumbup}`}
@@ -539,59 +456,6 @@ export function RouteAlternativesTray({
       >
         {noticeTooltip.label}
       </div>,
-      document.body,
-    )}
-    {feedbackDraft && typeof document !== "undefined" && createPortal(
-      <form
-        ref={feedbackPopoverRef}
-        className={styles.routeFeedbackPopover}
-        style={{
-          right: `${feedbackDraft.anchor.right}px`,
-          bottom: `${feedbackDraft.anchor.bottom}px`,
-        }}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submitFeedbackComment();
-        }}
-      >
-        <div className={styles.routeFeedbackHeader}>
-          <span>Feedback</span>
-          <button
-            type="button"
-            className={styles.routeFeedbackClose}
-            onClick={() => setFeedbackDraft(null)}
-            aria-label="Stäng feedback"
-          />
-        </div>
-        <textarea
-          ref={feedbackInputRef}
-          className={styles.routeFeedbackInput}
-          value={feedbackDraft.comment}
-          maxLength={200}
-          rows={2}
-          placeholder={feedbackDraft.vote === "down" ? "Varför var den inte bra?" : "Varför var den bra?"}
-          onChange={(event) => {
-            const next = event.target.value.slice(0, 200);
-            setFeedbackDraft((current) => current ? { ...current, comment: next } : current);
-          }}
-        />
-        <button
-          type="submit"
-          className={styles.routeFeedbackSubmit}
-          disabled={feedbackDraft.submitting || routeFeedbackByRoute[feedbackDraft.routeId]?.pending}
-        >
-          {feedbackDraft.submitting || routeFeedbackByRoute[feedbackDraft.routeId]?.pending ? (
-            <span className={styles.routeFeedbackSpinner} aria-label="Sparar feedback" />
-          ) : (
-            "Skicka"
-          )}
-        </button>
-        {(feedbackDraft.error || routeFeedbackByRoute[feedbackDraft.routeId]?.error) && (
-          <div className={styles.routeFeedbackError} role="status">
-            {feedbackDraft.error ?? routeFeedbackByRoute[feedbackDraft.routeId]?.error}
-          </div>
-        )}
-      </form>,
       document.body,
     )}
     </>

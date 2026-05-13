@@ -17,10 +17,9 @@ Supabase pg_cron ──► Edge Function scrape ──► Trafikverket Öppna AP
 ```
 
 - **Scraper** (`supabase/functions/scrape/`) — prod-scraper via Edge Function + pg_cron
-- **Scraper CLI** (`scraper/`) — Node/TS-version för manuell körning/nödknapp
 - **Web** (`web/`) — Next.js App Router, MapLibre-karta, API-rutter mot Supabase samt geocoding/routing-proxies
 - **DB** (`db/`) — SQL-migrations, RPC:er, vyer och materialiserade vyer
-- **Shared** (`shared/`) — TS-typer delade mellan scraper och web
+- **Shared** (`shared/`) — TS-typer och domänhjälpare för webben
 
 ## Kom igång (utvecklare)
 
@@ -29,10 +28,9 @@ Förutsätter att konton är uppsatta enligt [setup-checklistan](#setup-checklis
 ```sh
 corepack enable            # pnpm via Node >=20
 pnpm install
-cp .env.example .env       # scraper/scripts
+cp .env.example .env       # scripts
 cp web/.env.example web/.env.local
 pnpm web                   # Next.js dev på :3000
-pnpm scrape:dev            # manuell engångsscrape vid behov
 ```
 
 ## Setup-checklista
@@ -44,19 +42,18 @@ Engångsgrejer som inte kan automatiseras:
 - [ ] PostGIS aktiverad: Supabase → Database → Extensions → `postgis`
 - [ ] Schemat applicerat: kör migrationskedjan i [`db/migrations/`](./db/migrations/)
 - [ ] Edge Function `scrape` deployad och `pg_cron`/`pg_net` aktiverat via migration
-- [ ] Repo-secrets satta om GitHub Actions-nödknappen ska användas: `TRAFIKVERKET_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
+- [ ] Repo-secrets satta om GitHub Actions-nödknappen ska användas: `SUPABASE_URL`, `SCRAPE_SHARED_SECRET`
 - [ ] Vercel-projekt kopplat till `web/`, env-vars `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN` samt dedikerade `NOMINATIM_*`/`OSRM_*`-värden före större publik trafik
 
 ## Deploy
 
-- **Scraper** deployas som Supabase Edge Function. GitHub Actions finns bara som manuell nödknapp.
+- **Scraper** deployas som Supabase Edge Function. GitHub Actions finns bara som manuell nödknapp och triggar samma funktion via HTTP.
 - **Web** deployas automatiskt när main uppdateras (Vercel Git-integration).
 
 ## Struktur
 
 ```
 trafik/
-├── scraper/               # Node/TS scraper CLI
 ├── web/                   # Next.js-frontend
 ├── shared/                # delade TS-typer
 ├── db/                    # SQL-migrations
