@@ -16,7 +16,7 @@ Aktiva UI-lager:
 
 Segmentrisk-färgning finns kvar i backend/kod som vilande infrastruktur men är pausad i UI tills olyckshistoriken är tillräckligt stor för att ge en rimlig riskbild. Olyckslagret visar därför punkter/heatmap, inte röd-orange risklinjer.
 
-Desktop har info/ruttplanerare i vänsterstacken, lagerknappar uppe till höger och zoom/location nere till höger. Mobil samlar lager bakom en `layers.svg`-knapp och visar hjälp som helskärm.
+Desktop har info/ruttplanerare i vänsterstacken, lagerknappar uppe till höger och zoom/location nere till höger. Mobil samlar lager bakom en `layers.svg`-knapp och visar hjälp som helskärm. Tyngre lager visar en liten spinner i lagerknappen medan bbox/tile-data hämtas. När användaren slår på `Trafikflöde`, `Trafikstörningar` eller `Höga hastigheter` från för låg zoomnivå zoomar kartan automatiskt in till lagrets miniminivå, så användaren inte möts av en tom karta utan feedback.
 
 ## Ruttplanerare
 

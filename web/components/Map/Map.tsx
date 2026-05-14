@@ -15,7 +15,7 @@ import type { RouteLine } from "@/lib/routeTypes";
 import { HelpPanel, type HelpSectionId } from "./HelpPanel";
 import { useCustomRouteStopMarkers } from "./hooks/useCustomRouteStopMarkers";
 import { useLiveEventSummary } from "./hooks/useLiveEventSummary";
-import { useMapLibreLifecycle } from "./hooks/useMapLibreLifecycle";
+import { useMapLibreLifecycle, type MapLayerLoadingState } from "./hooks/useMapLibreLifecycle";
 import { useRouteControlsBottom } from "./hooks/useRouteControlsBottom";
 import { useRouteStopSearch } from "./hooks/useRouteStopSearch";
 import { useViewportCssVars } from "./hooks/useViewportCssVars";
@@ -53,6 +53,18 @@ import {
 } from "./routeSharing";
 
 const mobileInfoBoxQuery = "(max-width: 767px)";
+const initialLayerLoading: MapLayerLoadingState = {
+  accidents: false,
+  traffic: false,
+  disturbances: false,
+  largeRoads: false,
+};
+const LAYER_MIN_ZOOM = {
+  traffic: 9,
+  disturbances: 9,
+  largeRoads: 8,
+} as const;
+const LAYER_ZOOM_DURATION_MS = 520;
 
 export type MapProps = {
   sharedRouteSlug?: string;
@@ -127,6 +139,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const [trafficOn, setTrafficOn] = useState(false);
   const [disturbancesOn, setDisturbancesOn] = useState(false);
   const [largeRoadsOn, setLargeRoadsOn] = useState(false);
+  const [layerLoading, setLayerLoading] = useState<MapLayerLoadingState>(initialLayerLoading);
   const [atUserLocation, setAtUserLocation] = useState(false);
   const [routeStops, setRouteStops] = useState<RouteStop[]>(initialRouteStops);
   const [activeRouteStopId, setActiveRouteStopId] = useState<string | null>(null);
@@ -190,6 +203,35 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     if (!map || !mapLoadedRef.current) return;
     setRouteLayerData(map, routeLines, routeId ?? selectedRouteId, routeAvoids);
   }, [routeAvoids, routeLines, selectedRouteId]);
+  const handleLayerLoadingChange = useCallback((state: MapLayerLoadingState) => {
+    setLayerLoading(state);
+  }, []);
+  const zoomToLayerMinZoom = useCallback((minZoom: number) => {
+    const map = mapRef.current;
+    if (!map || !mapLoadedRef.current || map.getZoom() >= minZoom) return;
+    map.easeTo({ zoom: minZoom, duration: LAYER_ZOOM_DURATION_MS });
+  }, []);
+  const handleTrafficToggle = useCallback(() => {
+    setTrafficOn((current) => {
+      const next = !current;
+      if (next) zoomToLayerMinZoom(LAYER_MIN_ZOOM.traffic);
+      return next;
+    });
+  }, [zoomToLayerMinZoom]);
+  const handleDisturbancesToggle = useCallback(() => {
+    setDisturbancesOn((current) => {
+      const next = !current;
+      if (next) zoomToLayerMinZoom(LAYER_MIN_ZOOM.disturbances);
+      return next;
+    });
+  }, [zoomToLayerMinZoom]);
+  const handleLargeRoadsToggle = useCallback(() => {
+    setLargeRoadsOn((current) => {
+      const next = !current;
+      if (next) zoomToLayerMinZoom(LAYER_MIN_ZOOM.largeRoads);
+      return next;
+    });
+  }, [zoomToLayerMinZoom]);
 
   useViewportCssVars(mapRef);
   useRouteControlsBottom(routeControlsRef);
@@ -201,6 +243,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     mapLoadedRef,
     mapRef,
     refreshLiveCount,
+    setLayerLoading: handleLayerLoadingChange,
     routeAvoidsRef,
     routeLinesRef,
     selectedRouteIdRef,
@@ -937,24 +980,28 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
             onToggle={handleAccidentsToggle}
             badgeCount={liveCount}
             onBadgeClick={handleFocusLiveEvents}
+            loading={accidentsOn && layerLoading.accidents}
           />
           <LayerIconButton
             label="Trafikflöde"
             icon="flow"
             on={trafficOn}
-            onToggle={() => setTrafficOn((v) => !v)}
+            onToggle={handleTrafficToggle}
+            loading={trafficOn && layerLoading.traffic}
           />
           <LayerIconButton
             label="Trafikstörningar"
             icon="disturbances"
             on={disturbancesOn}
-            onToggle={() => setDisturbancesOn((v) => !v)}
+            onToggle={handleDisturbancesToggle}
+            loading={disturbancesOn && layerLoading.disturbances}
           />
           <LayerIconButton
             label="Höga hastigheter"
             icon="speed"
             on={largeRoadsOn}
-            onToggle={() => setLargeRoadsOn((v) => !v)}
+            onToggle={handleLargeRoadsToggle}
+            loading={largeRoadsOn && layerLoading.largeRoads}
           />
         </div>
       </div>
@@ -971,6 +1018,7 @@ function LayerIconButton({
   onToggle,
   badgeCount,
   onBadgeClick,
+  loading = false,
   className,
 }: {
   label: string;
@@ -979,24 +1027,31 @@ function LayerIconButton({
   onToggle: () => void;
   badgeCount?: number;
   onBadgeClick?: () => void;
+  loading?: boolean;
   className?: string;
 }) {
   const showBadge = on && typeof badgeCount === "number" && badgeCount > 0;
   const tooltipLabel = label.startsWith("Stäng") ? label : `Visa ${label.toLowerCase()}`;
+  const buttonLabel = loading ? `${label} laddas` : label;
   return (
     <span className={`${styles.layerIconItem} ${className ?? ""}`}>
       <button
         type="button"
-        className={`${styles.layerIconBtn} ${on ? styles.layerIconBtnOn : ""}`}
+        className={`${styles.layerIconBtn} ${on ? styles.layerIconBtnOn : ""} ${
+          loading ? styles.layerIconBtnLoading : ""
+        }`}
         onClick={onToggle}
-        aria-label={label}
+        aria-label={buttonLabel}
+        aria-busy={loading || undefined}
         aria-pressed={on}
-        data-label={tooltipLabel}
+        data-label={loading ? `Laddar ${label.toLowerCase()}` : tooltipLabel}
       >
-        <span
-          className={`${styles.layerIconGlyph} ${styles[`layerIconGlyph_${icon}`]}`}
-          aria-hidden="true"
-        />
+        <span className={styles.layerIconVisual} aria-hidden="true">
+          <span
+            className={`${styles.layerIconGlyph} ${styles[`layerIconGlyph_${icon}`]}`}
+          />
+          <span className={styles.layerIconSpinner} />
+        </span>
       </button>
       {showBadge && (
         <button

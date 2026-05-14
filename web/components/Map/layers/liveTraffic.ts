@@ -16,7 +16,7 @@ import {
   LIVE_CORE_LAYER_ID,
   LIVE_HALO_LAYER_ID,
 } from "./events";
-import type { LayerController } from "./types";
+import type { LayerController, LayerLoadingCallback } from "./types";
 
 const DISTURBANCE_SOURCE_ID = "disturbances";
 const DISTURBANCE_LAYER_ID = "disturbances-points";
@@ -67,7 +67,10 @@ function ensureDisturbanceMarkerImages(map: MapLibreMap): void {
   addMarker(DISTURBANCE_MARKER_IMAGE_ID);
 }
 
-export function addDisturbancesLayer(map: MapLibreMap): LayerController {
+export function addDisturbancesLayer(
+  map: MapLibreMap,
+  opts: { onLoadingChange?: LayerLoadingCallback } = {},
+): LayerController {
   if (map.getSource(DISTURBANCE_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
@@ -128,6 +131,7 @@ export function addDisturbancesLayer(map: MapLibreMap): LayerController {
     initialEnabled: false,
     bboxPadding: 0.2,
     maxBboxAreaDeg2: 5000,
+    onLoadingChange: opts.onLoadingChange,
     fetchBbox: async (bbox) => {
       await refreshDisturbancesLayer(map, bbox);
     },
@@ -189,7 +193,10 @@ export async function refreshDisturbancesLayer(
   return { disturbanceCount: points.length };
 }
 
-export function addTrafficFlowLayer(map: MapLibreMap): LayerController {
+export function addTrafficFlowLayer(
+  map: MapLibreMap,
+  opts: { onLoadingChange?: LayerLoadingCallback } = {},
+): LayerController {
   if (map.getSource(TRAFFIC_FLOW_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
@@ -270,8 +277,10 @@ export function addTrafficFlowLayer(map: MapLibreMap): LayerController {
 
   const loader = createBboxLoader(map, {
     minZoom: TRAFFIC_FLOW_MIN_ZOOM,
+    initialEnabled: false,
     bboxPadding: 0.5,
     maxBboxAreaDeg2: 30,
+    onLoadingChange: opts.onLoadingChange,
     fetchBbox: async (padded) => {
       await refreshTrafficFlowLayer(map, padded);
     },

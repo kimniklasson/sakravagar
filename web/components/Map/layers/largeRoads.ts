@@ -11,7 +11,7 @@ import {
   paddedBbox,
   type Bbox,
 } from "./bbox";
-import type { LayerController } from "./types";
+import type { LayerController, LayerLoadingCallback } from "./types";
 
 const LARGE_ROADS_BADGE_SOURCE_ID = "large-roads-speed-badges";
 export const LARGE_ROADS_BADGE_LAYER_ID = "large-roads-speed-badge-symbols";
@@ -335,7 +335,10 @@ function visibleLargeRoadKeys(entries: Array<[string, LargeRoadFeature]>): Set<s
 // Bbox-drivet NVDB-lager från Lastkajen: bara skyltad hastighet 80+.
 // Vägtyp-rader utan hastighetsvärde filtreras bort i API:t eftersom de kan
 // representera större vägar som ändå är 80-vägar i verkligheten.
-export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
+export function addLargeRoadsLayer(
+  map: MapLibreMap,
+  opts: { onLoadingChange?: LayerLoadingCallback } = {},
+): LayerController {
   if (map.getSource(LARGE_ROADS_BADGE_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
@@ -381,6 +384,17 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
   let activeTileFetches = 0;
   let enabled = false;
   let visibleFeatureKeys = new Set<string>();
+  let loading = false;
+
+  const setLoading = (v: boolean) => {
+    if (loading === v) return;
+    loading = v;
+    opts.onLoadingChange?.(v);
+  };
+
+  const syncLoading = () => {
+    setLoading(enabled && (activeTileFetches > 0 || tileQueue.length > 0));
+  };
 
   const updateBadgeSource = () => {
     const cellSize = map.getZoom() < 10 ? 130 : 96;
@@ -460,7 +474,10 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
   };
 
   const pumpTiles = () => {
-    if (!enabled) return;
+    if (!enabled) {
+      syncLoading();
+      return;
+    }
     while (activeTileFetches < LARGE_ROADS_MAX_CONCURRENT_TILES && tileQueue.length > 0) {
       const tile = tileQueue.shift();
       if (!tile) return;
@@ -469,12 +486,15 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
 
       activeTileFetches++;
       inFlightTiles.add(tile.key);
+      syncLoading();
       void fetchTile(tile).finally(() => {
         activeTileFetches--;
         inFlightTiles.delete(tile.key);
         pumpTiles();
+        syncLoading();
       });
     }
+    syncLoading();
   };
 
   const refreshTiles = () => {
@@ -499,6 +519,7 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
     }
     tileQueue.unshift(...nextTiles);
     pumpTiles();
+    syncLoading();
   };
 
   map.on("moveend", refreshTiles);
@@ -514,6 +535,8 @@ export function addLargeRoadsLayer(map: MapLibreMap): LayerController {
       if (v) {
         raiseLargeRoadBadges(map);
         refreshTiles();
+      } else {
+        syncLoading();
       }
     },
   };

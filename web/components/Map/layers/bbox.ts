@@ -1,4 +1,5 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
+import type { LayerLoadingCallback } from "./types";
 
 export type Bbox = { west: number; south: number; east: number; north: number };
 export type BboxLoader = { setEnabled: (v: boolean) => void };
@@ -69,6 +70,7 @@ export function createBboxLoader(
     bboxPadding?: number;
     maxBboxAreaDeg2?: number;
     fetchBbox: (b: Bbox) => Promise<void>;
+    onLoadingChange?: LayerLoadingCallback;
   },
 ): BboxLoader {
   const BBOX_PADDING = opts.bboxPadding ?? 0.3;
@@ -78,12 +80,20 @@ export function createBboxLoader(
   let inFlight = false;
   let needsRefresh = false;
   let enabled = opts.initialEnabled ?? true;
+  let loading = false;
+
+  const setLoading = (v: boolean) => {
+    if (loading === v) return;
+    loading = v;
+    opts.onLoadingChange?.(v);
+  };
 
   const refresh = async (): Promise<void> => {
     if (!enabled) return;
     if (map.getZoom() < opts.minZoom) return;
     if (inFlight) {
       needsRefresh = true;
+      setLoading(true);
       return;
     }
     const viewport = mapBoundsBbox(map);
@@ -94,6 +104,7 @@ export function createBboxLoader(
     if (!padded || bboxArea(padded) > MAX_BBOX_AREA_DEG2) return;
 
     inFlight = true;
+    setLoading(true);
     try {
       await opts.fetchBbox(padded);
       cachedBbox = padded;
@@ -101,7 +112,11 @@ export function createBboxLoader(
       inFlight = false;
       if (needsRefresh) {
         needsRefresh = false;
-        void refresh();
+        void refresh().finally(() => {
+          if (!inFlight && !needsRefresh) setLoading(false);
+        });
+      } else {
+        setLoading(false);
       }
     }
   };
@@ -113,7 +128,11 @@ export function createBboxLoader(
     setEnabled: (v: boolean) => {
       if (enabled === v) return;
       enabled = v;
-      if (v) void refresh();
+      if (v) {
+        void refresh();
+      } else {
+        setLoading(false);
+      }
     },
   };
 }

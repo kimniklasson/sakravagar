@@ -12,7 +12,7 @@ import {
 } from "./bbox";
 import { HEATMAP_LAYER_ID } from "./events";
 import { RISK_LAYER_ID } from "./risk";
-import type { LayerController } from "./types";
+import type { LayerController, LayerLoadingCallback } from "./types";
 
 type AdtSegment = {
   fid: number;
@@ -70,7 +70,10 @@ function adtTilesForBbox(b: Bbox, center: { lng: number; lat: number }): AdtTile
 // ÅDT-lager: tile-cacheat via /api/adt vid moveend när zoom ≥ 9.
 // Färgar linjer efter trafikflöde (ljusblåvitt → blått). Läggs under risk
 // och events så att det läses som underlagsdata, inte slutsatsen.
-export function addAdtLayer(map: MapLibreMap): LayerController {
+export function addAdtLayer(
+  map: MapLibreMap,
+  opts: { onLoadingChange?: LayerLoadingCallback } = {},
+): LayerController {
   if (map.getSource(ADT_SOURCE_ID)) {
     return { setVisible: () => {} };
   }
@@ -126,7 +129,18 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
   const inFlightTiles = new Set<string>();
   const tileQueue: AdtTile[] = [];
   let activeTileFetches = 0;
-  let enabled = true;
+  let enabled = false;
+  let loading = false;
+
+  const setLoading = (v: boolean) => {
+    if (loading === v) return;
+    loading = v;
+    opts.onLoadingChange?.(v);
+  };
+
+  const syncLoading = () => {
+    setLoading(enabled && (activeTileFetches > 0 || tileQueue.length > 0));
+  };
 
   const updateSource = () => {
     const fc: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
@@ -161,7 +175,10 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
   };
 
   const pumpTiles = () => {
-    if (!enabled) return;
+    if (!enabled) {
+      syncLoading();
+      return;
+    }
     while (activeTileFetches < ADT_MAX_CONCURRENT_TILES && tileQueue.length > 0) {
       const tile = tileQueue.shift();
       if (!tile) return;
@@ -170,12 +187,15 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
 
       activeTileFetches++;
       inFlightTiles.add(tile.key);
+      syncLoading();
       void fetchTile(tile).finally(() => {
         activeTileFetches--;
         inFlightTiles.delete(tile.key);
         pumpTiles();
+        syncLoading();
       });
     }
+    syncLoading();
   };
 
   const refreshTiles = () => {
@@ -196,6 +216,7 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
     for (const tile of nextTiles) queuedTiles.add(tile.key);
     tileQueue.unshift(...nextTiles);
     pumpTiles();
+    syncLoading();
   };
 
   map.on("moveend", refreshTiles);
@@ -209,7 +230,11 @@ export function addAdtLayer(map: MapLibreMap): LayerController {
         map.setLayoutProperty(ADT_LAYER_ID, "visibility", v ? "visible" : "none");
       }
       enabled = v;
-      if (v) refreshTiles();
+      if (v) {
+        refreshTiles();
+      } else {
+        syncLoading();
+      }
     },
   };
 }

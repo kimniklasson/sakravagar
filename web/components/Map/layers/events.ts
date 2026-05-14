@@ -13,6 +13,7 @@ import {
   paddedBbox,
   type Bbox,
 } from "./bbox";
+import type { LayerLoadingCallback } from "./types";
 
 type HeatmapStop = { density: number; color: string; alpha: number };
 type EventsLayerCache = {
@@ -67,7 +68,7 @@ function hexToRgba(hex: string, alpha: number): string {
 
 export async function addEventsLayer(
   map: MapLibreMap,
-  opts: { force?: boolean; since?: string | null } = {},
+  opts: { force?: boolean; since?: string | null; onLoadingChange?: LayerLoadingCallback } = {},
 ): Promise<{ liveCount: number }> {
   const viewport = mapBoundsBbox(map);
   const bbox = viewport ? clipBboxToLayerBounds(paddedBbox(viewport, 0.2)) : null;
@@ -84,9 +85,11 @@ export async function addEventsLayer(
   }
   if (cache.inFlight) {
     cache.needsRefresh = true;
+    opts.onLoadingChange?.(true);
     return { liveCount: cache.liveCount };
   }
   cache.inFlight = true;
+  opts.onLoadingChange?.(true);
 
   const params = new URLSearchParams({ bbox: bboxToParam(bbox) });
   if (opts.since) params.set("since", opts.since);
@@ -139,7 +142,11 @@ export async function addEventsLayer(
     cache.inFlight = false;
     if (cache.needsRefresh) {
       cache.needsRefresh = false;
-      void addEventsLayer(map, { ...opts, force: true });
+      void addEventsLayer(map, { ...opts, force: true }).finally(() => {
+        opts.onLoadingChange?.(false);
+      });
+    } else {
+      opts.onLoadingChange?.(false);
     }
   }
 

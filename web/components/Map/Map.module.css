@@ -425,7 +425,21 @@
   color: var(--color-dark);
 }
 
+.layerIconBtnLoading {
+  cursor: wait;
+}
+
+.layerIconVisual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
 .layerIconGlyph {
+  grid-area: 1 / 1;
   display: block;
   width: 17px;
   height: 17px;
@@ -436,6 +450,41 @@
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.layerIconSpinner {
+  grid-area: 1 / 1;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 999px;
+  opacity: 0;
+  transform-origin: center;
+  animation: layerIconSpin 760ms linear infinite;
+  transition: opacity 120ms ease;
+}
+
+.layerIconBtnLoading .layerIconGlyph {
+  opacity: 0;
+  transform: scale(0.78);
+}
+
+.layerIconBtnLoading .layerIconSpinner {
+  opacity: 1;
+}
+
+@keyframes layerIconSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layerIconSpinner {
+    animation-duration: 1.4s;
+  }
 }
 
 .layerIconGlyph_layers {
