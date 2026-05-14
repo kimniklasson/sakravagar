@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import type { RouteLine } from "@/lib/routeTypes";
-import styles from "./Map.module.css";
+import styles from "./RouteAlternativesTray.module.css";
 import {
   formatRouteDistance,
   formatRouteDuration,

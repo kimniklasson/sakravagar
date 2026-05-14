@@ -1,4 +1,4 @@
-import styles from "./Map.module.css";
+import styles from "./MapIcons.module.css";
 
 export function RoadOrXIcon({ expanded }: { expanded: boolean }) {
   return (

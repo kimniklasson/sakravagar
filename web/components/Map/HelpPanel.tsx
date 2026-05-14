@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "./Map.module.css";
+import styles from "./HelpPanel.module.css";
 
 export type HelpSectionId =
   | "routeHighSpeed"

@@ -1,0 +1,508 @@
+/* === Route planner === */
+
+.routeBox {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  color: var(--color-white);
+}
+
+.routeBoxWithAlternatives {
+  height: 100%;
+}
+
+.routePanel {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.routeStops {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.routeStopGroup {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.routeInputRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 16px;
+  border-radius: 0;
+  background: #555555;
+  color: var(--color-white);
+}
+
+.routeInputRowFirst {
+  border-radius: 8px 8px 0 0;
+}
+
+.routeInputRowLast {
+  border-radius: 0 0 8px 8px;
+}
+
+.routeInputRowFirst.routeInputRowLast {
+  border-radius: 8px;
+}
+
+.routeSuggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 1px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(34, 34, 34, 0.6);
+}
+
+.routeSuggestion {
+  composes: type-medium from global;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 16px 9px;
+  border: 0;
+  background: rgba(34, 34, 34, 0.6);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-univers);
+  text-align: left;
+  cursor: pointer;
+}
+
+.routeSuggestion:hover,
+.routeSuggestion:focus-visible,
+.routeSuggestionActive {
+  background: #222222;
+  color: var(--color-white);
+  outline: none;
+}
+
+.routeIcon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+
+.routePositionInputIcon {
+  color: var(--color-white);
+  mask-image: url("/icons/myposition.svg");
+  -webkit-mask-image: url("/icons/myposition.svg");
+}
+
+.routeDestinationInputIcon {
+  color: var(--color-white);
+  mask-image: url("/icons/mydestination.svg");
+  -webkit-mask-image: url("/icons/mydestination.svg");
+}
+
+.routeDragIcon {
+  width: 11px;
+  height: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  mask-image: url("/icons/draghandles.svg");
+  -webkit-mask-image: url("/icons/draghandles.svg");
+}
+
+.routeCloseIcon {
+  width: 12px;
+  height: 12px;
+  color: var(--color-white);
+  mask-image: url("/icons/close-circle.svg");
+  -webkit-mask-image: url("/icons/close-circle.svg");
+}
+
+.routeInput {
+  composes: type-large from global;
+  min-width: 0;
+  flex: 1;
+  height: 24px;
+  margin: 0 12px;
+  padding: 3px 0 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-white);
+  font-family: var(--font-univers);
+}
+
+.routeInput::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+  opacity: 1;
+}
+
+.routeClearBtn,
+.routeDragBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.routeClearBtn {
+  cursor: pointer;
+}
+
+.routeDragBtn {
+  margin-left: 2px;
+  cursor: grab;
+}
+
+.routeDragBtn:active {
+  cursor: grabbing;
+}
+
+
+
+.routePositionSuggestion {
+  composes: type-medium from global;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 1px;
+  padding: 10px 16px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(34, 34, 34, 0.6);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: rgba(255, 255, 255, 0.72);
+  font-family: var(--font-univers);
+  text-align: left;
+  cursor: pointer;
+}
+
+.routePositionSuggestion:hover,
+.routePositionSuggestion:focus-visible,
+.routePositionSuggestion.routeSuggestionActive {
+  background: #222222;
+  color: var(--color-white);
+  outline: none;
+}
+
+.routePositionSuggestion:disabled {
+  cursor: wait;
+  opacity: 0.82;
+}
+
+.routePositionIcon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.routeActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.routeActionBtn {
+  composes: type-small-x from global;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-univers);
+  cursor: pointer;
+}
+
+.routeStatus {
+  composes: type-small-x from global;
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.routeCompareStatus {
+  composes: type-large from global;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 96px;
+  padding: 24px;
+  border-radius: 8px;
+  background: rgba(85, 85, 85, 0.3);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: var(--color-white);
+}
+
+.routeCompareSpinner {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+.routeCompareSpinner::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--color-white);
+  border-right-color: var(--color-white);
+  animation: routeSpinnerChase 700ms linear infinite;
+}
+
+.routeSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 16px;
+  padding: 3px 0 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.routeSummaryMain,
+.routeSummaryDistance {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.routeSummaryDistance {
+  align-items: flex-end;
+  padding-top: 1px;
+}
+
+.routeSummaryLabel {
+  composes: type-medium from global;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.routeSummaryValue {
+  composes: type-large from global;
+  color: var(--color-white);
+}
+
+.routeSummaryDistanceValue {
+  composes: type-medium from global;
+  color: var(--color-white);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.routeSummaryDiff {
+  color: var(--color-red);
+}
+
+.routeNotice {
+  composes: type-small-x from global;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 4px;
+  background: var(--color-beige);
+  color: rgba(51, 51, 51, 0.75);
+}
+
+.routeNoticeIcon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.routeAvoidSection {
+  margin-top: 16px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.routeAvoidHeading {
+  composes: type-medium from global;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.62);
+  text-transform: none;
+}
+
+.routeAvoidList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.routeAvoidPill {
+  composes: type-small from global;
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 6px 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(17, 17, 17, 0.7);
+  color: var(--color-white);
+  font-family: var(--font-univers);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+.routeAvoidTooltip {
+  composes: type-m-small from global;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 3;
+  width: max-content;
+  min-width: 128px;
+  max-width: 160px;
+  padding: 6px 8px 7px;
+  border-radius: 4px;
+  background: var(--color-white);
+  color: var(--color-dark);
+  text-align: center;
+  text-transform: none;
+  line-height: 1.18;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.routeAvoidTooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--color-white);
+  transform: translate(-50%, -5px) rotate(45deg);
+}
+
+.routeAvoidPill:hover .routeAvoidTooltip,
+.routeAvoidPill:focus-visible .routeAvoidTooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.routeAvoidPill:hover,
+.routeAvoidPill:focus-visible {
+  background: rgba(17, 17, 17, 0.82);
+  outline: none;
+}
+
+.routeAvoidPillOn {
+  background: #555555;
+  color: var(--color-white);
+}
+
+.routeAvoidPillOn:hover,
+.routeAvoidPillOn:focus-visible {
+  background: #555555;
+  color: var(--color-white);
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.07);
+}
+
+.routeAvoidCheckbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: #555555;
+}
+
+.routeAvoidPillOn .routeAvoidCheckbox {
+  background: var(--color-white);
+}
+
+.routeAvoidPillOn .routeAvoidCheckbox::after {
+  content: "";
+  display: block;
+  width: 6px;
+  height: 4px;
+  background: #555555;
+  mask-image: url("/icons/check.svg");
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: 6px 4px;
+  -webkit-mask-image: url("/icons/check.svg");
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: 6px 4px;
+}
+
+.routeSpinner {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.routeSpinner::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-top-color: var(--color-white);
+  border-right-color: var(--color-white);
+  animation: routeSpinnerChase 700ms linear infinite;
+}
+
+@keyframes routeSpinnerChase {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .routeInputRow {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { GeocodeResult } from "@/app/api/geocode/route";
 import { LocationIcon, WarningIcon } from "./MapIcons";
-import styles from "./Map.module.css";
+import styles from "./RoutePlannerBox.module.css";
 import {
   isCustomRouteStop,
   routeAvoidLabels,

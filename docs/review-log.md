@@ -104,6 +104,16 @@ Kvarvarande medvetna uppföljningar:
 - SSR-prefetch av delade rutter är fortfarande en bra UX-vinst men inte blockerande.
 - Edge runtime-flytt för enkla API-routes kan tas senare när stabilitet väger tyngre än cold-start-optimering.
 
+## 2026-05-14 — Arkitekturcleanup: kvarvarande filsplit
+
+Status efter route- och layer-cleanup:
+
+- `web/app/api/route/route.ts` är nere på handler-nivå. Routinglogik, providers, custom models, dedupe, hybridbygge, timeout/concurrency, telemetry och tester ligger i `web/app/api/route/_routing/`.
+- `web/components/Map/layers.ts` är bara export-yta. Kartlagren ligger i `web/components/Map/layers/`.
+- `web/components/Map/Map.tsx` är fortfarande den viktigaste kvarvarande frontend-filen att tunna ut. Nästa rimliga pass är routeplanner-orchestration: route state, vald rutt, shared-route loading, planRoute/cache/fetch-flöde och map-control-state.
+- Första `web/components/Map/Map.module.css`-splitten är gjord: `RoutePlannerBox`, `RouteAlternativesTray`, `HelpPanel`, `RouteLoadingIndicator` och `MapIcons` har egna CSS Modules. `Map.module.css` är kvar som kartskal/styrpanel: info/live/time-box, lagerkontroller, högerkontroller, via-marker och mobil-attribution.
+- `_routing/scoring.ts`, `layers/route.ts` och `layers/largeRoads.ts` är accepterade specialistmoduler för nu. Dela först om ändringar i respektive område gör dem kognitivt tunga igen.
+
 ## 2026-05-11 — Loadingstate-experiment
 
 Ett dev-only experiment byggdes för att animera synliga vägar med shimmer medan rutter beräknas. Effekten gick att justera via ett temporärt labb, men upplevdes för hetsig även vid långsammare tider.

@@ -1,0 +1,108 @@
+.routeLoadingIndicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: min(240px, calc(100vw - 48px));
+  transform: translateY(10px);
+}
+
+.routeLoadingRuler {
+  position: relative;
+  width: min(193px, 100%);
+  height: 24px;
+  overflow: hidden;
+}
+
+.routeLoadingRulerBase,
+.routeLoadingRulerSweep {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: #777777;
+  -webkit-mask: url("/icons/ruler.svg") center / contain no-repeat;
+  mask: url("/icons/ruler.svg") center / contain no-repeat;
+}
+
+.routeLoadingRulerSweep {
+  background: var(--color-white);
+  clip-path: inset(0 100% 0 0);
+  animation: routeRulerSweep 2100ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.routeLoadingMessageMask {
+  composes: type-small-x from global;
+  width: min(240px, 100%);
+  height: 16px;
+  overflow: hidden;
+  color: var(--color-white);
+  font-family: var(--font-univers);
+  line-height: 16px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.routeLoadingMessageStack {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(calc(var(--route-loading-message-index, 0) * -16px));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.routeLoadingMessage {
+  height: 16px;
+  white-space: nowrap;
+}
+
+.routeLoadingHint {
+  composes: type-m-small from global;
+  width: min(320px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(17, 17, 17, 0.7);
+  color: var(--color-white);
+  font-family: var(--font-univers);
+  line-height: 1.25;
+  text-align: center;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+@keyframes routeRulerSweep {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  42%,
+  55% {
+    clip-path: inset(0 0 0 0);
+  }
+
+  100% {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .routeLoadingRulerSweep {
+    animation: none;
+    clip-path: inset(0 0 0 0);
+  }
+
+  .routeLoadingMessageStack {
+    transition: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .routeLoadingIndicator {
+    position: absolute;
+    top: calc(var(--route-controls-bottom, 0px) + 16px);
+    right: auto;
+    bottom: var(--route-results-loader-bottom, calc(var(--app-visual-bottom, 0px) + env(safe-area-inset-bottom)));
+    left: 50%;
+    justify-content: center;
+    transform: translateX(-50%);
+  }
+}

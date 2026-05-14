@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import styles from "./Map.module.css";
+import styles from "./RouteLoadingIndicator.module.css";
 
 const routeLoadingMessages = [
   "Mäter distanser...",

@@ -1,0 +1,54 @@
+/* === Road icon + morph to X === */
+
+.roadIcon {
+  display: block;
+  width: 28px;
+  height: 18px;
+}
+
+.roadIcon path {
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  transform-box: view-box;
+  transform-origin: 14px 9px;
+}
+
+.roadIcon path:nth-child(2) {
+  /* Mittlinjens dash-animation — scrollar mönstret höger→vänster, loopar.
+     5+4 = 9 px periodlängd. */
+  animation: roadDashScroll 1.4s linear infinite;
+}
+
+.roadIconExpanded path:nth-child(1) {
+  transform: translateY(8px) rotate(45deg);
+}
+
+.roadIconExpanded path:nth-child(2) {
+  opacity: 0;
+  animation-play-state: paused;
+}
+
+.roadIconExpanded path:nth-child(3) {
+  transform: translateY(-8px) rotate(-45deg);
+}
+
+@keyframes roadDashScroll {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -9; }
+}
+
+.warningIcon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.btnIcon {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.roadIcon path,
+.warningIcon path,
+.btnIcon path {
+  vector-effect: non-scaling-stroke;
+}
