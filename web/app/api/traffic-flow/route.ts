@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
 import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
@@ -25,18 +25,7 @@ export type TrafficFlowSegment = {
   geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
 };
 
-type TrafficFlowRow = {
-  site_id: number;
-  fid: number;
-  vehicle_flow_rate: number | null;
-  average_vehicle_speed: number | null;
-  data_quality: string | null;
-  measurement_time: string | null;
-  last_seen: string;
-  sample_count: number;
-  snap_distance_m: number | null;
-  geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
-};
+type TrafficFlowRow = PublicFunctionRow<"traffic_flow_segments_in_bbox">;
 
 function categoryFromFlow(flowRate: number | null, speed: number | null): TrafficFlowCategory {
   const flow = flowRate ?? 0;
@@ -63,7 +52,7 @@ export async function GET(req: Request) {
   const startedAt = Date.now();
   const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("traffic_flow_segments_in_bbox", {
     min_lng: bbox.minLng,
     min_lat: bbox.minLat,
@@ -75,7 +64,7 @@ export async function GET(req: Request) {
     return serverErrorResponse("traffic flow query failed", error);
   }
 
-  const segments: TrafficFlowSegment[] = ((data ?? []) as TrafficFlowRow[]).map((row) => {
+  const segments: TrafficFlowSegment[] = ((data ?? []) satisfies TrafficFlowRow[]).map((row) => {
     const speed = row.average_vehicle_speed;
     const flow = row.vehicle_flow_rate;
     return {
@@ -89,7 +78,7 @@ export async function GET(req: Request) {
       category: categoryFromFlow(flow, speed),
       sample_count: row.sample_count,
       snap_distance_m: row.snap_distance_m,
-      geometry: row.geometry,
+      geometry: row.geometry as unknown as GeoJSON.LineString | GeoJSON.MultiLineString,
     };
   });
 

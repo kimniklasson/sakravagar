@@ -78,6 +78,8 @@ Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-
 
 Alla rate-limitade API-svar inkluderar `x-request-id`. Cloudflare Free har en aktiv rate limiting-regel på exakt `/api/route`: 10 requests / 10 seconds per IP, action `Block`, duration 10 seconds. `/api/route` använder dessutom en per-instans concurrency cap för att skydda GraphHopper: `ROUTE_MAX_CONCURRENT_TOTAL`, `ROUTE_MAX_CONCURRENT_PER_IP` och `ROUTE_CONCURRENCY_RETRY_AFTER_SECONDS` kan sättas i Vercel om defaultvärdena behöver justeras.
 
+Server-side Supabase-klienter ska skapas via `web/lib/supabaseServer.ts`, som använder genererade typer från `db/database.types.ts`.
+
 ## Routeplanner
 
 `Undvik om möjligt`-filter:

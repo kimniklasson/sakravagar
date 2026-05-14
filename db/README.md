@@ -57,6 +57,14 @@ Supabase ändrar Data API-defaults under 2026: nya objekt i `public` ska inte an
 
 Om objektet inte ska exponeras direkt, gör det tydligt i migrationen: enable RLS utan publik policy och använd en smal `security definer`-RPC eller server-side `service_role` i stället.
 
+Efter schema-/RPC-ändringar i Supabase ska `database.types.ts` regenereras:
+
+```sh
+pnpm exec supabase gen types typescript --project-id evgrkuxpqyoucvfrarap --schema public > db/database.types.ts
+```
+
+Webbens serverkod använder typerna via `web/lib/supabaseServer.ts`. Kör `pnpm --filter @trafik/web run typecheck` efter regenerering så brutna RPC-signaturer fångas direkt.
+
 ## Viktiga migrations
 
 - `0004_pg_cron_scrape.sql` — schemalägger Edge Function-scrape via `pg_cron`/`pg_net`.

@@ -1,10 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
 import {
   parseFeedbackVote,
   parseJsonObject,
   parseRouteSharePayload,
   parseUuid,
 } from "@/lib/routeShareSchema";
+import { createServerSupabaseClient, type SupabaseJson } from "@/lib/supabaseServer";
 import { jsonResponse, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
@@ -15,11 +15,8 @@ const serviceKey = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERV
 const SNAPSHOT_MAX_BYTES = 300_000;
 const FEEDBACK_SNAPSHOT_TTL_DAYS = 90;
 
-type SnapshotRpcRow = {
-  id: string;
-  slug: string | null;
-  expires_at: string;
-};
+// Supabase CLI currently emits nullable RPC args as non-nullable strings.
+const PRIVATE_ROUTE_SNAPSHOT_SLUG = null as unknown as string;
 
 export async function POST(req: Request) {
   if (!url || !serviceKey) {
@@ -45,20 +42,20 @@ export async function POST(req: Request) {
   const snapshot = parsedSnapshot.value;
   const routeMeta = parseJsonObject(body?.routeMeta) ?? {};
   const searchMeta = parseJsonObject(body?.searchMeta) ?? {};
-  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, serviceKey);
   const expiresAt = new Date(Date.now() + FEEDBACK_SNAPSHOT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: snapshotData, error: snapshotErrorResponse } = await client.rpc("create_route_snapshot", {
-    p_slug: null,
+    p_slug: PRIVATE_ROUTE_SNAPSHOT_SLUG,
     p_is_public: false,
-    p_payload: snapshot,
+    p_payload: snapshot as unknown as SupabaseJson,
     p_expires_at: expiresAt,
   });
   if (snapshotErrorResponse) {
     return serverErrorResponse("route feedback snapshot create failed", snapshotErrorResponse);
   }
 
-  const snapshotRow = ((snapshotData as SnapshotRpcRow[] | null) ?? [])[0];
+  const snapshotRow = (snapshotData ?? [])[0];
   if (!snapshotRow?.id) {
     return serverErrorResponse("route feedback snapshot missing id", new Error("missing snapshot id"));
   }
@@ -66,9 +63,9 @@ export async function POST(req: Request) {
   const { data: feedbackId, error: feedbackError } = await client.rpc("create_route_feedback", {
     p_snapshot_id: snapshotRow.id,
     p_vote: vote,
-    p_comment: null,
-    p_route_meta: routeMeta,
-    p_search_meta: searchMeta,
+    p_comment: "",
+    p_route_meta: routeMeta as unknown as SupabaseJson,
+    p_search_meta: searchMeta as unknown as SupabaseJson,
   });
   if (feedbackError) {
     return serverErrorResponse("route feedback create failed", feedbackError);
@@ -86,7 +83,7 @@ export async function DELETE(req: Request) {
   const id = parseUuid(searchParams.get("id"));
   if (!id) return jsonResponse({ error: "invalid feedback id" }, { status: 400 });
 
-  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, serviceKey);
   const { data, error } = await client.rpc("delete_route_feedback", {
     p_feedback_id: id,
   });

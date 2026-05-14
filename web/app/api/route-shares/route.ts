@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { parseRouteSharePayload, parseSlug } from "@/lib/routeShareSchema";
+import { createServerSupabaseClient, type SupabaseJson } from "@/lib/supabaseServer";
 import { jsonResponse, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
@@ -12,18 +12,6 @@ const serviceKey = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERV
 const siteOrigin = process.env.PUBLIC_SITE_ORIGIN ?? process.env.NEXT_PUBLIC_SITE_ORIGIN;
 const SNAPSHOT_MAX_BYTES = 300_000;
 const PUBLIC_SNAPSHOT_TTL_DAYS = 30;
-
-type SnapshotRpcRow = {
-  id: string;
-  slug: string | null;
-  expires_at: string;
-};
-
-type PublicSnapshotRpcRow = {
-  payload: unknown | null;
-  expires_at: string;
-  expired: boolean;
-};
 
 function makeSlug(): string {
   return randomBytes(12).toString("base64url");
@@ -60,11 +48,11 @@ export async function GET(req: Request) {
     return jsonResponse({ error: "invalid slug" }, { status: 400 });
   }
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("get_public_route_snapshot", { p_slug: slug });
   if (error) return serverErrorResponse("route share lookup failed", error);
 
-  const row = ((data as PublicSnapshotRpcRow[] | null) ?? [])[0];
+  const row = (data ?? [])[0];
   if (!row) return jsonResponse({ error: "not found" }, { status: 404 });
   if (row.expired) {
     return jsonResponse({ error: "expired", expiresAt: row.expires_at }, { status: 410 });
@@ -85,7 +73,7 @@ export async function POST(req: Request) {
   }
   const payload = parsedPayload.value;
 
-  const client = createClient(url, serviceKey, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, serviceKey);
   const expiresAt = new Date(Date.now() + PUBLIC_SNAPSHOT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -93,12 +81,12 @@ export async function POST(req: Request) {
     const { data, error } = await client.rpc("create_route_snapshot", {
       p_slug: slug,
       p_is_public: true,
-      p_payload: payload,
+      p_payload: payload as unknown as SupabaseJson,
       p_expires_at: expiresAt,
     });
 
     if (!error) {
-      const row = ((data as SnapshotRpcRow[] | null) ?? [])[0];
+      const row = (data ?? [])[0];
       if (!row?.slug) return serverErrorResponse("route share missing slug", new Error("missing slug"));
       return jsonResponse({
         slug: row.slug,

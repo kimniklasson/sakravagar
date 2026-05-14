@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { jsonResponse, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     return jsonResponse({ error: "fid must be a safe integer" }, { status: 400 });
   }
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("segment_detail", { p_fid: fid });
 
   if (error) {

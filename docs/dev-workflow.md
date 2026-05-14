@@ -50,6 +50,18 @@ Kör `pnpm --filter @trafik/web run build` när ändringen påverkar Next-konfig
 
 Kör inte `next build` samtidigt som `next dev` är igång om `.next` börjar bete sig konstigt.
 
+## Supabase-typer
+
+Genererade Supabase-typer ligger i `db/database.types.ts` och används av serverklienter via `web/lib/supabaseServer.ts`.
+
+Uppdatera filen efter schema-/RPC-ändringar i Supabase:
+
+```sh
+pnpm exec supabase gen types typescript --project-id evgrkuxpqyoucvfrarap --schema public > db/database.types.ts
+```
+
+Typerna kommer från remote-projektet. Kör `pnpm --filter @trafik/web run typecheck` efteråt så RPC-signaturer, grants-relaterade vyer och returnerade fält fångas av TypeScript.
+
 ## Ruttplanerar-smoke tests
 
 - Floda -> Rönnäng: `Höga hastigheter` ska kunna välja en lugnare kandidat än snabbaste rutten.

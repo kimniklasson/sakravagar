@@ -70,7 +70,7 @@ Detaljerade endpoint-kontrakt finns i `docs/api.md`.
 
 - **App:** `https://sakravagar.se` på Vercel.
 - **DNS:** Loopia är registrar. Cloudflare DNS hanterar både `sakravagar.se` och legacy-domänen `säkravägar.se` / `xn--skravgar-0zae.se`.
-- **Databas:** Supabase Postgres + PostGIS, migrations i `db/migrations/`.
+- **Databas:** Supabase Postgres + PostGIS, migrations i `db/migrations/` och genererade Data API/RPC-typer i `db/database.types.ts`.
 - **Routing:** Hetzner CPX32 med GraphHopper 11 bakom Caddy och `X-Routing-Token`. Drift i `docs/routing-ops.md`.
 - **Tiles:** MapLibre GL med OpenFreeMap.
 
@@ -101,6 +101,7 @@ Canonical domains:
 
 - Supabase PostGIS ligger i schemat `extensions`; `security definer` med explicit `search_path` behöver inkludera `extensions`.
 - Supabase Data API-exponering ska vara explicit i nya migrations. Alla nya `public`-tabeller, vyer, materialized views, funktioner och sekvenser behöver minsta nödvändiga `grant` i samma migration som objektet/RLS/policies; anta inte att default privileges gör objektet nåbart för `anon`, `authenticated` eller `service_role`.
+- Efter schema-/RPC-ändringar: regenerera `db/database.types.ts` med Supabase CLI och kör web-typecheck. Serverkod ska skapa Supabase-klient via `web/lib/supabaseServer.ts` så `createClient<Database>` används konsekvent.
 - Middleware och `/api/route` skickar `x-request-id`; route-observability loggar samma id. Middleware-rate-limit och route-concurrency är process-/instanslokala skydd. Cloudflare-regeln för `/api/route` är yttre skydd på Free-planen, men räknare kan fortfarande vara Cloudflare-datacenterlokala och är inte exakt global concurrency-kontroll. Vid större publik trafik eller app-specifika kvoter behövs Upstash/Vercel KV eller annan delad state.
 - Lastkajen bulkimport ska använda Supabase session pooler på port `5432`, inte transaction pooler `6543`.
 - `Höga hastigheter` kräver att `scripts/import-large-roads.sh` körts efter 80+-ändringen; migrationen ensam skapar inte raderna.

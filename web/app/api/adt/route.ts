@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
 import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
@@ -15,13 +15,7 @@ type AdtSegment = {
   geometry: GeoJSON.LineString;
 };
 
-type AdtRow = {
-  fid: number;
-  adt_total: number;
-  adt_tung: number | null;
-  matar: number | null;
-  geometry: GeoJSON.LineString;
-};
+type AdtRow = PublicFunctionRow<"adt_in_bbox">;
 
 export async function GET(req: Request) {
   if (!url || !anon) {
@@ -39,7 +33,7 @@ export async function GET(req: Request) {
   }
 
   const startedAt = Date.now();
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("adt_in_bbox", {
     min_lng: bbox.minLng,
     min_lat: bbox.minLat,
@@ -51,12 +45,12 @@ export async function GET(req: Request) {
     return serverErrorResponse("adt query failed", error);
   }
 
-  const segments: AdtSegment[] = ((data ?? []) as AdtRow[]).map((row) => ({
+  const segments: AdtSegment[] = ((data ?? []) satisfies AdtRow[]).map((row) => ({
     fid: row.fid,
     adt_total: row.adt_total,
     adt_tung: row.adt_tung,
     matar: row.matar,
-    geometry: row.geometry,
+    geometry: row.geometry as unknown as GeoJSON.LineString,
   }));
 
   logApiObservation("adt", {

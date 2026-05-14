@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
 import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
@@ -20,16 +20,11 @@ export type LargeRoadSegment = {
   geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
 };
 
-type LargeRoadRow = {
-  fid: number;
-  element_id: string;
-  class: LargeRoadClass;
-  rank: number;
-  speed_limit: number | null;
-  road_type: string | null;
-  length_m: number | null;
-  geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
-};
+type LargeRoadRow = PublicFunctionRow<"large_roads_in_bbox">;
+
+function isHighSpeedRow(row: LargeRoadRow): row is LargeRoadRow & { class: "high_speed"; speed_limit: number } {
+  return row.class === "high_speed" && row.speed_limit >= 80;
+}
 
 export async function GET(req: Request) {
   if (!url || !anon) {
@@ -47,7 +42,7 @@ export async function GET(req: Request) {
   }
 
   const startedAt = Date.now();
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("large_roads_in_bbox", {
     min_lng: bbox.minLng,
     min_lat: bbox.minLat,
@@ -58,10 +53,10 @@ export async function GET(req: Request) {
     return serverErrorResponse("large roads query failed", error);
   }
 
-  const rows = (data ?? []) as LargeRoadRow[];
+  const rows = (data ?? []) satisfies LargeRoadRow[];
 
   const segments: LargeRoadSegment[] = rows
-    .filter((row) => row.class === "high_speed" && row.speed_limit !== null && row.speed_limit >= 80)
+    .filter(isHighSpeedRow)
     .map((row) => ({
       fid: row.fid,
       element_id: row.element_id,
@@ -70,7 +65,7 @@ export async function GET(req: Request) {
       speed_limit: row.speed_limit,
       road_type: row.road_type,
       length_m: row.length_m,
-      geometry: row.geometry,
+      geometry: row.geometry as unknown as GeoJSON.LineString | GeoJSON.MultiLineString,
     }));
 
   logApiObservation("large-roads", {

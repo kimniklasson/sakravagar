@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { jsonResponse, serverErrorResponse } from "../../_utils";
 
 export const runtime = "nodejs";
@@ -23,7 +23,7 @@ export async function GET() {
     return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
   }
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const [oldestResult, latestResult] = await Promise.all([
     client
       .from("events_public")

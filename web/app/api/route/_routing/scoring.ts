@@ -1,8 +1,8 @@
-import { createClient } from "@supabase/supabase-js";
 import {
   categoryFromDisturbanceMessageType,
   LIVE_EVENT_THRESHOLD_MS,
 } from "@trafik/shared";
+import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import type {
   RouteAnnotationPoint,
   RouteAnnotationSegment,
@@ -545,7 +545,7 @@ async function fetchTrafficIntensityRowsForBbox(
   const cached = context?.trafficIntensityRowsCache.get(key);
   if (cached) return cached;
 
-  const client = createClient(supabaseUrl, supabaseAnon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(supabaseUrl, supabaseAnon);
   const params = {
     min_lng: bbox.minLng,
     min_lat: bbox.minLat,
@@ -566,8 +566,8 @@ async function fetchTrafficIntensityRowsForBbox(
     ]);
 
     return {
-      adtRows: adtResult.error ? [] : (adtResult.data ?? []) as AdtRow[],
-      trafficFlowRows: trafficFlowResult.error ? [] : (trafficFlowResult.data ?? []) as TrafficFlowRow[],
+      adtRows: adtResult.error ? [] : (adtResult.data ?? []) as unknown as AdtRow[],
+      trafficFlowRows: trafficFlowResult.error ? [] : (trafficFlowResult.data ?? []) as unknown as TrafficFlowRow[],
     };
   })().catch((err) => {
     console.warn("route penalty zone lookup failed", err);
@@ -729,7 +729,7 @@ export async function scoreRouteAlternatives(
     };
   });
 
-  const client = createClient(supabaseUrl, supabaseAnon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(supabaseUrl, supabaseAnon);
   const params = {
     min_lng: bbox.minLng,
     min_lat: bbox.minLat,
@@ -743,7 +743,7 @@ export async function scoreRouteAlternatives(
       ? (async () => {
           const result = await client.rpc("events_in_bbox", {
             ...params,
-            p_since: null,
+            p_since: undefined,
             p_live_since: activeSince,
           });
           if (!result.error || !isMissingPostgrestFunctionError(result.error, "events_in_bbox")) {

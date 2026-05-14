@@ -1,5 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
 import { LIVE_EVENT_THRESHOLD_MS } from "@trafik/shared";
+import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import {
   isMissingPostgrestFunctionError,
   jsonResponse,
@@ -60,7 +60,7 @@ export async function GET(req: Request) {
   }
 
   const startedAt = Date.now();
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const liveSince = liveOnly
     ? new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString()
     : null;
@@ -71,8 +71,8 @@ export async function GET(req: Request) {
     min_lat: bbox.minLat,
     max_lng: bbox.maxLng,
     max_lat: bbox.maxLat,
-    p_since: since,
-    p_live_since: liveSince,
+    p_since: since ?? undefined,
+    p_live_since: liveSince ?? undefined,
   });
 
   if (error && isMissingPostgrestFunctionError(error, "events_in_bbox")) {
@@ -93,7 +93,7 @@ export async function GET(req: Request) {
       .lte("lat", bbox.maxLat);
 
     const fallbackResult = await fallbackQuery;
-    data = fallbackResult.data;
+    data = fallbackResult.data as unknown as typeof data;
     error = fallbackResult.error;
   }
 

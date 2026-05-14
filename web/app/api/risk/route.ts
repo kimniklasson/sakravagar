@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
 import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
 
 export const runtime = "nodejs";
@@ -20,7 +20,7 @@ type RiskSegment = {
   geometry: GeoJSON.LineString;
 };
 
-type RiskRow = RiskSegment;
+type RiskRow = PublicFunctionRow<"risk_in_bbox">;
 
 /**
  * @deprecated Dormant by design — see docs/decisions.md 2026-05-11 and 2026-05-13.
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
   }
 
   const startedAt = Date.now();
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("risk_in_bbox", {
     min_lng: bbox.minLng,
     min_lat: bbox.minLat,
@@ -53,12 +53,12 @@ export async function GET(req: Request) {
     return serverErrorResponse("risk query failed", error);
   }
 
-  const segments: RiskSegment[] = ((data ?? []) as RiskRow[]).map((row) => ({
+  const segments: RiskSegment[] = ((data ?? []) satisfies RiskRow[]).map((row) => ({
     fid: row.fid,
     adt_total: row.adt_total,
     events_count: row.events_count,
     risk_per_milj_fordon: row.risk_per_milj_fordon,
-    geometry: row.geometry,
+    geometry: row.geometry as unknown as GeoJSON.LineString,
   }));
 
   logApiObservation("risk", {

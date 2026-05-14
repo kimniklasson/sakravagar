@@ -1,9 +1,9 @@
-import { createClient } from "@supabase/supabase-js";
 import {
   categoryFromDisturbanceMessageType,
   LIVE_EVENT_THRESHOLD_MS,
   type DisturbanceCategory,
 } from "@trafik/shared";
+import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import {
   isMissingPostgrestFunctionError,
   jsonResponse,
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
   const startedAt = Date.now();
   const activeSince = new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString();
 
-  const client = createClient(url, anon, { auth: { persistSession: false } });
+  const client = createServerSupabaseClient(url, anon);
   let resultSource = "disturbances_in_bbox";
   let { data, error } = await client.rpc("disturbances_in_bbox", {
     min_lng: bbox.minLng,
@@ -76,7 +76,7 @@ export async function GET(req: Request) {
       .lte("lat", bbox.maxLat);
 
     const fallbackResult = await fallbackQuery;
-    data = fallbackResult.data;
+    data = fallbackResult.data as unknown as typeof data;
     error = fallbackResult.error;
   }
 
