@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CLIENT_IP_HEADER,
   REQUEST_ID_HEADER,
   clientIpFromRequest,
   jsonResponse,
+  logApiError,
+  logApiObservation,
+  logApiWarning,
   parseBboxParam,
   requestIdFromRequest,
   SWEDEN_DATA_BOUNDS,
@@ -79,5 +82,57 @@ describe("request context helpers", () => {
   it("adds request id to json responses", () => {
     const res = jsonResponse({ ok: true }, { requestId: "req-12345678" });
     expect(res.headers.get(REQUEST_ID_HEADER)).toBe("req-12345678");
+  });
+
+  it("logs structured API observations", () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    logApiObservation("events", { requestId: "req-12345678", rowCount: 3 });
+
+    expect(spy).toHaveBeenCalledWith("api_observation", {
+      event: "api_observation",
+      route: "events",
+      status: "ok",
+      requestId: "req-12345678",
+      rowCount: 3,
+    });
+    spy.mockRestore();
+  });
+
+  it("logs structured API errors", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    logApiError("example failed", new Error("boom"), { requestId: "req-12345678" });
+
+    expect(spy).toHaveBeenCalledWith("api_error", expect.objectContaining({
+      event: "api_error",
+      label: "example failed",
+      requestId: "req-12345678",
+      error: expect.objectContaining({ name: "Error", message: "boom" }),
+    }));
+    spy.mockRestore();
+  });
+
+  it("logs structured API warnings", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    logApiWarning(
+      "example degraded",
+      { code: "PGRST202", message: "missing rpc" },
+      { requestId: "req-12345678" },
+    );
+
+    expect(spy).toHaveBeenCalledWith("api_warning", {
+      event: "api_warning",
+      label: "example degraded",
+      requestId: "req-12345678",
+      error: {
+        code: "PGRST202",
+        details: undefined,
+        hint: undefined,
+        message: "missing rpc",
+      },
+    });
+    spy.mockRestore();
   });
 });

@@ -1,5 +1,5 @@
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
-import { jsonResponse, serverErrorResponse } from "../_utils";
+import { jsonResponse, requestIdFromRequest, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,29 +29,30 @@ export type SegmentDetail = {
 };
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
   const fidRaw = searchParams.get("fid");
   if (!fidRaw) {
-    return jsonResponse({ error: "fid required" }, { status: 400 });
+    return jsonResponse({ error: "fid required" }, { status: 400, requestId });
   }
   const fid = Number(fidRaw);
   if (!Number.isSafeInteger(fid) || fid < 0 || fid > 1_000_000_000) {
-    return jsonResponse({ error: "fid must be a safe integer" }, { status: 400 });
+    return jsonResponse({ error: "fid must be a safe integer" }, { status: 400, requestId });
   }
 
   const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("segment_detail", { p_fid: fid });
 
   if (error) {
-    return serverErrorResponse("segment detail query failed", error);
+    return serverErrorResponse("segment detail query failed", error, { requestId });
   }
   if (!data) {
-    return jsonResponse({ error: "segment not found" }, { status: 404 });
+    return jsonResponse({ error: "segment not found" }, { status: 404, requestId });
   }
 
-  return jsonResponse({ segment: data as SegmentDetail }, { cacheSeconds: 3600 });
+  return jsonResponse({ segment: data as SegmentDetail }, { cacheSeconds: 3600, requestId });
 }

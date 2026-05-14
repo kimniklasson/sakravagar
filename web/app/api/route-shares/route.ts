@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { parseRouteSharePayload, parseSlug } from "@/lib/routeShareSchema";
 import { createServerSupabaseClient, type SupabaseJson } from "@/lib/supabaseServer";
-import { jsonResponse, serverErrorResponse } from "../_utils";
+import { jsonResponse, requestIdFromRequest, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,38 +38,40 @@ function requestOrigin(req: Request): string {
 }
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
   const slug = parseSlug(searchParams.get("slug"));
   if (!slug) {
-    return jsonResponse({ error: "invalid slug" }, { status: 400 });
+    return jsonResponse({ error: "invalid slug" }, { status: 400, requestId });
   }
 
   const client = createServerSupabaseClient(url, anon);
   const { data, error } = await client.rpc("get_public_route_snapshot", { p_slug: slug });
-  if (error) return serverErrorResponse("route share lookup failed", error);
+  if (error) return serverErrorResponse("route share lookup failed", error, { requestId });
 
   const row = (data ?? [])[0];
-  if (!row) return jsonResponse({ error: "not found" }, { status: 404 });
+  if (!row) return jsonResponse({ error: "not found" }, { status: 404, requestId });
   if (row.expired) {
-    return jsonResponse({ error: "expired", expiresAt: row.expires_at }, { status: 410 });
+    return jsonResponse({ error: "expired", expiresAt: row.expires_at }, { status: 410, requestId });
   }
 
-  return jsonResponse({ payload: row.payload, expiresAt: row.expires_at }, { cacheSeconds: 30 });
+  return jsonResponse({ payload: row.payload, expiresAt: row.expires_at }, { cacheSeconds: 30, requestId });
 }
 
 export async function POST(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !serviceKey) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const body = (await req.json().catch(() => null)) as { payload?: unknown } | null;
   const parsedPayload = parseRouteSharePayload(body?.payload, { maxBytes: SNAPSHOT_MAX_BYTES });
   if (!parsedPayload.ok) {
-    return jsonResponse({ error: parsedPayload.error }, { status: 400 });
+    return jsonResponse({ error: parsedPayload.error }, { status: 400, requestId });
   }
   const payload = parsedPayload.value;
 
@@ -87,18 +89,20 @@ export async function POST(req: Request) {
 
     if (!error) {
       const row = (data ?? [])[0];
-      if (!row?.slug) return serverErrorResponse("route share missing slug", new Error("missing slug"));
+      if (!row?.slug) {
+        return serverErrorResponse("route share missing slug", new Error("missing slug"), { requestId });
+      }
       return jsonResponse({
         slug: row.slug,
         url: `${requestOrigin(req)}/r/${row.slug}`,
         expiresAt: row.expires_at,
-      });
+      }, { requestId });
     }
 
     if (error.code !== "23505") {
-      return serverErrorResponse("route share create failed", error);
+      return serverErrorResponse("route share create failed", error, { requestId });
     }
   }
 
-  return serverErrorResponse("route share slug collision", new Error("slug collision"));
+  return serverErrorResponse("route share slug collision", new Error("slug collision"), { requestId });
 }

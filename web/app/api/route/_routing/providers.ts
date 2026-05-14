@@ -7,6 +7,11 @@ const GRAPHHOPPER_TOKEN = process.env.GRAPHHOPPER_TOKEN;
 const OSRM_ROUTE_TIMEOUT_MS = 15_000;
 export const GRAPHHOPPER_ROUTE_TIMEOUT_MS = 15_000;
 
+function providerErrorMessage(label: string, status: number, body: string): string {
+  const detail = body.trim().slice(0, 500);
+  return detail ? `${label} failed (${status}): ${detail}` : `${label} failed (${status})`;
+}
+
 export function hasGraphHopperConfig(): boolean {
   return Boolean(GRAPHHOPPER_BASE_URL);
 }
@@ -41,8 +46,7 @@ export async function fetchOsrmRoutes(coordinates: [number, number][], alternati
     clearTimeout(timeout);
   }
   if (!res.ok) {
-    console.error("route provider failed", await res.text());
-    throw new Error("route provider failed");
+    throw new Error(providerErrorMessage("route provider", res.status, await res.text()));
   }
 
   const osrm = (await res.json()) as OsrmResponse;
@@ -125,8 +129,7 @@ export async function fetchGraphHopperRoute(
   }
 
   if (!res.ok) {
-    console.error("graphhopper route provider failed", await res.text());
-    throw new Error("route provider failed");
+    throw new Error(providerErrorMessage("graphhopper route provider", res.status, await res.text()));
   }
 
   const graphhopper = (await res.json()) as GraphHopperResponse;

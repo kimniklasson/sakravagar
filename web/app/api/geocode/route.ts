@@ -1,4 +1,4 @@
-import { jsonResponse } from "../_utils";
+import { jsonResponse, logApiError, requestIdFromRequest } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -310,6 +310,7 @@ async function fetchNominatim<T>(path: string, params: URLSearchParams): Promise
 }
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim() ?? "";
   const latParam = searchParams.get("lat");
@@ -320,7 +321,7 @@ export async function GET(req: Request) {
       const lat = Number(latParam);
       const lng = Number(lngParam);
       if (!isCoordinateInSwedenBounds(lng, lat)) {
-        return jsonResponse({ error: "coordinates outside Sweden bounds" }, { status: 400 });
+        return jsonResponse({ error: "coordinates outside Sweden bounds" }, { status: 400, requestId });
       }
 
       const result = await fetchNominatim<NominatimSearchResult>("/reverse", new URLSearchParams({
@@ -331,19 +332,19 @@ export async function GET(req: Request) {
         zoom: "18",
       }));
       const mapped = mapResult(result);
-      return jsonResponse({ results: mapped ? [mapped] : [] }, { cacheSeconds: 3600 });
+      return jsonResponse({ results: mapped ? [mapped] : [] }, { cacheSeconds: 3600, requestId });
     }
 
     if (q.length < 2) {
-      return jsonResponse({ results: [] }, { cacheSeconds: 60 });
+      return jsonResponse({ results: [] }, { cacheSeconds: 60, requestId });
     }
     if (q.length > 120) {
-      return jsonResponse({ error: "query too long" }, { status: 400 });
+      return jsonResponse({ error: "query too long" }, { status: 400, requestId });
     }
 
     const { limit, error: limitError } = parseResultLimit(searchParams.get("limit"));
     if (limitError || limit === null) {
-      return jsonResponse({ error: limitError }, { status: 400 });
+      return jsonResponse({ error: limitError }, { status: 400, requestId });
     }
 
     let results = await searchNominatim(q, limit);
@@ -353,12 +354,12 @@ export async function GET(req: Request) {
     }
 
     const mapped = results.map(mapResult).filter((r): r is GeocodeResult => r !== null);
-    return jsonResponse({ results: rankResults(mapped, q) }, { cacheSeconds: 3600 });
+    return jsonResponse({ results: rankResults(mapped, q) }, { cacheSeconds: 3600, requestId });
   } catch (err) {
     if (err instanceof Error && err.message === "nominatim rate limited") {
-      return jsonResponse({ error: "geocode rate limited" }, { status: 429 });
+      return jsonResponse({ error: "geocode rate limited" }, { status: 429, requestId });
     }
-    console.error("geocode failed", err);
-    return jsonResponse({ error: "geocode failed" }, { status: 502 });
+    logApiError("geocode failed", err, { requestId });
+    return jsonResponse({ error: "geocode failed" }, { status: 502, requestId });
   }
 }

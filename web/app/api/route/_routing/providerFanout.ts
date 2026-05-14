@@ -12,6 +12,7 @@ import type { RouteAvoidState } from "@/lib/routeTypes";
 import {
   activeAvoidOptions,
 } from "./request";
+import { logApiWarning } from "../../_utils";
 import {
   avoidBridgeCustomModel,
   avoidTunnelCustomModel,
@@ -40,8 +41,8 @@ import { buildRoutePreferenceCustomModel } from "./scoring";
 const GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS = 7_000;
 const GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS = 9_000;
 
-export function createRouteRequestContext(): RouteRequestContext {
-  return { trafficIntensityRowsCache: new Map() };
+export function createRouteRequestContext(requestId?: string): RouteRequestContext {
+  return { requestId, trafficIntensityRowsCache: new Map() };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -100,7 +101,9 @@ export async function fetchProviderRoutes(
     });
   } catch (err) {
     if (!avoid.cityTraffic) throw err;
-    console.warn("graphhopper city traffic details unavailable for fastest route", err);
+    logApiWarning("graphhopper city traffic details unavailable for fastest route", err, {
+      requestId: context?.requestId,
+    });
     fastestRoutes = await fetchGraphHopperRoute(coordinates, { source: "fastest" });
   }
   const baseline = fastestRoutes[0];

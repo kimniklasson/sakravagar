@@ -9,6 +9,7 @@ import {
   jsonResponse,
   logApiObservation,
   parseBboxParam,
+  requestIdFromRequest,
   serverErrorResponse,
   SWEDEN_DATA_BOUNDS,
 } from "../_utils";
@@ -34,8 +35,9 @@ export type DisturbancePoint = {
 };
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
@@ -45,7 +47,7 @@ export async function GET(req: Request) {
     bounds: SWEDEN_DATA_BOUNDS,
   });
   if (bboxError || !bbox) {
-    return jsonResponse({ error: bboxError }, { status: 400 });
+    return jsonResponse({ error: bboxError }, { status: 400, requestId });
   }
   const startedAt = Date.now();
   const activeSince = new Date(Date.now() - LIVE_EVENT_THRESHOLD_MS).toISOString();
@@ -81,7 +83,7 @@ export async function GET(req: Request) {
   }
 
   if (error) {
-    return serverErrorResponse("disturbances query failed", error);
+    return serverErrorResponse("disturbances query failed", error, { requestId });
   }
 
   let unknownCategoryCount = 0;
@@ -107,10 +109,11 @@ export async function GET(req: Request) {
   logApiObservation("disturbances", {
     bboxArea: Number(bbox.area.toFixed(4)),
     durationMs: Date.now() - startedAt,
+    requestId,
     rowCount: points.length,
     source: resultSource,
     unknownCategoryCount,
   });
 
-  return jsonResponse({ points }, { cacheSeconds: 30 });
+  return jsonResponse({ points }, { cacheSeconds: 30, requestId });
 }

@@ -5,6 +5,7 @@ import {
   jsonResponse,
   logApiObservation,
   parseBboxParam,
+  requestIdFromRequest,
   serverErrorResponse,
   SWEDEN_DATA_BOUNDS,
 } from "../_utils";
@@ -39,14 +40,15 @@ function normalizeSinceParam(value: string | null): { since: string | null; erro
 }
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
   const { since, error: sinceError } = normalizeSinceParam(searchParams.get("since"));
   if (sinceError) {
-    return jsonResponse({ error: sinceError }, { status: 400 });
+    return jsonResponse({ error: sinceError }, { status: 400, requestId });
   }
 
   const liveOnly = searchParams.get("live") === "1" || searchParams.get("live") === "true";
@@ -56,7 +58,7 @@ export async function GET(req: Request) {
     bounds: SWEDEN_DATA_BOUNDS,
   });
   if (bboxError || !bbox) {
-    return jsonResponse({ error: bboxError }, { status: 400 });
+    return jsonResponse({ error: bboxError }, { status: 400, requestId });
   }
 
   const startedAt = Date.now();
@@ -98,7 +100,7 @@ export async function GET(req: Request) {
   }
 
   if (error) {
-    return serverErrorResponse("events query failed", error);
+    return serverErrorResponse("events query failed", error, { requestId });
   }
 
   const points: EventPoint[] = ((data ?? []) as EventPoint[]).map((row) => ({
@@ -117,10 +119,11 @@ export async function GET(req: Request) {
     bboxArea: Number(bbox.area.toFixed(4)),
     durationMs: Date.now() - startedAt,
     liveOnly,
+    requestId,
     rowCount: points.length,
     since: Boolean(since),
     source: resultSource,
   });
 
-  return jsonResponse({ points }, { cacheSeconds: 30 });
+  return jsonResponse({ points }, { cacheSeconds: 30, requestId });
 }

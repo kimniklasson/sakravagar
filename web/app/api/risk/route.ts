@@ -1,5 +1,12 @@
 import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
-import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import {
+  jsonResponse,
+  logApiObservation,
+  parseBboxParam,
+  requestIdFromRequest,
+  serverErrorResponse,
+  SWEDEN_DATA_BOUNDS,
+} from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,8 +33,9 @@ type RiskRow = PublicFunctionRow<"risk_in_bbox">;
  * @deprecated Dormant by design — see docs/decisions.md 2026-05-11 and 2026-05-13.
  */
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
@@ -37,7 +45,7 @@ export async function GET(req: Request) {
     bounds: SWEDEN_DATA_BOUNDS,
   });
   if (bboxError || !bbox) {
-    return jsonResponse({ error: bboxError }, { status: 400 });
+    return jsonResponse({ error: bboxError }, { status: 400, requestId });
   }
 
   const startedAt = Date.now();
@@ -50,7 +58,7 @@ export async function GET(req: Request) {
   });
 
   if (error) {
-    return serverErrorResponse("risk query failed", error);
+    return serverErrorResponse("risk query failed", error, { requestId });
   }
 
   const segments: RiskSegment[] = ((data ?? []) satisfies RiskRow[]).map((row) => ({
@@ -64,8 +72,9 @@ export async function GET(req: Request) {
   logApiObservation("risk", {
     bboxArea: Number(bbox.area.toFixed(4)),
     durationMs: Date.now() - startedAt,
+    requestId,
     rowCount: segments.length,
   });
 
-  return jsonResponse({ segments }, { cacheSeconds: 600 });
+  return jsonResponse({ segments }, { cacheSeconds: 600, requestId });
 }

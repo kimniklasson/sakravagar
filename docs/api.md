@@ -8,8 +8,8 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 - Bboxar valideras mot area och `SWEDEN_DATA_BOUNDS` innan Supabase/RPC anropas.
 - SQL/RPC ska ha limit eller annan spärr. Klientens zoomlogik räcker inte som skydd.
 - Publika svar ska inte exponera råa upstream-payloads.
-- Supabase-fel loggas serverside och returneras som generiskt `server error`.
-- Rate-limitade endpoints får `x-request-id` i svaren. Skicka med värdet vid felsökning så det går att hitta motsvarande serverlogg.
+- Supabase-fel loggas serverside som `api_error` och returneras som generiskt `server error`.
+- API-svar får `x-request-id` där serverrutter kan läsa eller skapa ett request-id. Skicka med värdet vid felsökning så det går att hitta motsvarande `api_error`, `api_warning` eller `api_observation` i serverloggar.
 - Delade rutt-snapshots valideras server-side via `web/lib/routeShareSchema.ts` innan de sparas eller används som SSR-prefetch-data.
 
 ## Kartdata
@@ -85,7 +85,7 @@ Performance:
 - Cloudflare Free rate-limit skyddar exakt `/api/route` före Vercel: 10 requests / 10 seconds per IP, action `Block`, duration 10 seconds.
 - per-instans concurrency cap skyddar GraphHopper från för många samtidiga `/api/route`-anrop. Default är max 8 aktiva totalt och max 3 per klient-IP. Överskridning returnerar `429`, `Retry-After` och `x-request-id`.
 
-Observability-loggen innehåller `requestId`, filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Den ska inte logga koordinater, adresser eller geometrier.
+Route-observability loggas som `api_observation` och innehåller `requestId`, filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Mjuka fallbackar i routing/scoring loggas som `api_warning`. Loggarna ska inte innehålla koordinater, adresser eller geometrier.
 
 ## Route shares
 

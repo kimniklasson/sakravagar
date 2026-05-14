@@ -1,5 +1,12 @@
 import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
-import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import {
+  jsonResponse,
+  logApiObservation,
+  parseBboxParam,
+  requestIdFromRequest,
+  serverErrorResponse,
+  SWEDEN_DATA_BOUNDS,
+} from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +34,9 @@ function isHighSpeedRow(row: LargeRoadRow): row is LargeRoadRow & { class: "high
 }
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
@@ -38,7 +46,7 @@ export async function GET(req: Request) {
     bounds: SWEDEN_DATA_BOUNDS,
   });
   if (bboxError || !bbox) {
-    return jsonResponse({ error: bboxError }, { status: 400 });
+    return jsonResponse({ error: bboxError }, { status: 400, requestId });
   }
 
   const startedAt = Date.now();
@@ -50,7 +58,7 @@ export async function GET(req: Request) {
     max_lat: bbox.maxLat,
   });
   if (error) {
-    return serverErrorResponse("large roads query failed", error);
+    return serverErrorResponse("large roads query failed", error, { requestId });
   }
 
   const rows = (data ?? []) satisfies LargeRoadRow[];
@@ -71,9 +79,10 @@ export async function GET(req: Request) {
   logApiObservation("large-roads", {
     bboxArea: Number(bbox.area.toFixed(4)),
     durationMs: Date.now() - startedAt,
+    requestId,
     returnedRows: rows.length,
     rowCount: segments.length,
   });
 
-  return jsonResponse({ segments }, { cacheSeconds: 86_400 });
+  return jsonResponse({ segments }, { cacheSeconds: 86_400, requestId });
 }

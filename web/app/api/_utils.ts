@@ -25,6 +25,7 @@ type JsonResponseInit = ResponseInit & {
   cacheSeconds?: number;
   requestId?: string;
 };
+type ApiLogLevel = "info" | "warn";
 
 const MIN_LNG = -180;
 const MAX_LNG = 180;
@@ -60,12 +61,68 @@ export function serverErrorResponse(
   error: unknown,
   opts: { requestId?: string } = {},
 ) {
-  console.error("api error", { label, requestId: opts.requestId, error });
+  logApiError(label, error, opts);
   return jsonResponse({ error: "server error" }, { status: 500, requestId: opts.requestId });
 }
 
-export function logApiObservation(route: string, fields: Record<string, unknown>): void {
-  console.info("api observability", { route, ...fields });
+function loggableError(error: unknown): unknown {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+  if (error && typeof error === "object") {
+    const err = error as Record<string, unknown>;
+    return {
+      code: err.code,
+      message: err.message,
+      details: err.details,
+      hint: err.hint,
+    };
+  }
+  return error;
+}
+
+export function logApiError(
+  label: string,
+  error: unknown,
+  opts: { requestId?: string } = {},
+): void {
+  console.error("api_error", {
+    event: "api_error",
+    label,
+    requestId: opts.requestId,
+    error: loggableError(error),
+  });
+}
+
+export function logApiWarning(
+  label: string,
+  error: unknown,
+  opts: { requestId?: string } = {},
+): void {
+  console.warn("api_warning", {
+    event: "api_warning",
+    label,
+    requestId: opts.requestId,
+    error: loggableError(error),
+  });
+}
+
+export function logApiObservation(
+  route: string,
+  fields: Record<string, unknown>,
+  opts: { level?: ApiLogLevel } = {},
+): void {
+  const level = opts.level ?? "info";
+  console[level]("api_observation", {
+    event: "api_observation",
+    route,
+    status: "ok",
+    ...fields,
+  });
 }
 
 function isValidRequestId(value: string | null): value is string {

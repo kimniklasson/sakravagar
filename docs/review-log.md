@@ -71,7 +71,7 @@ Viktiga beslut/fynd:
 - `events_in_bbox` dedupar före visualisering; live-events ingår inte samtidigt i historisk heatmap.
 - `disturbances` fick fallback-kategori `other` och loggar okända kategorier.
 - `resnap_orphan_events` schemalades tätare.
-- Bbox-API:er fick enkla `api observability`-loggar.
+- Bbox-API:er fick strukturerade `api_observation`-loggar med request-id.
 - `current-state` och ADR dokumenterar att risklinjer och ÅDT-segmentpopup är dormant by design.
 
 Kvarvarande medvetna uppföljningar:

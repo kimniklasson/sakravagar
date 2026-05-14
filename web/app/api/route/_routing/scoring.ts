@@ -11,7 +11,7 @@ import type {
   RouteAvoidState,
   RouteLine,
 } from "@/lib/routeTypes";
-import { isMissingPostgrestFunctionError } from "../../_utils";
+import { isMissingPostgrestFunctionError, logApiWarning } from "../../_utils";
 import {
   capSamples,
   distanceBetweenCoordinatesMeters,
@@ -570,7 +570,9 @@ async function fetchTrafficIntensityRowsForBbox(
       trafficFlowRows: trafficFlowResult.error ? [] : (trafficFlowResult.data ?? []) as unknown as TrafficFlowRow[],
     };
   })().catch((err) => {
-    console.warn("route penalty zone lookup failed", err);
+    logApiWarning("route penalty zone lookup failed", err, {
+      requestId: context?.requestId,
+    });
     return emptyTrafficIntensityRows;
   });
 
@@ -846,7 +848,9 @@ export async function scoreRouteAlternatives(
       };
     });
   } catch (err) {
-    console.warn("route scoring failed", err);
+    logApiWarning("route scoring failed", err, {
+      requestId: context?.requestId,
+    });
     return fallbackScores;
   }
 }

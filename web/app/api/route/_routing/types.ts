@@ -122,5 +122,6 @@ export type TrafficIntensityRows = {
 };
 
 export type RouteRequestContext = {
+  requestId?: string;
   trafficIntensityRowsCache: Map<string, Promise<TrafficIntensityRows>>;
 };

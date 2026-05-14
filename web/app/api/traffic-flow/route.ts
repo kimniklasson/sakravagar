@@ -1,5 +1,12 @@
 import { createServerSupabaseClient, type PublicFunctionRow } from "@/lib/supabaseServer";
-import { jsonResponse, logApiObservation, parseBboxParam, serverErrorResponse, SWEDEN_DATA_BOUNDS } from "../_utils";
+import {
+  jsonResponse,
+  logApiObservation,
+  parseBboxParam,
+  requestIdFromRequest,
+  serverErrorResponse,
+  SWEDEN_DATA_BOUNDS,
+} from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,8 +43,9 @@ function categoryFromFlow(flowRate: number | null, speed: number | null): Traffi
 }
 
 export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const { searchParams } = new URL(req.url);
@@ -47,7 +55,7 @@ export async function GET(req: Request) {
     bounds: SWEDEN_DATA_BOUNDS,
   });
   if (bboxError || !bbox) {
-    return jsonResponse({ error: bboxError }, { status: 400 });
+    return jsonResponse({ error: bboxError }, { status: 400, requestId });
   }
   const startedAt = Date.now();
   const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
@@ -61,7 +69,7 @@ export async function GET(req: Request) {
     active_since: activeSince,
   });
   if (error) {
-    return serverErrorResponse("traffic flow query failed", error);
+    return serverErrorResponse("traffic flow query failed", error, { requestId });
   }
 
   const segments: TrafficFlowSegment[] = ((data ?? []) satisfies TrafficFlowRow[]).map((row) => {
@@ -85,8 +93,9 @@ export async function GET(req: Request) {
   logApiObservation("traffic-flow", {
     bboxArea: Number(bbox.area.toFixed(4)),
     durationMs: Date.now() - startedAt,
+    requestId,
     rowCount: segments.length,
   });
 
-  return jsonResponse({ segments }, { cacheSeconds: 20 });
+  return jsonResponse({ segments }, { cacheSeconds: 20, requestId });
 }

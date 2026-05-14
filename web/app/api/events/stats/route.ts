@@ -1,5 +1,5 @@
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
-import { jsonResponse, serverErrorResponse } from "../../_utils";
+import { jsonResponse, requestIdFromRequest, serverErrorResponse } from "../../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,9 +18,10 @@ export type EventStats = {
   periodDays: number | null;
 };
 
-export async function GET() {
+export async function GET(req: Request) {
+  const requestId = requestIdFromRequest(req);
   if (!url || !anon) {
-    return serverErrorResponse("supabase env missing", new Error("missing supabase env"));
+    return serverErrorResponse("supabase env missing", new Error("missing supabase env"), { requestId });
   }
 
   const client = createServerSupabaseClient(url, anon);
@@ -41,7 +42,7 @@ export async function GET() {
 
   const error = oldestResult.error ?? latestResult.error;
   if (error) {
-    return serverErrorResponse("event stats query failed", error);
+    return serverErrorResponse("event stats query failed", error, { requestId });
   }
 
   const oldestFirstSeen = oldestResult.data?.first_seen ?? null;
@@ -54,5 +55,5 @@ export async function GET() {
     oldestFirstSeen,
     latestLastSeen,
     periodDays,
-  } satisfies EventStats, { cacheSeconds: 30 });
+  } satisfies EventStats, { cacheSeconds: 30, requestId });
 }

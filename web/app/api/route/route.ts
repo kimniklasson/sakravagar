@@ -2,6 +2,8 @@ import type { RouteLine } from "@/lib/routeTypes";
 import {
   clientIpFromRequest,
   jsonResponse,
+  logApiError,
+  logApiObservation,
   requestIdFromRequest,
 } from "../_utils";
 import {
@@ -77,7 +79,7 @@ export async function POST(req: Request) {
   const logContext = { ...logBase, requestId };
 
   try {
-    const requestContext = createRouteRequestContext();
+    const requestContext = createRouteRequestContext(requestId);
     const timeoutMs = routeRequestTimeoutMs(preview, alternatives, avoid);
     const result = await routeConcurrencyLimiter.run(clientIp, () =>
       withRouteDeadline((async () => {
@@ -126,7 +128,7 @@ export async function POST(req: Request) {
         };
       })(), timeoutMs));
 
-    console.info("route observability", {
+    logApiObservation("route", {
       ...logContext,
       status: "ok",
       provider: result.response.provider,
@@ -141,12 +143,12 @@ export async function POST(req: Request) {
     return jsonResponse(result.response, { requestId });
   } catch (err) {
     if (isRouteConcurrencyLimitError(err)) {
-      console.warn("route observability", {
+      logApiObservation("route", {
         ...logContext,
         status: "concurrency_limited",
         totalMs: Date.now() - startedAt,
         ...err.snapshot,
-      });
+      }, { level: "warn" });
       return jsonResponse(
         { error: "too many active route requests" },
         {
@@ -160,13 +162,13 @@ export async function POST(req: Request) {
       );
     }
 
-    console.error("routing failed", { requestId, error: err });
-    console.warn("route observability", {
+    logApiError("routing failed", err, { requestId });
+    logApiObservation("route", {
       ...logContext,
       status: isRouteTimeoutError(err) ? "timeout" : "error",
       totalMs: Date.now() - startedAt,
       timeout: isRouteTimeoutError(err),
-    });
+    }, { level: "warn" });
     if (isRouteTimeoutError(err)) {
       return jsonResponse({ error: routeTimeoutMessage() }, { status: 504, requestId });
     }
