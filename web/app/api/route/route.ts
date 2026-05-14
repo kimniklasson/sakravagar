@@ -107,6 +107,8 @@ export async function POST(req: Request) {
             cityTraffic: null,
             bridges: null,
             tunnels: null,
+            largeRoundabouts: null,
+            multilane: null,
           },
           exposure: scores[index]?.exposure ?? {
             highSpeedMeters: null,
@@ -116,6 +118,8 @@ export async function POST(req: Request) {
             liveAccidents: null,
             bridgeMeters: null,
             tunnelMeters: null,
+            largeRoundaboutMeters: null,
+            multilaneMeters: null,
           },
           annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
         }));

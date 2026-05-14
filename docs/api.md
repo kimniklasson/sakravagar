@@ -74,7 +74,7 @@ Svar:
 - `maxExtraMinutes`
 - `provider`
 
-Filter som påverkar GraphHopper custom model: `highSpeed`, `trafficIntensity`, `cityTraffic`, `bridges`, `tunnels`. Olyckor och störningar är route-notices/annotations, inte planeringsfilter.
+Filter som påverkar GraphHopper custom model: `highSpeed`, `trafficIntensity`, `cityTraffic`, `bridges`, `tunnels`, `largeRoundabouts`, `multilane`. Olyckor och störningar är route-notices/annotations, inte planeringsfilter. Om underlag för `largeRoundabouts` eller `multilane` saknas/fallerar ska routing fortsätta och respektive score/exposure returneras som `null`.
 
 Performance:
 

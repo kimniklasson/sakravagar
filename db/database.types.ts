@@ -796,6 +796,24 @@ export type Database = {
           speed_limit: number
         }[]
       }
+      route_lane_penalties_in_bbox: {
+        Args: {
+          include_large_roundabouts?: boolean
+          include_multilane?: boolean
+          max_lat: number
+          max_lng: number
+          min_lat: number
+          min_lng: number
+        }
+        Returns: {
+          element_id: string | null
+          fid: number
+          geometry: Json
+          kind: string
+          lane_count: number | null
+          length_m: number | null
+        }[]
+      }
       resnap_orphan_events: { Args: { p_limit?: number }; Returns: number }
       risk_in_bbox: {
         Args: {

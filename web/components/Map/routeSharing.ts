@@ -165,6 +165,18 @@ function compactRouteForSnapshot(route: RouteLine): RouteLine {
           ...segment,
           geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
         })),
+      largeRoundabouts: (route.annotations.largeRoundabouts ?? [])
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
+      multilane: (route.annotations.multilane ?? [])
+        .slice(0, SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS)
+        .map((segment) => ({
+          ...segment,
+          geometry: compactLineString(segment.geometry, SHARED_ROUTE_MAX_ANNOTATION_COORDINATES),
+        })),
       disturbances: (route.annotations.disturbances ?? []).slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
       liveAccidents: (route.annotations.liveAccidents ?? []).slice(0, SHARED_ROUTE_MAX_ANNOTATION_POINTS),
     },

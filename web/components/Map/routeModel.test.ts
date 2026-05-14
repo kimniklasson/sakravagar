@@ -37,6 +37,8 @@ function route(id: string, overrides: Partial<RouteLine> = {}): RouteLine {
       cityTraffic: null,
       bridges: null,
       tunnels: null,
+      largeRoundabouts: null,
+      multilane: null,
     },
     exposure: {
       highSpeedMeters: null,
@@ -46,6 +48,8 @@ function route(id: string, overrides: Partial<RouteLine> = {}): RouteLine {
       liveAccidents: null,
       bridgeMeters: null,
       tunnelMeters: null,
+      largeRoundaboutMeters: null,
+      multilaneMeters: null,
     },
     annotations: {
       highSpeed: [],
@@ -53,6 +57,8 @@ function route(id: string, overrides: Partial<RouteLine> = {}): RouteLine {
       cityTraffic: [],
       bridges: [],
       tunnels: [],
+      largeRoundabouts: [],
+      multilane: [],
       disturbances: [],
       liveAccidents: [],
     },
@@ -68,11 +74,11 @@ describe("route cache helpers", () => {
         [19.000004, 60.000006],
       ],
       alternatives: 3,
-      avoids: avoids({ tunnels: true, highSpeed: true }),
+      avoids: avoids({ tunnels: true, highSpeed: true, multilane: true }),
       timeBudget: "unlimited",
     });
 
-    expect(key).toBe("18.12346,59.98765|19.00000,60.00001;alt:3;avoid:highSpeed,tunnels;budget:unlimited");
+    expect(key).toBe("18.12346,59.98765|19.00000,60.00001;alt:3;avoid:highSpeed,multilane,tunnels;budget:unlimited");
   });
 
   it("uses longer cache TTL for traffic intensity routes", () => {
@@ -178,6 +184,32 @@ describe("routeAlternativeCopy", () => {
     expect(copy.title).toBe("Lägre hastigheter");
     expect(copy.rows).toEqual([
       { kind: "highSpeed", label: "Höga hastigheter", value: "Undviker", tone: "positive" },
+    ]);
+  });
+
+  it("shows metrics for large roundabouts and multilane filters", () => {
+    const fastest = route("fastest", {
+      avoidScores: { ...route("x").avoidScores, largeRoundabouts: 0.3, multilane: 0.5 },
+      exposure: { ...route("x").exposure, largeRoundaboutMeters: 120, multilaneMeters: 1_200 },
+    });
+    const calm = route("calm", {
+      durationSeconds: 700,
+      avoidScores: { ...route("x").avoidScores, largeRoundabouts: 0, multilane: 0.1 },
+      exposure: { ...route("x").exposure, largeRoundaboutMeters: 0, multilaneMeters: 300 },
+    });
+
+    const copy = routeAlternativeCopy(
+      calm,
+      1,
+      fastest,
+      avoids({ largeRoundabouts: true, multilane: true }),
+      [fastest, calm],
+      false,
+    );
+
+    expect(copy.rows).toEqual([
+      { kind: "largeRoundabouts", label: "Stora rondeller", value: "Undviker", tone: "positive" },
+      { kind: "multilane", label: "Flerfiligt", value: "300 m" },
     ]);
   });
 });

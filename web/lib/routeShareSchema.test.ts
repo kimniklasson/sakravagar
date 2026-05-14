@@ -21,6 +21,8 @@ function validPayload(overrides: Partial<RouteSharePayload> = {}): RouteSharePay
       cityTraffic: false,
       bridges: false,
       tunnels: false,
+      largeRoundabouts: false,
+      multilane: false,
     },
     selectedRoute: {
       id: "route-1",
@@ -42,6 +44,8 @@ function validPayload(overrides: Partial<RouteSharePayload> = {}): RouteSharePay
         cityTraffic: null,
         bridges: null,
         tunnels: null,
+        largeRoundabouts: null,
+        multilane: null,
       },
       exposure: {
         highSpeedMeters: null,
@@ -51,6 +55,8 @@ function validPayload(overrides: Partial<RouteSharePayload> = {}): RouteSharePay
         liveAccidents: 0,
         bridgeMeters: null,
         tunnelMeters: null,
+        largeRoundaboutMeters: null,
+        multilaneMeters: null,
       },
       annotations: {
         highSpeed: [],
@@ -69,6 +75,8 @@ function validPayload(overrides: Partial<RouteSharePayload> = {}): RouteSharePay
         cityTraffic: [],
         bridges: [],
         tunnels: [],
+        largeRoundabouts: [],
+        multilane: [],
         disturbances: [
           { kind: "disturbances", coordinates: [18.065, 59.325], category: "traffic" },
         ],
@@ -92,6 +100,44 @@ describe("route share schema", () => {
         version: 1,
         provider: "graphhopper",
         selectedRoute: { id: "route-1" },
+      },
+    });
+  });
+
+  it("keeps old v1 snapshots valid by defaulting newly added filters", () => {
+    const payload = validPayload();
+    delete (payload.routeAvoids as Partial<typeof payload.routeAvoids>).largeRoundabouts;
+    delete (payload.routeAvoids as Partial<typeof payload.routeAvoids>).multilane;
+    delete (payload.selectedRoute.avoidScores as Partial<typeof payload.selectedRoute.avoidScores>).largeRoundabouts;
+    delete (payload.selectedRoute.avoidScores as Partial<typeof payload.selectedRoute.avoidScores>).multilane;
+    delete (payload.selectedRoute.exposure as Partial<typeof payload.selectedRoute.exposure>).largeRoundaboutMeters;
+    delete (payload.selectedRoute.exposure as Partial<typeof payload.selectedRoute.exposure>).multilaneMeters;
+    delete (payload.selectedRoute.annotations as Partial<typeof payload.selectedRoute.annotations>).largeRoundabouts;
+    delete (payload.selectedRoute.annotations as Partial<typeof payload.selectedRoute.annotations>).multilane;
+
+    const parsed = parseRouteSharePayload(payload, { maxBytes: 300_000 });
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        routeAvoids: {
+          largeRoundabouts: false,
+          multilane: false,
+        },
+        selectedRoute: {
+          avoidScores: {
+            largeRoundabouts: null,
+            multilane: null,
+          },
+          exposure: {
+            largeRoundaboutMeters: null,
+            multilaneMeters: null,
+          },
+          annotations: {
+            largeRoundabouts: [],
+            multilane: [],
+          },
+        },
       },
     });
   });

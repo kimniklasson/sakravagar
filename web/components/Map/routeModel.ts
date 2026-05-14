@@ -52,6 +52,8 @@ export const initialRouteAvoids: RouteAvoidState = {
   cityTraffic: false,
   bridges: false,
   tunnels: false,
+  largeRoundabouts: false,
+  multilane: false,
 };
 
 export const routeAvoidLabels: Record<RouteAvoidOption, string> = {
@@ -60,6 +62,8 @@ export const routeAvoidLabels: Record<RouteAvoidOption, string> = {
   cityTraffic: "Stadstrafik",
   bridges: "Broar",
   tunnels: "Tunnlar",
+  largeRoundabouts: "Stora rondeller",
+  multilane: "Flerfiligt",
 };
 
 export const routeAvoidTooltips: Record<RouteAvoidOption, string> = {
@@ -68,6 +72,8 @@ export const routeAvoidTooltips: Record<RouteAvoidOption, string> = {
   cityTraffic: "Tät stadsmiljö och större leder",
   bridges: "Alla brotyper",
   tunnels: "Alla tunnlar",
+  largeRoundabouts: "Rondeller med flera körfält",
+  multilane: "Flera körfält i samma riktning",
 };
 
 const routeMetricLabels: Record<RouteAvoidOption, string> = {
@@ -76,6 +82,8 @@ const routeMetricLabels: Record<RouteAvoidOption, string> = {
   cityTraffic: "Stadstrafik",
   bridges: "Broar",
   tunnels: "Tunnlar",
+  largeRoundabouts: "Stora rondeller",
+  multilane: "Flerfiligt",
 };
 
 export const activeRouteTimeBudget: RouteTimeBudget = "unlimited";
@@ -86,6 +94,8 @@ const routeAvoidOptionWeights: Record<RouteAvoidOption, number> = {
   cityTraffic: 4,
   bridges: 1.6,
   tunnels: 1.6,
+  largeRoundabouts: 2.2,
+  multilane: 3,
 };
 const routeAvoidSortTieEpsilon = 0.005;
 const routeExtraMinuteScoreDivisor = 240;
@@ -368,13 +378,23 @@ function routeExposureValue(route: RouteLine, option: RouteAvoidOption): number 
   if (option === "cityTraffic") return route.exposure?.cityTrafficMeters ?? null;
   if (option === "bridges") return route.exposure?.bridgeMeters ?? null;
   if (option === "tunnels") return route.exposure?.tunnelMeters ?? null;
+  if (option === "largeRoundabouts") return route.exposure?.largeRoundaboutMeters ?? null;
+  if (option === "multilane") return route.exposure?.multilaneMeters ?? null;
   return null;
 }
 
 function routeCappedExposureValue(route: RouteLine, option: RouteAvoidOption): number | null {
   const value = routeExposureValue(route, option);
   if (value === null) return null;
-  if (option === "highSpeed" || option === "trafficIntensity" || option === "cityTraffic" || option === "bridges" || option === "tunnels") {
+  if (
+    option === "highSpeed" ||
+    option === "trafficIntensity" ||
+    option === "cityTraffic" ||
+    option === "bridges" ||
+    option === "tunnels" ||
+    option === "largeRoundabouts" ||
+    option === "multilane"
+  ) {
     return Math.min(Math.max(0, value), route.distanceMeters);
   }
   return Math.max(0, value);
@@ -495,6 +515,20 @@ function routeAlternativeTitle(
 
   if (avoids.tunnels && routeIsBestForOption(route, routes, "tunnels") && routeImprovesOption(route, baseline, "tunnels")) {
     return routeCappedExposureValue(route, "tunnels") === 0 ? "Utan tunnlar" : "Färre tunnlar";
+  }
+
+  if (
+    avoids.largeRoundabouts &&
+    routeIsBestForOption(route, routes, "largeRoundabouts") &&
+    routeImprovesOption(route, baseline, "largeRoundabouts")
+  ) {
+    return routeCappedExposureValue(route, "largeRoundabouts") === 0
+      ? "Utan stora rondeller"
+      : "Färre rondeller";
+  }
+
+  if (avoids.multilane && routeIsBestForOption(route, routes, "multilane") && routeImprovesOption(route, baseline, "multilane")) {
+    return routeCappedExposureValue(route, "multilane") === 0 ? "Utan flerfiligt" : "Mindre flerfiligt";
   }
 
   if (routeExtraMinutes(route, baseline) <= 10 && activeOptions.length > 1) return "Balanserad";

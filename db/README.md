@@ -81,6 +81,7 @@ Webbens serverkod använder typerna via `web/lib/supabaseServer.ts`. Kör `pnpm 
 - `0028_route_feedback_update_delete.sql` — lägger till RPC:er för tidigare feedbackkommentarer och för att ta bort feedbackröst.
 - `0030_events_dedup_and_orphan_resnap.sql` — dedupad `events_in_bbox` för kartpunkter och timvis resnap av orphans. `resnap-orphan-events` är pausat i produktion sedan 2026-05-13; orphans visas fortsatt med vägnummer + geohash-fallback.
 - `0031_performance_indexes_disturbances_bbox.sql` — index för `events.first_seen` och GIST-baserad `disturbances_in_bbox`.
+- `0032_route_lane_penalties.sql` — index/RPC för reducerat Lastkajen-underlag till `Stora rondeller` och `Flerfiligt`. Kräver att `scripts/import-route-lane-penalties.sh` har importerat `route_large_roundabouts` och `route_multilane_segments` först.
 
 ## Dataregler
 
@@ -90,6 +91,7 @@ Webbens serverkod använder typerna via `web/lib/supabaseServer.ts`. Kör `pnpm 
 - Riskrelaterade snap-/refresh-cronjobb är pausade i produktion; behandla `event_segments` och `risk_per_segment` som vilande data tills riskdelen återaktiveras.
 - `events.raw` ska inte exponeras publikt.
 - Publika, tunga RPC:er ska ha både bbox-filter och response-limit.
+- `route_lane_penalties_in_bbox(...)` returnerar max 4000 reducerade straffsegment och exponerar inte råtabellerna direkt till `anon`/`authenticated`.
 
 ## Supabase-gotchas
 

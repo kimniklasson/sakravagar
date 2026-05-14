@@ -1,6 +1,13 @@
 import type { DisturbanceCategory } from "@trafik/shared";
 
-export type RouteAnnotationSegmentKind = "highSpeed" | "trafficIntensity" | "cityTraffic" | "bridges" | "tunnels";
+export type RouteAnnotationSegmentKind =
+  | "highSpeed"
+  | "trafficIntensity"
+  | "cityTraffic"
+  | "bridges"
+  | "tunnels"
+  | "largeRoundabouts"
+  | "multilane";
 export type RouteAnnotationPointKind = "disturbances" | "liveAccidents";
 
 export type RouteAnnotationSegment = {
@@ -20,6 +27,8 @@ export type RouteAnnotations = {
   cityTraffic: RouteAnnotationSegment[];
   bridges: RouteAnnotationSegment[];
   tunnels: RouteAnnotationSegment[];
+  largeRoundabouts: RouteAnnotationSegment[];
+  multilane: RouteAnnotationSegment[];
   disturbances: RouteAnnotationPoint[];
   liveAccidents: RouteAnnotationPoint[];
 };
@@ -37,6 +46,8 @@ export type RouteLine = {
     cityTraffic: number | null;
     bridges: number | null;
     tunnels: number | null;
+    largeRoundabouts: number | null;
+    multilane: number | null;
   };
   exposure: {
     highSpeedMeters: number | null;
@@ -46,6 +57,8 @@ export type RouteLine = {
     liveAccidents: number | null;
     bridgeMeters: number | null;
     tunnelMeters: number | null;
+    largeRoundaboutMeters: number | null;
+    multilaneMeters: number | null;
   };
   annotations: RouteAnnotations;
 };

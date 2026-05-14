@@ -33,6 +33,8 @@ const ROUTE_AVOID_KEYS = [
   "cityTraffic",
   "bridges",
   "tunnels",
+  "largeRoundabouts",
+  "multilane",
 ] as const;
 const ROUTE_ANNOTATION_SEGMENT_KEYS = [
   "highSpeed",
@@ -40,7 +42,10 @@ const ROUTE_ANNOTATION_SEGMENT_KEYS = [
   "cityTraffic",
   "bridges",
   "tunnels",
+  "largeRoundabouts",
+  "multilane",
 ] as const;
+const ROUTE_ADDED_AVOID_KEYS = new Set<string>(["largeRoundabouts", "multilane"]);
 const ROUTE_ANNOTATION_POINT_KEYS = ["disturbances", "liveAccidents"] as const;
 const DISTURBANCE_CATEGORIES = new Set<DisturbanceCategory>(["roadwork", "traffic", "other"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -169,7 +174,11 @@ function parseRouteStops(value: unknown): RouteStop[] | null {
 
 function parseRouteAvoids(value: unknown): RouteAvoidState | null {
   if (!isPlainObject(value)) return null;
-  const entries = ROUTE_AVOID_KEYS.map((key) => [key, value[key]]);
+  const entries = ROUTE_AVOID_KEYS.map((key) => {
+    const optionValue = value[key];
+    if (optionValue === undefined && ROUTE_ADDED_AVOID_KEYS.has(key)) return [key, false];
+    return [key, optionValue];
+  });
   if (!entries.every(([, optionValue]) => typeof optionValue === "boolean")) return null;
   return Object.fromEntries(entries) as RouteAvoidState;
 }
@@ -187,14 +196,19 @@ function parseNullableNumber(value: unknown): number | null | undefined {
 
 function parseRouteMetricRecord(value: unknown): RouteLine["avoidScores"] | null {
   if (!isPlainObject(value)) return null;
-  const entries = ROUTE_AVOID_KEYS.map((key) => [key, parseNullableNumber(value[key])]);
+  const entries = ROUTE_AVOID_KEYS.map((key) => [
+    key,
+    value[key] === undefined && ROUTE_ADDED_AVOID_KEYS.has(key)
+      ? null
+      : parseNullableNumber(value[key]),
+  ]);
   if (entries.some(([, optionValue]) => optionValue === undefined)) return null;
   return Object.fromEntries(entries) as RouteLine["avoidScores"];
 }
 
 function parseRouteExposure(value: unknown): RouteLine["exposure"] | null {
   if (!isPlainObject(value)) return null;
-  const keys = [
+  const legacyKeys = [
     "highSpeedMeters",
     "trafficIntensityMeters",
     "cityTrafficMeters",
@@ -203,7 +217,15 @@ function parseRouteExposure(value: unknown): RouteLine["exposure"] | null {
     "bridgeMeters",
     "tunnelMeters",
   ] as const;
-  const entries = keys.map((key) => [key, parseNullableNumber(value[key])]);
+  const addedKeys = ["largeRoundaboutMeters", "multilaneMeters"] as const;
+  const addedKeySet = new Set<string>(addedKeys);
+  const keys = [...legacyKeys, ...addedKeys] as const;
+  const entries = keys.map((key) => [
+    key,
+    value[key] === undefined && addedKeySet.has(key)
+      ? null
+      : parseNullableNumber(value[key]),
+  ]);
   if (entries.some(([, optionValue]) => optionValue === undefined)) return null;
   return Object.fromEntries(entries) as RouteLine["exposure"];
 }
@@ -211,7 +233,7 @@ function parseRouteExposure(value: unknown): RouteLine["exposure"] | null {
 function parseRouteAnnotations(value: unknown): RouteLine["annotations"] | null {
   if (!isPlainObject(value)) return null;
   const segmentEntries = ROUTE_ANNOTATION_SEGMENT_KEYS.map((key) => {
-    const segments = value[key];
+    const segments = value[key] ?? (ROUTE_ADDED_AVOID_KEYS.has(key) ? [] : undefined);
     if (!Array.isArray(segments) || segments.length > 200) return null;
     const parsed = segments.map((segment) => {
       if (!isPlainObject(segment) || segment.kind !== key) return null;

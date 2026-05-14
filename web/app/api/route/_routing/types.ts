@@ -121,7 +121,24 @@ export type TrafficIntensityRows = {
   trafficFlowRows: TrafficFlowRow[];
 };
 
+export type RouteLanePenaltyKind = "largeRoundabouts" | "multilane";
+
+export type RouteLanePenaltyRow = {
+  kind: RouteLanePenaltyKind;
+  fid: number;
+  element_id: string | null;
+  lane_count: number | null;
+  length_m: number | null;
+  geometry: GeoJSON.LineString | GeoJSON.MultiLineString;
+};
+
+export type RouteLanePenaltyRows = {
+  largeRoundabouts: RouteLanePenaltyRow[];
+  multilane: RouteLanePenaltyRow[];
+};
+
 export type RouteRequestContext = {
   requestId?: string;
   trafficIntensityRowsCache: Map<string, Promise<TrafficIntensityRows>>;
+  routeLanePenaltyRowsCache: Map<string, Promise<RouteLanePenaltyRows>>;
 };

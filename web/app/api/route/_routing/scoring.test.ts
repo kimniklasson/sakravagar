@@ -5,10 +5,11 @@ import {
   buildPenaltyZoneCustomModel,
   emptyRouteAnnotations,
   scoreCityTraffic,
+  scoreRouteLanePenalty,
   scoreTrafficIntensity,
   trafficFlowIntensityScore,
 } from "./scoring";
-import type { AdtRow, OsrmRoute, TrafficFlowRow } from "./types";
+import type { AdtRow, OsrmRoute, RouteLanePenaltyRow, TrafficFlowRow } from "./types";
 
 const noAvoids: RouteAvoidState = {
   highSpeed: false,
@@ -16,6 +17,8 @@ const noAvoids: RouteAvoidState = {
   cityTraffic: false,
   bridges: false,
   tunnels: false,
+  largeRoundabouts: false,
+  multilane: false,
 };
 
 const trafficAvoid: RouteAvoidState = {
@@ -56,6 +59,18 @@ function trafficFlowRow(overrides: Partial<TrafficFlowRow> = {}): TrafficFlowRow
   };
 }
 
+function routeLanePenaltyRow(overrides: Partial<RouteLanePenaltyRow> = {}): RouteLanePenaltyRow {
+  return {
+    kind: "largeRoundabouts",
+    fid: 77,
+    element_id: "abc",
+    lane_count: 2,
+    length_m: 120,
+    geometry: { type: "LineString", coordinates: [[18, 59], [18.002, 59]] },
+    ...overrides,
+  };
+}
+
 describe("route scoring helpers", () => {
   it("initializes the full annotation shape", () => {
     expect(emptyRouteAnnotations()).toEqual({
@@ -64,6 +79,8 @@ describe("route scoring helpers", () => {
       cityTraffic: [],
       bridges: [],
       tunnels: [],
+      largeRoundabouts: [],
+      multilane: [],
       disturbances: [],
       liveAccidents: [],
     });
@@ -106,6 +123,33 @@ describe("route scoring helpers", () => {
     expect(metric.exposure).toBeGreaterThan(1_000);
   });
 
+  it("scores large roundabout and multilane exposure when rows overlap the route", () => {
+    const candidate = route([[18, 59], [18.02, 59]]);
+
+    const largeRoundaboutMetric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({ kind: "largeRoundabouts", lane_count: 3, length_m: 140 }),
+    ]);
+    const multilaneMetric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({ kind: "multilane", fid: 88, lane_count: 2, length_m: 900 }),
+    ]);
+
+    expect(largeRoundaboutMetric.score).toBeGreaterThan(0);
+    expect(largeRoundaboutMetric.exposure).toBe(140);
+    expect(multilaneMetric.score).toBeGreaterThan(0);
+    expect(multilaneMetric.exposure).toBe(900);
+  });
+
+  it("returns null lane exposure when no rows overlap the route", () => {
+    const candidate = route([[18, 59], [18.02, 59]]);
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        geometry: { type: "LineString", coordinates: [[19, 59], [19.01, 59]] },
+      }),
+    ]);
+
+    expect(metric).toEqual({ score: null, exposure: null });
+  });
+
   it("builds traffic intensity penalty areas from overlapping high-intensity rows", () => {
     const baseline = route([[18, 59], [18.02, 59]]);
     const model = buildPenaltyZoneCustomModel(
@@ -124,5 +168,46 @@ describe("route scoring helpers", () => {
     expect(model?.priority?.map((rule) => rule.multiply_by)).toEqual(["0.22", "0.42"]);
     expect(buildPenaltyZoneCustomModel({ adtRows: [adtRow(45_000)], trafficFlowRows: [] }, noAvoids, [baseline]))
       .toBeUndefined();
+  });
+
+  it("caps lane penalty areas and ignores rows far from the baseline", () => {
+    const baseline = route([[18, 59], [18.02, 59]]);
+    const laneAvoid: RouteAvoidState = {
+      ...noAvoids,
+      largeRoundabouts: true,
+      multilane: true,
+    };
+    const largeRoundabouts = Array.from({ length: 40 }, (_, index) => routeLanePenaltyRow({
+      kind: "largeRoundabouts",
+      fid: index + 1,
+      length_m: 100 + index,
+    }));
+    const multilane = Array.from({ length: 50 }, (_, index) => routeLanePenaltyRow({
+      kind: "multilane",
+      fid: index + 100,
+      length_m: 100 + index,
+    }));
+    const model = buildPenaltyZoneCustomModel(
+      {
+        adtRows: [],
+        trafficFlowRows: [],
+        largeRoundabouts: [
+          ...largeRoundabouts,
+          routeLanePenaltyRow({
+            kind: "largeRoundabouts",
+            fid: 999,
+            geometry: { type: "LineString", coordinates: [[19, 59], [19.01, 59]] },
+          }),
+        ],
+        multilane,
+      },
+      laneAvoid,
+      [baseline],
+    );
+
+    const ids = model?.areas?.features.map((feature) => feature.id) ?? [];
+    expect(ids.filter((id) => id.startsWith("large_roundabout_"))).toHaveLength(25);
+    expect(ids.filter((id) => id.startsWith("multilane_"))).toHaveLength(35);
+    expect(ids).not.toContain("large_roundabout_999");
   });
 });

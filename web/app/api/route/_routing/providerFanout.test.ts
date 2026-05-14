@@ -22,6 +22,8 @@ describe("provider fanout helpers", () => {
 
     expect(context.trafficIntensityRowsCache).toBeInstanceOf(Map);
     expect(context.trafficIntensityRowsCache.size).toBe(0);
+    expect(context.routeLanePenaltyRowsCache).toBeInstanceOf(Map);
+    expect(context.routeLanePenaltyRowsCache.size).toBe(0);
   });
 
   it("caps GraphHopper alternative-route weight factors from max extra minutes", () => {

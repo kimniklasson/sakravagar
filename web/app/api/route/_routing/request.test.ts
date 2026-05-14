@@ -24,6 +24,12 @@ describe("route request helpers", () => {
       cityTraffic: true,
       bridges: false,
       tunnels: false,
+      largeRoundabouts: false,
+      multilane: false,
+    });
+    expect(parseAvoidState({ largeRoundabouts: true, multilane: 1 })).toEqual({
+      ...noAvoids,
+      largeRoundabouts: true,
     });
   });
 

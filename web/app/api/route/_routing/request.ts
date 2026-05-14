@@ -13,7 +13,15 @@ export const MAX_SWEDEN_LNG = 25;
 export const MIN_SWEDEN_LAT = 54;
 export const MAX_SWEDEN_LAT = 70;
 
-export const routeAvoidOptions = ["highSpeed", "trafficIntensity", "cityTraffic", "bridges", "tunnels"] as const;
+export const routeAvoidOptions = [
+  "highSpeed",
+  "trafficIntensity",
+  "cityTraffic",
+  "bridges",
+  "tunnels",
+  "largeRoundabouts",
+  "multilane",
+] as const;
 
 export const noAvoids: RouteAvoidState = {
   highSpeed: false,
@@ -21,6 +29,8 @@ export const noAvoids: RouteAvoidState = {
   cityTraffic: false,
   bridges: false,
   tunnels: false,
+  largeRoundabouts: false,
+  multilane: false,
 };
 
 export function isCoordinate(value: unknown): value is [number, number] {
@@ -47,6 +57,8 @@ export function parseAvoidState(value: unknown): RouteAvoidState {
     cityTraffic: input.cityTraffic === true,
     bridges: input.bridges === true,
     tunnels: input.tunnels === true,
+    largeRoundabouts: input.largeRoundabouts === true,
+    multilane: input.multilane === true,
   };
 }
 

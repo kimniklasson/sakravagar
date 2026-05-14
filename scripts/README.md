@@ -53,3 +53,29 @@ Skapar/uppdaterar:
 - `nvdb_large_roads_type`
 - `large_roads_public`
 - RPC `large_roads_in_bbox(...)`
+
+## `import-route-lane-penalties.sh` — importera rondell-/körfältsunderlag
+
+Importerar reducerade lager från Lastkajen-paketet `korfalt_rondell_*.gpkg`:
+
+- `route_large_roundabouts`: rondellsegment där kopplad körfältsdata visar minst två körfält.
+- `route_multilane_segments`: segment där fram- eller bakriktning innehåller flera körfält (`K1;K2` osv).
+
+Detta är underlag till ruttfiltren `Stora rondeller` och `Flerfiligt`; hela råpaketet ska inte importeras till Supabase.
+
+```sh
+set -a && . .env && set +a
+./scripts/import-route-lane-penalties.sh /sökväg/till/korfalt_rondell_294765.gpkg
+```
+
+Efter import:
+
+```sh
+/opt/homebrew/opt/libpq/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/0032_route_lane_penalties.sql
+```
+
+Skapar/uppdaterar:
+
+- `route_large_roundabouts`
+- `route_multilane_segments`
+- RPC `route_lane_penalties_in_bbox(...)`

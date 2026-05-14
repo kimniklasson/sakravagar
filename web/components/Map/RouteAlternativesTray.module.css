@@ -217,6 +217,17 @@
   );
 }
 
+.routeAlternativeMetricIcon_largeRoundabouts {
+  border: 2px solid #B98CFF;
+  border-radius: 999px;
+}
+
+.routeAlternativeMetricIcon_multilane {
+  height: 5px;
+  border-top: 2px solid #42D9C8;
+  border-bottom: 2px solid #42D9C8;
+}
+
 .routeAlternativeMetricIconMuted {
   opacity: 0.55;
   filter: grayscale(1);

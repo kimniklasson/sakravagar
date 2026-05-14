@@ -37,6 +37,8 @@ import type {
   GraphHopperRule,
   LargeRoadRow,
   OsrmRoute,
+  RouteLanePenaltyRow,
+  RouteLanePenaltyRows,
   RouteRequestContext,
   TrafficFlowRow,
   TrafficIntensityRows,
@@ -65,11 +67,28 @@ const TRAFFIC_INTENSITY_ADT_PENALTY_MAX_AREAS = 20;
 const TRAFFIC_INTENSITY_FLOW_PENALTY_MAX_AREAS = 8;
 const TRAFFIC_INTENSITY_PENALTY_PADDING_METERS = 120;
 const TRAFFIC_INTENSITY_ANNOTATION_MAX_SAMPLES = 1400;
+const ROUTE_LANE_PENALTY_RPC_LIMIT = 4000;
+const ROUTE_LANE_PENALTY_ANNOTATION_MAX_SAMPLES = 1400;
+const LARGE_ROUNDABOUT_PENALTY_CANDIDATE_LIMIT = 90;
+const LARGE_ROUNDABOUT_PENALTY_MAX_AREAS = 25;
+const LARGE_ROUNDABOUT_PENALTY_PADDING_METERS = 90;
+const LARGE_ROUNDABOUT_PENALTY_MULTIPLIER = "0.55";
+const MULTILANE_PENALTY_CANDIDATE_LIMIT = 140;
+const MULTILANE_PENALTY_MAX_AREAS = 35;
+const MULTILANE_PENALTY_PADDING_METERS = 120;
+const MULTILANE_PENALTY_MULTIPLIER = "0.70";
 const PENALTY_ZONE_BBOX_PADDING = 0.08;
 const PENALTY_ZONE_MAX_BBOX_AREA = 80;
 const TRAFFIC_FLOW_ACTIVE_WINDOW_MS = 45 * 60 * 1000;
 
 const emptyTrafficIntensityRows: TrafficIntensityRows = { adtRows: [], trafficFlowRows: [] };
+const emptyRouteLanePenaltyRows: RouteLanePenaltyRows = { largeRoundabouts: [], multilane: [] };
+
+type PenaltyZoneRows = TrafficIntensityRows & RouteLanePenaltyRows;
+const emptyPenaltyZoneRows: PenaltyZoneRows = {
+  ...emptyTrafficIntensityRows,
+  ...emptyRouteLanePenaltyRows,
+};
 
 export function emptyRouteAnnotations(): RouteAnnotations {
   return {
@@ -78,6 +97,8 @@ export function emptyRouteAnnotations(): RouteAnnotations {
     cityTraffic: [],
     bridges: [],
     tunnels: [],
+    largeRoundabouts: [],
+    multilane: [],
     disturbances: [],
     liveAccidents: [],
   };
@@ -411,6 +432,78 @@ function trafficFlowRowNearLine(line: GeoJSON.Position[], row: TrafficFlowRow, o
   });
 }
 
+function routeLanePenaltyThreshold(row: Pick<RouteLanePenaltyRow, "kind">): number {
+  return row.kind === "largeRoundabouts" ? 120 : 140;
+}
+
+function routeLanePenaltyWeight(row: RouteLanePenaltyRow): number {
+  const laneBonus = Math.max(0, (row.lane_count ?? 2) - 2) * 0.16;
+  return (row.kind === "largeRoundabouts" ? 1.25 : 1) + laneBonus;
+}
+
+function routeLanePenaltySamples(row: RouteLanePenaltyRow): GeoJSON.Position[] {
+  const samples: GeoJSON.Position[] = [];
+  for (const segment of flattenLineString(row.geometry)) {
+    const mid = midpoint(segment);
+    if (mid) samples.push(mid);
+    samples.push(...sampleLine(segment));
+  }
+  return samples;
+}
+
+function routeLanePenaltyRowNearLine(
+  line: GeoJSON.Position[],
+  row: RouteLanePenaltyRow,
+  originLat: number,
+): boolean {
+  const threshold = routeLanePenaltyThreshold(row);
+  return routeLanePenaltySamples(row).some((point) => distancePointToLineMeters(point, line, originLat) <= threshold);
+}
+
+export function scoreRouteLanePenalty(route: OsrmRoute, rows: RouteLanePenaltyRow[]): RouteMetric {
+  if (!rows.length) return { score: null, exposure: null };
+
+  const originLat = routeOriginLat(route);
+  const line = routeMatchLine(route);
+  let weightedMeters = 0;
+  let exposureMeters = 0;
+
+  for (const row of rows) {
+    if (!routeLanePenaltyRowNearLine(line, row, originLat)) continue;
+    const meters = Math.max(row.kind === "largeRoundabouts" ? 35 : 60, row.length_m ?? geometryLengthMeters(row.geometry, originLat));
+    exposureMeters += meters;
+    weightedMeters += meters * routeLanePenaltyWeight(row);
+  }
+
+  if (exposureMeters <= 0) return { score: null, exposure: null };
+  return {
+    score: Math.min(1, weightedMeters / Math.max(1, route.distance)),
+    exposure: Math.min(exposureMeters, route.distance),
+  };
+}
+
+function routeLanePenaltySegments(
+  route: OsrmRoute,
+  rows: RouteLanePenaltyRow[],
+  kind: RouteAnnotationSegmentKind,
+): RouteAnnotationSegment[] {
+  if (!rows.length || route.geometry.coordinates.length < 2) return [];
+
+  const originLat = routeOriginLat(route);
+  const samples = capSamples(
+    rows.flatMap((row) => routeLanePenaltySamples(row)),
+    ROUTE_LANE_PENALTY_ANNOTATION_MAX_SAMPLES,
+  );
+  if (!samples.length) return [];
+
+  return routeSegmentAnnotationsFromMask(route, kind, (segmentIndex) => {
+    const start = route.geometry.coordinates[segmentIndex];
+    const end = route.geometry.coordinates[segmentIndex + 1];
+    if (!start || !end) return false;
+    return samples.some((sample) => distancePointToSegmentMeters(sample, start, end, originLat) <= 140);
+  });
+}
+
 export function scoreTrafficIntensity(
   route: OsrmRoute,
   adtRows: AdtRow[],
@@ -519,14 +612,27 @@ async function fetchPenaltyZoneRows(
   routes: OsrmRoute[],
   avoid: RouteAvoidState,
   context?: RouteRequestContext,
-): Promise<TrafficIntensityRows> {
-  if (!avoid.trafficIntensity) return emptyTrafficIntensityRows;
+): Promise<PenaltyZoneRows> {
+  const includeLanePenalties = avoid.largeRoundabouts || avoid.multilane;
+  if (!avoid.trafficIntensity && !includeLanePenalties) return emptyPenaltyZoneRows;
 
   const bbox = routeBbox(routes, PENALTY_ZONE_BBOX_PADDING);
-  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return emptyTrafficIntensityRows;
-  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return emptyTrafficIntensityRows;
+  if (!bbox || bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return emptyPenaltyZoneRows;
+  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return emptyPenaltyZoneRows;
 
-  return fetchTrafficIntensityRowsForBbox(bbox, context);
+  const [trafficIntensityRows, routeLaneRows] = await Promise.all([
+    avoid.trafficIntensity
+      ? fetchTrafficIntensityRowsForBbox(bbox, context)
+      : Promise.resolve(emptyTrafficIntensityRows),
+    includeLanePenalties
+      ? fetchRouteLanePenaltyRowsForBbox(bbox, avoid, context)
+      : Promise.resolve(emptyRouteLanePenaltyRows),
+  ]);
+
+  return {
+    ...trafficIntensityRows,
+    ...routeLaneRows,
+  };
 }
 
 function trafficIntensityRowsCacheKey(bbox: Bbox): string {
@@ -580,10 +686,76 @@ async function fetchTrafficIntensityRowsForBbox(
   return promise;
 }
 
+function routeLanePenaltyRowsCacheKey(bbox: Bbox, avoid: RouteAvoidState): string {
+  return [
+    bbox.minLng,
+    bbox.minLat,
+    bbox.maxLng,
+    bbox.maxLat,
+    avoid.largeRoundabouts ? "roundabouts" : "",
+    avoid.multilane ? "multilane" : "",
+  ].map((part) => typeof part === "number" ? part.toFixed(5) : part).join(",");
+}
+
+function isRouteLanePenaltyRow(value: unknown): value is RouteLanePenaltyRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Partial<RouteLanePenaltyRow>;
+  return (
+    (row.kind === "largeRoundabouts" || row.kind === "multilane") &&
+    Boolean(row.geometry) &&
+    (row.geometry?.type === "LineString" || row.geometry?.type === "MultiLineString")
+  );
+}
+
+async function fetchRouteLanePenaltyRowsForBbox(
+  bbox: Bbox,
+  avoid: RouteAvoidState,
+  context?: RouteRequestContext,
+): Promise<RouteLanePenaltyRows> {
+  if (!avoid.largeRoundabouts && !avoid.multilane) return emptyRouteLanePenaltyRows;
+  if (!supabaseUrl || !supabaseAnon) return emptyRouteLanePenaltyRows;
+  if (bbox.minLng >= bbox.maxLng || bbox.minLat >= bbox.maxLat) return emptyRouteLanePenaltyRows;
+  if (bboxArea(bbox) > PENALTY_ZONE_MAX_BBOX_AREA) return emptyRouteLanePenaltyRows;
+
+  const key = routeLanePenaltyRowsCacheKey(bbox, avoid);
+  const cached = context?.routeLanePenaltyRowsCache.get(key);
+  if (cached) return cached;
+
+  const client = createServerSupabaseClient(supabaseUrl, supabaseAnon);
+  const promise = (async (): Promise<RouteLanePenaltyRows> => {
+    const result = await client.rpc("route_lane_penalties_in_bbox", {
+      min_lng: bbox.minLng,
+      min_lat: bbox.minLat,
+      max_lng: bbox.maxLng,
+      max_lat: bbox.maxLat,
+      include_large_roundabouts: avoid.largeRoundabouts,
+      include_multilane: avoid.multilane,
+    }).limit(ROUTE_LANE_PENALTY_RPC_LIMIT);
+
+    if (result.error) return emptyRouteLanePenaltyRows;
+
+    const rows = ((result.data ?? []) as unknown[]).filter(isRouteLanePenaltyRow);
+    return {
+      largeRoundabouts: rows.filter((row) => row.kind === "largeRoundabouts"),
+      multilane: rows.filter((row) => row.kind === "multilane"),
+    };
+  })().catch((err) => {
+    logApiWarning("route lane penalty lookup failed", err, {
+      requestId: context?.requestId,
+    });
+    return emptyRouteLanePenaltyRows;
+  });
+
+  context?.routeLanePenaltyRowsCache.set(key, promise);
+  return promise;
+}
+
 export function buildPenaltyZoneCustomModel(
   rows: {
     adtRows: AdtRow[];
     trafficFlowRows: TrafficFlowRow[];
+    largeRoundabouts?: RouteLanePenaltyRow[];
+    multilane?: RouteLanePenaltyRow[];
   },
   avoid: RouteAvoidState,
   baselineRoutes: OsrmRoute[],
@@ -640,6 +812,62 @@ export function buildPenaltyZoneCustomModel(
     }
   }
 
+  if (avoid.largeRoundabouts) {
+    const largeRoundaboutRows = [...(rows.largeRoundabouts ?? [])]
+      .filter((row) => !baselineRoute || routeLanePenaltyRowNearLine(baselineLine, row, baselineOriginLat))
+      .sort((a, b) => {
+        const weightDiff = routeLanePenaltyWeight(b) - routeLanePenaltyWeight(a);
+        if (weightDiff !== 0) return weightDiff;
+        return (b.length_m ?? 0) - (a.length_m ?? 0);
+      })
+      .slice(0, LARGE_ROUNDABOUT_PENALTY_CANDIDATE_LIMIT)
+      .slice(0, LARGE_ROUNDABOUT_PENALTY_MAX_AREAS);
+
+    for (const row of largeRoundaboutRows) {
+      const line = flattenLineString(row.geometry)[0];
+      if (!line) continue;
+      const feature = linePenaltyArea(
+        `large_roundabout_${row.fid}`,
+        line,
+        LARGE_ROUNDABOUT_PENALTY_PADDING_METERS,
+      );
+      if (!feature) continue;
+      features.push(feature);
+      priority.push({
+        if: `in_${feature.id}`,
+        multiply_by: LARGE_ROUNDABOUT_PENALTY_MULTIPLIER,
+      });
+    }
+  }
+
+  if (avoid.multilane) {
+    const multilaneRows = [...(rows.multilane ?? [])]
+      .filter((row) => !baselineRoute || routeLanePenaltyRowNearLine(baselineLine, row, baselineOriginLat))
+      .sort((a, b) => {
+        const weightDiff = routeLanePenaltyWeight(b) - routeLanePenaltyWeight(a);
+        if (weightDiff !== 0) return weightDiff;
+        return (b.length_m ?? 0) - (a.length_m ?? 0);
+      })
+      .slice(0, MULTILANE_PENALTY_CANDIDATE_LIMIT)
+      .slice(0, MULTILANE_PENALTY_MAX_AREAS);
+
+    for (const row of multilaneRows) {
+      const line = flattenLineString(row.geometry)[0];
+      if (!line) continue;
+      const feature = linePenaltyArea(
+        `multilane_${row.fid}`,
+        line,
+        MULTILANE_PENALTY_PADDING_METERS,
+      );
+      if (!feature) continue;
+      features.push(feature);
+      priority.push({
+        if: `in_${feature.id}`,
+        multiply_by: MULTILANE_PENALTY_MULTIPLIER,
+      });
+    }
+  }
+
   return mergeCustomModels({
     priority,
     areas: features.length
@@ -689,6 +917,8 @@ export async function scoreRouteAlternatives(
         cityTraffic: cityTraffic.score,
         bridges: bridges.score,
         tunnels: tunnels.score,
+        largeRoundabouts: null,
+        multilane: null,
       },
       exposure: {
         highSpeedMeters: null,
@@ -698,6 +928,8 @@ export async function scoreRouteAlternatives(
         liveAccidents: null,
         bridgeMeters: bridges.exposure,
         tunnelMeters: tunnels.exposure,
+        largeRoundaboutMeters: null,
+        multilaneMeters: null,
       },
       annotations,
     };
@@ -717,6 +949,8 @@ export async function scoreRouteAlternatives(
         cityTraffic: null,
         bridges: null,
         tunnels: null,
+        largeRoundabouts: null,
+        multilane: null,
       },
       exposure: {
         highSpeedMeters: null,
@@ -726,6 +960,8 @@ export async function scoreRouteAlternatives(
         liveAccidents: null,
         bridgeMeters: null,
         tunnelMeters: null,
+        largeRoundaboutMeters: null,
+        multilaneMeters: null,
       },
       annotations: emptyRouteAnnotations(),
     };
@@ -785,13 +1021,23 @@ export async function scoreRouteAlternatives(
     const trafficIntensityRowsRequest = avoid.trafficIntensity
       ? fetchTrafficIntensityRowsForBbox(bbox, context)
       : Promise.resolve(emptyTrafficIntensityRows);
-    const [largeRoadsResult, disturbancesResult, eventsResult, trafficIntensityRows] = await Promise.all([
+    const routeLaneRowsRequest = (avoid.largeRoundabouts || avoid.multilane)
+      ? fetchRouteLanePenaltyRowsForBbox(bbox, avoid, context)
+      : Promise.resolve(emptyRouteLanePenaltyRows);
+    const [
+      largeRoadsResult,
+      disturbancesResult,
+      eventsResult,
+      trafficIntensityRows,
+      routeLaneRows,
+    ] = await Promise.all([
       bboxArea(bbox) <= 40
         ? client.rpc("large_roads_in_bbox", params)
         : Promise.resolve({ data: [], error: null }),
       disturbancesRequest,
       eventsRequest,
       trafficIntensityRowsRequest,
+      routeLaneRowsRequest,
     ]);
 
     const largeRoadRows = largeRoadsResult.error
@@ -816,6 +1062,12 @@ export async function scoreRouteAlternatives(
       const disturbances = scoreDisturbances(route, disturbanceRows);
       const bridges = roadEnvironmentExposure(route, "BRIDGE");
       const tunnels = roadEnvironmentExposure(route, "TUNNEL");
+      const largeRoundabouts = avoid.largeRoundabouts
+        ? scoreRouteLanePenalty(route, routeLaneRows.largeRoundabouts)
+        : { score: null, exposure: null };
+      const multilane = avoid.multilane
+        ? scoreRouteLanePenalty(route, routeLaneRows.multilane)
+        : { score: null, exposure: null };
       const accidentPoints = liveAccidentPoints(route, eventRows);
       const annotations = emptyRouteAnnotations();
       annotations.highSpeed = highSpeedSegments(route, largeRoadRows);
@@ -825,6 +1077,12 @@ export async function scoreRouteAlternatives(
       annotations.cityTraffic = avoid.cityTraffic ? cityTrafficSegments(route) : [];
       annotations.bridges = roadEnvironmentSegments(route, "BRIDGE", "bridges");
       annotations.tunnels = roadEnvironmentSegments(route, "TUNNEL", "tunnels");
+      annotations.largeRoundabouts = avoid.largeRoundabouts
+        ? routeLanePenaltySegments(route, routeLaneRows.largeRoundabouts, "largeRoundabouts")
+        : [];
+      annotations.multilane = avoid.multilane
+        ? routeLanePenaltySegments(route, routeLaneRows.multilane, "multilane")
+        : [];
       annotations.disturbances = disturbancePoints(route, disturbanceRows);
       annotations.liveAccidents = accidentPoints;
       return {
@@ -834,6 +1092,8 @@ export async function scoreRouteAlternatives(
           cityTraffic: cityTraffic.score,
           bridges: bridges.score,
           tunnels: tunnels.score,
+          largeRoundabouts: largeRoundabouts.score,
+          multilane: multilane.score,
         },
         exposure: {
           highSpeedMeters: highSpeed.exposure,
@@ -843,6 +1103,8 @@ export async function scoreRouteAlternatives(
           liveAccidents: accidentPoints.length,
           bridgeMeters: bridges.exposure,
           tunnelMeters: tunnels.exposure,
+          largeRoundaboutMeters: largeRoundabouts.exposure,
+          multilaneMeters: multilane.exposure,
         },
         annotations,
       };

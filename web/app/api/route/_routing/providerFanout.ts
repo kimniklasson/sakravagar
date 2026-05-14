@@ -42,7 +42,11 @@ const GRAPHHOPPER_ALTERNATIVE_TIMEOUT_MS = 7_000;
 const GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS = 9_000;
 
 export function createRouteRequestContext(requestId?: string): RouteRequestContext {
-  return { requestId, trafficIntensityRowsCache: new Map() };
+  return {
+    requestId,
+    trafficIntensityRowsCache: new Map(),
+    routeLanePenaltyRowsCache: new Map(),
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -167,7 +171,9 @@ export async function fetchProviderRoutes(
     !avoid.trafficIntensity &&
     !avoid.cityTraffic &&
     !avoid.bridges &&
-    !avoid.tunnels;
+    !avoid.tunnels &&
+    !avoid.largeRoundabouts &&
+    !avoid.multilane;
   const longHighSpeedSearch = avoid.highSpeed && baseline.distance >= 60_000;
   const pathCount = trafficIntensityActive
     ? Math.max(2, Math.min(3, alternatives + 1))
@@ -194,7 +200,9 @@ export async function fetchProviderRoutes(
     avoid.trafficIntensity &&
     !avoid.cityTraffic &&
     !avoid.bridges &&
-    !avoid.tunnels;
+    !avoid.tunnels &&
+    !avoid.largeRoundabouts &&
+    !avoid.multilane;
 
   const preferenceModel = activeOptions.length > 0 && !skipCombinedTrafficPreference
     ? await buildRoutePreferenceCustomModel(fastestRoutes, avoid, context)
@@ -208,6 +216,8 @@ export async function fetchProviderRoutes(
       avoid.cityTraffic ? "city-traffic" : null,
       avoid.bridges ? "bridges" : null,
       avoid.tunnels ? "tunnels" : null,
+      avoid.largeRoundabouts ? "large-roundabouts" : null,
+      avoid.multilane ? "multilane" : null,
     ].filter(Boolean).join("-");
 
     preferenceRequests.push(
@@ -285,7 +295,14 @@ export async function fetchProviderRoutes(
     }
   }
 
-  const activeCoreOptions = (["highSpeed", "trafficIntensity", "bridges", "tunnels"] as const)
+  const activeCoreOptions = ([
+    "highSpeed",
+    "trafficIntensity",
+    "bridges",
+    "tunnels",
+    "largeRoundabouts",
+    "multilane",
+  ] as const)
     .filter((option) => avoid[option]);
   if (activeCoreOptions.length > 1) {
     for (const option of activeCoreOptions) {

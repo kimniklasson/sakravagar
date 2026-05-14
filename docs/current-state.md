@@ -1,4 +1,4 @@
-# Current state — 2026-05-13
+# Current state — 2026-05-14
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt, `docs/routing-ops.md` för GraphHopper-drift och `docs/review-log.md` för reviewspåret. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
 
@@ -29,14 +29,16 @@ Ruttplaneraren finns i `web/components/Map/RoutePlannerBox.tsx`, med state/orche
 - `Stadstrafik`
 - `Broar`
 - `Tunnlar`
+- `Stora rondeller`
+- `Flerfiligt`
 
-GraphHopper custom models påverkar vägkostnaden för dessa fem filter. Olyckshistorik och trafikstörningar är kontrollager/route-notices, inte planeringsfilter. Vald rutt visar pågående störningar och liveolyckor ovanpå ruttlinjen även när motsvarande kartlager är avstängt.
+GraphHopper custom models påverkar vägkostnaden för dessa filter. `Stora rondeller` och `Flerfiligt` bygger på reducerat NVDB/Lastkajen-underlag från `korfalt_rondell_*.gpkg`; de importerar inte hela råpaketet utan bara segment som behövs för routing penalty areas och scoring. Olyckshistorik och trafikstörningar är kontrollager/route-notices, inte planeringsfilter. Vald rutt visar pågående störningar och liveolyckor ovanpå ruttlinjen även när motsvarande kartlager är avstängt.
 
 `POST /api/route` är uppdelad efter arkitektur-reviewen: publika ruttyper ligger i `web/lib/routeTypes.ts`, och rena serverhjälpare ligger i `web/app/api/route/_routing/` (`types`, `request`, `timeout`, `telemetry`, `geometry`, `customModels`, `providers`, `providerFanout`, `routeDetails`, `dedupe`, `hybrid`, `scoring`, `highSpeedSelection`). Själva `route.ts` är nu i princip request handler, deadline/logging och response mapping.
 
 MapLibre-lagren är uppdelade efter frontend cleanup. `web/components/Map/layers.ts` är bara export-yta, medan lagren ligger i `web/components/Map/layers/`: `route.ts` för ruttlinjer/annotationer, `adt.ts` för ÅDT, `largeRoads.ts` för hastighetsbadges, `risk.ts` för vilande risklager, `events.ts` för olycks-/live-lagret, `liveTraffic.ts` för störningar och trafikflöde, `bbox.ts` för delad viewport-loader och `popups.ts` för popup-interaktioner. `Map.tsx` har också börjat tunnas ut via `web/components/Map/hooks/`: MapLibre-livscykel, viewport-CSS-vars, route-controls-mått, live event summary, ruttstopp-sök och egna via-punktsmarkörer ligger där. Delnings-/feedback-payloads och Google Maps-länkbygge ligger i `web/components/Map/routeSharing.ts`. CSS för ruttplanerare, ruttalternativ, hjälppanel, loading-indikator och ikon-SVG:er är utbruten från `Map.module.css` till komponentnära CSS Modules.
 
-Hjälppanelen har en egen ruttsektion som förklarar vad varje undvik-filter försöker ge användaren: lugnare hastigheter, mindre intensiv trafik, mindre stadskörning samt färre broar och tunnlar när rimliga alternativ finns. Den ligger före kartlagersektionen för att hjälpa användaren förstå ruttförslagen innan hen tolkar datalagren.
+Hjälppanelen har en egen ruttsektion som förklarar vad varje undvik-filter försöker ge användaren: lugnare hastigheter, mindre intensiv trafik, mindre stadskörning, färre broar/tunnlar samt färre stora rondeller och flerfiliga segment när rimliga alternativ finns. Den ligger före kartlagersektionen för att hjälpa användaren förstå ruttförslagen innan hen tolkar datalagren.
 
 Viktiga beteenden:
 
@@ -96,6 +98,7 @@ Canonical domains:
 - `nvdb_trafik_latest` väljer senaste mätperiod per `element_id` men behåller syskon-`fid`.
 - `events.raw`, `disturbances.raw` och `traffic_flow_measurements.raw` ska inte exponeras publikt.
 - ÅDT-/hastighetslager och vilande riskinfrastruktur är bbox/tile-baserade för att undvika stora Supabase-svar.
+- Rondell-/körfältsfiltren använder reducerade tabeller `route_large_roundabouts` och `route_multilane_segments`, bbox-RPC:n `route_lane_penalties_in_bbox(...)`, max 4000 returnerade rader och capped GraphHopper penalty areas per request. Import + `0032_route_lane_penalties.sql` kördes i Supabase 2026-05-14: `route_multilane_segments` 20 132 rader och `route_large_roundabouts` 3 064 rader.
 
 ## Gotchas
 
@@ -105,6 +108,7 @@ Canonical domains:
 - API-rutter skickar `x-request-id` och serverloggar använder stabila eventnamn: `api_observation` för mätpunkter, `api_warning` för mjuka fallbackar och `api_error` för fel. Middleware-rate-limit och route-concurrency är process-/instanslokala skydd. Cloudflare-regeln för `/api/route` är yttre skydd på Free-planen, men räknare kan fortfarande vara Cloudflare-datacenterlokala och är inte exakt global concurrency-kontroll. Vid större publik trafik eller app-specifika kvoter behövs Upstash/Vercel KV eller annan delad state.
 - Lastkajen bulkimport ska använda Supabase session pooler på port `5432`, inte transaction pooler `6543`.
 - `Höga hastigheter` kräver att `scripts/import-large-roads.sh` körts efter 80+-ändringen; migrationen ensam skapar inte raderna.
+- `Stora rondeller` och `Flerfiligt` kräver att `scripts/import-route-lane-penalties.sh` körts mot `korfalt_rondell_*.gpkg` innan `0032_route_lane_penalties.sql` appliceras i Supabase. Underlaget är importerat i prod per 2026-05-14. Om en route-smoke ger `largeRoundabouts`/`multilane` som `null`, kontrollera först att RPC:n `route_lane_penalties_in_bbox(...)` finns och att tabellraderna inte har skrivits över utan att migrationen körts om.
 - GraphHopper custom model kräver `ch.disable: true`; snabbaste basrutten kan använda CH.
 - Efter domän-/env-ändringar i Vercel krävs redeploy för att `PUBLIC_SITE_ORIGIN`, `GRAPHHOPPER_BASE_URL`, redirects och CSP ska börja gälla i production.
 - Om GraphHopper-cache byggs om efter config/OSM-byte: stoppa service, flytta `/opt/graphhopper/graph-cache`, starta service och följ `journalctl -u graphhopper -f`.

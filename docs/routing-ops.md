@@ -99,6 +99,12 @@ Testa sedan rutter via UI:t eller `POST /api/route`. Kända smoke test-sträckor
 - `trafficIntensity` — sänker prioritet för trafikintensiva ÅDT-segment och aktiva liveflödessegment med tät/långsam trafik.
 - `cityTraffic` — sänker prioritet i statiska stadszoner, särskilt större/högre hastighetsleder.
 - `bridges` / `tunnels` — sänker prioritet för GraphHoppers `road_environment == BRIDGE` respektive `TUNNEL`.
+- `largeRoundabouts` — sänker prioritet för rondellsegment där kopplad NVDB-körfältsdata visar minst två körfält.
+- `multilane` — sänker prioritet för segment där fram- eller bakriktning har flera körfält i samma riktning.
+
+`largeRoundabouts` och `multilane` använder `route_lane_penalties_in_bbox(...)` mot reducerade Lastkajen-tabeller, inte hela GeoPackage-råmaterialet. API:t filtrerar först på bbox, hämtar max 4000 rader, behåller bara segment nära baseline-rutten för GraphHopper custom areas och cappar penalty areas till 25 stora rondeller respektive 35 flerfiliga segment. Om RPC:n saknas eller fallerar ska rutten fortfarande fungera; scores för dessa filter blir då `null`.
+
+Prod-underlaget importerades 2026-05-14 från `korfalt_rondell_294765.gpkg`: 20 132 flerfiliga segment och 3 064 stora rondellsegment. Om importscriptet körs om med overwrite måste `0032_route_lane_penalties.sql` köras efteråt så index, RLS och RPC är tillbaka.
 
 Olyckor och störningar är inte GraphHopper-filter längre. De följer med ruttsvaret som notices/annotations.
 

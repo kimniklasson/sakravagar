@@ -32,6 +32,8 @@ const ROUTE_TRAFFIC_INTENSITY_LAYER_ID = "route-traffic-intensity-lines";
 const ROUTE_CITY_TRAFFIC_LAYER_ID = "route-city-traffic-lines";
 const ROUTE_BRIDGE_LAYER_ID = "route-bridge-lines";
 const ROUTE_TUNNEL_LAYER_ID = "route-tunnel-lines";
+const ROUTE_LARGE_ROUNDABOUT_LAYER_ID = "route-large-roundabout-lines";
+const ROUTE_MULTILANE_LAYER_ID = "route-multilane-lines";
 const ROUTE_DISTURBANCE_LAYER_ID = "route-disturbance-points";
 const ROUTE_ACCIDENT_LAYER_ID = "route-accident-points";
 const ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID = "route-disturbance-triangle";
@@ -41,6 +43,8 @@ const ROUTE_ANNOTATION_COLORS = {
   cityTraffic: "#FFD166",
   bridges: "#F23FC8",
   tunnels: "#FF2F00",
+  largeRoundabouts: "#B98CFF",
+  multilane: "#42D9C8",
   disturbances: "#F27A3F",
   liveAccidents: "#FF2F00",
 };
@@ -321,6 +325,34 @@ export function addRouteLayer(
   );
   map.addLayer(
     {
+      id: ROUTE_LARGE_ROUNDABOUT_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "largeRoundabouts"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.largeRoundabouts,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2.4, 12, 4.8, 16, 7.2],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_MULTILANE_LAYER_ID,
+      type: "line",
+      source: ROUTE_ANNOTATION_LINE_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "multilane"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ROUTE_ANNOTATION_COLORS.multilane,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 12, 4, 16, 6],
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
       id: ROUTE_DISTURBANCE_LAYER_ID,
       type: "symbol",
       source: ROUTE_ANNOTATION_POINT_SOURCE_ID,
@@ -410,6 +442,8 @@ export function addRouteLayer(
         ROUTE_HIGH_SPEED_LAYER_ID,
         ROUTE_BRIDGE_LAYER_ID,
         ROUTE_TUNNEL_LAYER_ID,
+        ROUTE_LARGE_ROUNDABOUT_LAYER_ID,
+        ROUTE_MULTILANE_LAYER_ID,
         ROUTE_DISTURBANCE_LAYER_ID,
         ROUTE_ACCIDENT_LAYER_ID,
         ROUTE_PRIMARY_HIT_LAYER_ID,
@@ -466,6 +500,8 @@ export function setRouteLayerData(
         ...(visibleAnnotations.cityTraffic ? selectedRoute.annotations.cityTraffic ?? [] : []),
         ...(visibleAnnotations.bridges ? selectedRoute.annotations.bridges ?? [] : []),
         ...(visibleAnnotations.tunnels ? selectedRoute.annotations.tunnels ?? [] : []),
+        ...(visibleAnnotations.largeRoundabouts ? selectedRoute.annotations.largeRoundabouts ?? [] : []),
+        ...(visibleAnnotations.multilane ? selectedRoute.annotations.multilane ?? [] : []),
       ]
     : [];
   const pointAnnotations = selectedRoute?.annotations

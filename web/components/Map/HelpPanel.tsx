@@ -8,6 +8,8 @@ export type HelpSectionId =
   | "routeCityTraffic"
   | "routeBridges"
   | "routeTunnels"
+  | "routeLargeRoundabouts"
+  | "routeMultilane"
   | "accidents"
   | "traffic"
   | "disturbances"
@@ -76,6 +78,24 @@ const routeHelpSections: HelpSection[] = [
     body: [
       "Vi letar efter rutter med färre tunnlar eller mindre tid i tunnel när det går att göra utan en orimlig omväg.",
       "Om tunnlar behövs för att resan ska fungera hjälper jämförelsen dig se vilket alternativ som innebär minst tunnelkörning.",
+    ],
+    legend: [],
+  },
+  {
+    id: "routeLargeRoundabouts",
+    title: "Stora rondeller",
+    body: [
+      "Här väger ruttplaneraren ner rondeller där NVDB-data visar flera körfält.",
+      "Filtret är till för att minska rondeller som ofta kräver mer uppmärksamhet, särskilt där flera flöden möts samtidigt.",
+    ],
+    legend: [],
+  },
+  {
+    id: "routeMultilane",
+    title: "Flerfiligt",
+    body: [
+      "Vi försöker minska körning på segment där samma färdriktning har flera körfält.",
+      "Det kan ge rutter med färre filbyten och mindre intensiv körning när vägnätet erbjuder ett rimligt alternativ.",
     ],
     legend: [],
   },
