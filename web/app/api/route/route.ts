@@ -1,5 +1,13 @@
 import type { RouteLine } from "@/lib/routeTypes";
-import { jsonResponse } from "../_utils";
+import {
+  clientIpFromRequest,
+  jsonResponse,
+  requestIdFromRequest,
+} from "../_utils";
+import {
+  isRouteConcurrencyLimitError,
+  routeConcurrencyLimiter,
+} from "./_routing/concurrency";
 import {
   isCoordinate,
   noAvoids,
@@ -27,23 +35,25 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  const requestId = requestIdFromRequest(req);
+  const clientIp = clientIpFromRequest(req);
   let body: RouteRequest;
   try {
     body = (await req.json()) as RouteRequest;
   } catch {
-    return jsonResponse({ error: "invalid JSON body" }, { status: 400 });
+    return jsonResponse({ error: "invalid JSON body" }, { status: 400, requestId });
   }
 
   if (!Array.isArray(body.coordinates)) {
-    return jsonResponse({ error: "coordinates must be an array" }, { status: 400 });
+    return jsonResponse({ error: "coordinates must be an array" }, { status: 400, requestId });
   }
 
   const coordinates = body.coordinates;
   if (coordinates.length < 2 || coordinates.length > 10) {
-    return jsonResponse({ error: "route requires 2-10 coordinates" }, { status: 400 });
+    return jsonResponse({ error: "route requires 2-10 coordinates" }, { status: 400, requestId });
   }
   if (!coordinates.every(isCoordinate)) {
-    return jsonResponse({ error: "coordinates outside Sweden bounds" }, { status: 400 });
+    return jsonResponse({ error: "coordinates outside Sweden bounds" }, { status: 400, requestId });
   }
 
   const alternatives =
@@ -64,58 +74,60 @@ export async function POST(req: Request) {
     maxExtraMinutes,
     preview,
   });
+  const logContext = { ...logBase, requestId };
 
   try {
     const requestContext = createRouteRequestContext();
     const timeoutMs = routeRequestTimeoutMs(preview, alternatives, avoid);
-    const result = await withRouteDeadline((async () => {
-      const providerStartedAt = Date.now();
-      const routeResult = preview
-        ? await fetchProviderRoutes(coordinates, 0, noAvoids, null, requestContext)
-        : alternatives === 0
+    const result = await routeConcurrencyLimiter.run(clientIp, () =>
+      withRouteDeadline((async () => {
+        const providerStartedAt = Date.now();
+        const routeResult = preview
           ? await fetchProviderRoutes(coordinates, 0, noAvoids, null, requestContext)
-          : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes, requestContext);
-      const providerMs = Date.now() - providerStartedAt;
-      const providerRoutes = routeResult.routes;
-      const scoringStartedAt = Date.now();
-      const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid, requestContext);
-      const scoringMs = Date.now() - scoringStartedAt;
-      const routes: RouteLine[] = providerRoutes.map((route, index) => ({
-        id: `route-${index + 1}`,
-        source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
-        distanceMeters: route.distance,
-        durationSeconds: route.duration,
-        geometry: route.geometry,
-        safetyScore: null,
-        avoidScores: scores[index]?.avoidScores ?? {
-          highSpeed: null,
-          trafficIntensity: null,
-          cityTraffic: null,
-          bridges: null,
-          tunnels: null,
-        },
-        exposure: scores[index]?.exposure ?? {
-          highSpeedMeters: null,
-          trafficIntensityMeters: null,
-          cityTrafficMeters: null,
-          disturbances: null,
-          liveAccidents: null,
-          bridgeMeters: null,
-          tunnelMeters: null,
-        },
-        annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
-      }));
+          : alternatives === 0
+            ? await fetchProviderRoutes(coordinates, 0, noAvoids, null, requestContext)
+            : await fetchProviderRoutes(coordinates, alternatives, avoid, maxExtraMinutes, requestContext);
+        const providerMs = Date.now() - providerStartedAt;
+        const providerRoutes = routeResult.routes;
+        const scoringStartedAt = Date.now();
+        const scores = preview ? [] : await scoreRouteAlternatives(providerRoutes, avoid, requestContext);
+        const scoringMs = Date.now() - scoringStartedAt;
+        const routes: RouteLine[] = providerRoutes.map((route, index) => ({
+          id: `route-${index + 1}`,
+          source: preview ? "preview" : route.source ?? `candidate-${index + 1}`,
+          distanceMeters: route.distance,
+          durationSeconds: route.duration,
+          geometry: route.geometry,
+          safetyScore: null,
+          avoidScores: scores[index]?.avoidScores ?? {
+            highSpeed: null,
+            trafficIntensity: null,
+            cityTraffic: null,
+            bridges: null,
+            tunnels: null,
+          },
+          exposure: scores[index]?.exposure ?? {
+            highSpeedMeters: null,
+            trafficIntensityMeters: null,
+            cityTrafficMeters: null,
+            disturbances: null,
+            liveAccidents: null,
+            bridgeMeters: null,
+            tunnelMeters: null,
+          },
+          annotations: scores[index]?.annotations ?? emptyRouteAnnotations(),
+        }));
 
-      return {
-        response: { routes, avoid, maxExtraMinutes, provider: routeResult.provider },
-        providerMs,
-        scoringMs,
-        telemetry: routeResult.telemetry,
-      };
-    })(), timeoutMs);
+        return {
+          response: { routes, avoid, maxExtraMinutes, provider: routeResult.provider },
+          providerMs,
+          scoringMs,
+          telemetry: routeResult.telemetry,
+        };
+      })(), timeoutMs));
 
     console.info("route observability", {
-      ...logBase,
+      ...logContext,
       status: "ok",
       provider: result.response.provider,
       totalMs: Date.now() - startedAt,
@@ -126,18 +138,38 @@ export async function POST(req: Request) {
       ...result.telemetry,
     });
 
-    return jsonResponse(result.response);
+    return jsonResponse(result.response, { requestId });
   } catch (err) {
-    console.error("routing failed", err);
+    if (isRouteConcurrencyLimitError(err)) {
+      console.warn("route observability", {
+        ...logContext,
+        status: "concurrency_limited",
+        totalMs: Date.now() - startedAt,
+        ...err.snapshot,
+      });
+      return jsonResponse(
+        { error: "too many active route requests" },
+        {
+          status: 429,
+          requestId,
+          headers: {
+            "Retry-After": String(err.retryAfterSeconds),
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    console.error("routing failed", { requestId, error: err });
     console.warn("route observability", {
-      ...logBase,
+      ...logContext,
       status: isRouteTimeoutError(err) ? "timeout" : "error",
       totalMs: Date.now() - startedAt,
       timeout: isRouteTimeoutError(err),
     });
     if (isRouteTimeoutError(err)) {
-      return jsonResponse({ error: routeTimeoutMessage() }, { status: 504 });
+      return jsonResponse({ error: routeTimeoutMessage() }, { status: 504, requestId });
     }
-    return jsonResponse({ error: "routing failed" }, { status: 502 });
+    return jsonResponse({ error: "routing failed" }, { status: 502, requestId });
   }
 }

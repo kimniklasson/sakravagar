@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  CLIENT_IP_HEADER,
+  REQUEST_ID_HEADER,
+} from "./app/api/_utils";
 
 type RateLimitRule = {
   id: string;
@@ -55,6 +59,29 @@ function clientIp(req: NextRequest): string {
   );
 }
 
+function createRequestId(): string {
+  return crypto.randomUUID();
+}
+
+function getRequestId(req: NextRequest): string {
+  const existing = req.headers.get(REQUEST_ID_HEADER);
+  return existing && /^[A-Za-z0-9._:-]{8,128}$/.test(existing)
+    ? existing
+    : createRequestId();
+}
+
+function nextWithRequestContext(req: NextRequest, requestId: string, ip: string) {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set(REQUEST_ID_HEADER, requestId);
+  requestHeaders.set(CLIENT_IP_HEADER, ip);
+
+  const response = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+  response.headers.set(REQUEST_ID_HEADER, requestId);
+  return response;
+}
+
 function pruneExpiredBuckets(now: number) {
   pruneCounter += 1;
   if (pruneCounter % 100 !== 0 && buckets.size <= MAX_BUCKETS) return;
@@ -78,11 +105,12 @@ function hitBucket(key: string, rule: RateLimitRule, now: number): Bucket {
 
 export function middleware(req: NextRequest) {
   const methodRules = endpointRules[req.nextUrl.pathname]?.[req.method];
-  if (!methodRules?.length) return NextResponse.next();
+  const requestId = getRequestId(req);
+  const ip = clientIp(req);
+  if (!methodRules?.length) return nextWithRequestContext(req, requestId, ip);
 
   const now = Date.now();
   pruneExpiredBuckets(now);
-  const ip = clientIp(req);
 
   for (const rule of methodRules) {
     const bucket = hitBucket(`${rule.id}:${ip}`, rule, now);
@@ -93,6 +121,7 @@ export function middleware(req: NextRequest) {
         {
           status: 429,
           headers: {
+            [REQUEST_ID_HEADER]: requestId,
             "Retry-After": String(retryAfterSeconds),
             "Cache-Control": "no-store",
           },
@@ -101,7 +130,7 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  return nextWithRequestContext(req, requestId, ip);
 }
 
 export const config = {

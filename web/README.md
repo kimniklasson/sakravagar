@@ -76,6 +76,8 @@ web/
 
 Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit.
 
+Alla rate-limitade API-svar inkluderar `x-request-id`. `/api/route` använder dessutom en per-instans concurrency cap för att skydda GraphHopper: `ROUTE_MAX_CONCURRENT_TOTAL`, `ROUTE_MAX_CONCURRENT_PER_IP` och `ROUTE_CONCURRENCY_RETRY_AFTER_SECONDS` kan sättas i Vercel om defaultvärdena behöver justeras. Detta ersätter inte distribuerad rate limiting över flera Vercel-instanser.
+
 ## Routeplanner
 
 `Undvik om möjligt`-filter:

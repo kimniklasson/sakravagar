@@ -21,10 +21,17 @@ type BboxOptions = {
   bounds?: BboxBounds;
 };
 
+type JsonResponseInit = ResponseInit & {
+  cacheSeconds?: number;
+  requestId?: string;
+};
+
 const MIN_LNG = -180;
 const MAX_LNG = 180;
 const MIN_LAT = -90;
 const MAX_LAT = 90;
+export const REQUEST_ID_HEADER = "x-request-id";
+export const CLIENT_IP_HEADER = "x-client-ip";
 
 export const SWEDEN_DATA_BOUNDS: BboxBounds = {
   minLng: 9,
@@ -35,9 +42,10 @@ export const SWEDEN_DATA_BOUNDS: BboxBounds = {
 
 export function jsonResponse<T>(
   body: T,
-  init: ResponseInit & { cacheSeconds?: number } = {},
+  init: JsonResponseInit = {},
 ) {
   const headers = new Headers(init.headers);
+  if (init.requestId) headers.set(REQUEST_ID_HEADER, init.requestId);
   if (init.cacheSeconds && init.cacheSeconds > 0) {
     headers.set(
       "Cache-Control",
@@ -47,13 +55,45 @@ export function jsonResponse<T>(
   return NextResponse.json(body, { ...init, headers });
 }
 
-export function serverErrorResponse(label: string, error: unknown) {
-  console.error(label, error);
-  return jsonResponse({ error: "server error" }, { status: 500 });
+export function serverErrorResponse(
+  label: string,
+  error: unknown,
+  opts: { requestId?: string } = {},
+) {
+  console.error("api error", { label, requestId: opts.requestId, error });
+  return jsonResponse({ error: "server error" }, { status: 500, requestId: opts.requestId });
 }
 
 export function logApiObservation(route: string, fields: Record<string, unknown>): void {
   console.info("api observability", { route, ...fields });
+}
+
+function isValidRequestId(value: string | null): value is string {
+  return value !== null && /^[A-Za-z0-9._:-]{8,128}$/.test(value);
+}
+
+function newRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+export function requestIdFromRequest(req: Request): string {
+  const existing = req.headers.get(REQUEST_ID_HEADER);
+  return isValidRequestId(existing) ? existing : newRequestId();
+}
+
+export function clientIpFromRequest(req: Request): string {
+  const forwardedByMiddleware = req.headers.get(CLIENT_IP_HEADER)?.trim();
+  if (forwardedByMiddleware) return forwardedByMiddleware;
+  const forwardedFor = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return (
+    forwardedFor ||
+    req.headers.get("x-real-ip") ||
+    req.headers.get("cf-connecting-ip") ||
+    "unknown"
+  );
 }
 
 export function isMissingPostgrestFunctionError(error: unknown, functionName: string): boolean {

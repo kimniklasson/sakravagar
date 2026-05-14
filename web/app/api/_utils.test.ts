@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseBboxParam, SWEDEN_DATA_BOUNDS } from "./_utils";
+import {
+  CLIENT_IP_HEADER,
+  REQUEST_ID_HEADER,
+  clientIpFromRequest,
+  jsonResponse,
+  parseBboxParam,
+  requestIdFromRequest,
+  SWEDEN_DATA_BOUNDS,
+} from "./_utils";
 
 describe("parseBboxParam", () => {
   const opts = { required: true, maxArea: 1, bounds: SWEDEN_DATA_BOUNDS };
@@ -42,5 +50,34 @@ describe("parseBboxParam", () => {
       },
       error: null,
     });
+  });
+});
+
+describe("request context helpers", () => {
+  it("reads valid request ids and ignores malformed ones", () => {
+    const valid = new Request("https://example.test", {
+      headers: { [REQUEST_ID_HEADER]: "route-req_123456" },
+    });
+    expect(requestIdFromRequest(valid)).toBe("route-req_123456");
+
+    const malformed = new Request("https://example.test", {
+      headers: { [REQUEST_ID_HEADER]: "no" },
+    });
+    expect(requestIdFromRequest(malformed)).not.toBe("no");
+  });
+
+  it("reads forwarded client ip from middleware first", () => {
+    const req = new Request("https://example.test", {
+      headers: {
+        [CLIENT_IP_HEADER]: "203.0.113.10",
+        "x-forwarded-for": "198.51.100.20",
+      },
+    });
+    expect(clientIpFromRequest(req)).toBe("203.0.113.10");
+  });
+
+  it("adds request id to json responses", () => {
+    const res = jsonResponse({ ok: true }, { requestId: "req-12345678" });
+    expect(res.headers.get(REQUEST_ID_HEADER)).toBe("req-12345678");
   });
 });

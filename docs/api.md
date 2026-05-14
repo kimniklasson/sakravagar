@@ -9,6 +9,7 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 - SQL/RPC ska ha limit eller annan spärr. Klientens zoomlogik räcker inte som skydd.
 - Publika svar ska inte exponera råa upstream-payloads.
 - Supabase-fel loggas serverside och returneras som generiskt `server error`.
+- Rate-limitade endpoints får `x-request-id` i svaren. Skicka med värdet vid felsökning så det går att hitta motsvarande serverlogg.
 
 ## Kartdata
 
@@ -80,8 +81,9 @@ Performance:
 - snabbaste/ofiltrerad routing timeoutar efter 20 s.
 - filtrerade alternativ timeoutar efter 55 s.
 - timeout returnerar `504` med användarcopy.
+- per-instans concurrency cap skyddar GraphHopper från för många samtidiga `/api/route`-anrop. Default är max 8 aktiva totalt och max 3 per klient-IP. Överskridning returnerar `429`, `Retry-After` och `x-request-id`.
 
-Observability-loggen innehåller filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Den ska inte logga koordinater, adresser eller geometrier.
+Observability-loggen innehåller `requestId`, filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Den ska inte logga koordinater, adresser eller geometrier.
 
 ## Route shares
 
