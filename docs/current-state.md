@@ -44,8 +44,8 @@ Viktiga beteenden:
 - Ruttlinjen är inte dragbar i MVP-flödet; via-punkter hanteras via stoppfältet.
 - Utan aktiva filter visas snabbaste rutten. Med aktiva filter visas relevanta kandidater och listan sorteras efter filtermatchning, därefter tid och distans.
 - Frontend har kort session-cache för route-svar: 2 min för statiska filter och 5 min när `Trafikintensiva vägar` är aktivt.
-- Delning skapar public route snapshots via `/api/route-shares` med 30 dagars TTL.
-- Tumme upp/ner sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal. Feedback-snapshots sparas i 90 dagar.
+- Delning skapar public route snapshots via `/api/route-shares` med 30 dagars TTL. Payloaden valideras via `web/lib/routeShareSchema.ts` både vid API-write och SSR-prefetch av `/r/[slug]`.
+- Tumme upp/ner sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal. Feedback-snapshots använder samma route-share-schema och sparas i 90 dagar.
 
 ## Data och API
 

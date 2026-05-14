@@ -1,28 +1,19 @@
 import type { RouteLine } from "@/lib/routeTypes";
+import type {
+  RouteProvider,
+  RouteSharePayload,
+  RouteStop,
+} from "@/lib/routeShareSchema";
+export type { RouteFeedbackVote, RouteSharePayload } from "@/lib/routeShareSchema";
 import {
   dedupeRouteCoordinates,
   type RouteAvoidState,
-  type RouteProvider,
-  type RouteStop,
 } from "./routeModel";
 
 const SHARED_ROUTE_MAX_COORDINATES = 360;
 const SHARED_ROUTE_MAX_ANNOTATION_COORDINATES = 80;
 const SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS = 80;
 const SHARED_ROUTE_MAX_ANNOTATION_POINTS = 160;
-
-export type RouteFeedbackVote = "up" | "down";
-
-export type RouteSharePayload = {
-  version: 1;
-  createdAt: string;
-  stops: RouteStop[];
-  routeAvoids: RouteAvoidState;
-  selectedRoute: RouteLine;
-  provider: RouteProvider | null;
-  selectedRouteRank: number;
-  presentedRouteCount: number;
-};
 
 export function routeStateKey(stops: RouteStop[]): string {
   return stops

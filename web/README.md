@@ -70,8 +70,8 @@ web/
 - `/api/large-roads` — höghastighetssegment för 80+-badges.
 - `/api/geocode` — Nominatim-proxy för svensk search/reverse.
 - `/api/route` — GraphHopper/OSRM-routing via `POST`.
-- `/api/route-shares` — public route snapshots för `/r/[slug]`.
-- `/api/route-feedback` — tumme upp/ner som kalibreringsunderlag.
+- `/api/route-shares` — public route snapshots för `/r/[slug]`, validerade via `web/lib/routeShareSchema.ts`.
+- `/api/route-feedback` — tumme upp/ner som kalibreringsunderlag, med samma snapshot-schema som delningslänkar.
 - `/api/segment` — vilande popupdetaljer för vägsegment; ÅDT-lagret är inte klickbart i nuvarande UI.
 
 Alla tunga bbox-rutter ska ha API-side area guard, Sverige-bounds guard och SQL-side limit.

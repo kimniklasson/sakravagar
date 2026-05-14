@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { parseRouteSharePayload, parseSlug } from "@/lib/routeShareSchema";
 import { jsonResponse, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
@@ -23,53 +24,6 @@ type PublicSnapshotRpcRow = {
   expires_at: string;
   expired: boolean;
 };
-
-function payloadByteLength(payload: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(payload)).length;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isCoordinate(value: unknown): value is [number, number] {
-  return (
-    Array.isArray(value) &&
-    value.length === 2 &&
-    typeof value[0] === "number" &&
-    typeof value[1] === "number" &&
-    Number.isFinite(value[0]) &&
-    Number.isFinite(value[1])
-  );
-}
-
-function isRouteLineLike(value: unknown): boolean {
-  if (!isObject(value)) return false;
-  const geometry = value.geometry;
-  if (!isObject(geometry) || geometry.type !== "LineString") return false;
-  const coordinates = geometry.coordinates;
-  return (
-    typeof value.id === "string" &&
-    typeof value.source === "string" &&
-    typeof value.distanceMeters === "number" &&
-    typeof value.durationSeconds === "number" &&
-    Array.isArray(coordinates) &&
-    coordinates.length >= 2 &&
-    coordinates.every(isCoordinate)
-  );
-}
-
-function validateSnapshotPayload(payload: unknown): string | null {
-  if (!isObject(payload)) return "payload must be an object";
-  if (payload.version !== 1) return "unsupported payload version";
-  if (!Array.isArray(payload.stops) || payload.stops.length < 2 || payload.stops.length > 10) {
-    return "payload stops invalid";
-  }
-  if (!isObject(payload.routeAvoids)) return "payload routeAvoids invalid";
-  if (!isRouteLineLike(payload.selectedRoute)) return "payload selectedRoute invalid";
-  if (payloadByteLength(payload) > SNAPSHOT_MAX_BYTES) return "payload too large";
-  return null;
-}
 
 function makeSlug(): string {
   return randomBytes(12).toString("base64url");
@@ -101,8 +55,8 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const slug = searchParams.get("slug")?.trim() ?? "";
-  if (!/^[A-Za-z0-9_-]{10,64}$/.test(slug)) {
+  const slug = parseSlug(searchParams.get("slug"));
+  if (!slug) {
     return jsonResponse({ error: "invalid slug" }, { status: 400 });
   }
 
@@ -125,11 +79,11 @@ export async function POST(req: Request) {
   }
 
   const body = (await req.json().catch(() => null)) as { payload?: unknown } | null;
-  const payload = body?.payload;
-  const payloadError = validateSnapshotPayload(payload);
-  if (payloadError) {
-    return jsonResponse({ error: payloadError }, { status: 400 });
+  const parsedPayload = parseRouteSharePayload(body?.payload, { maxBytes: SNAPSHOT_MAX_BYTES });
+  if (!parsedPayload.ok) {
+    return jsonResponse({ error: parsedPayload.error }, { status: 400 });
   }
+  const payload = parsedPayload.value;
 
   const client = createClient(url, serviceKey, { auth: { persistSession: false } });
   const expiresAt = new Date(Date.now() + PUBLIC_SNAPSHOT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();

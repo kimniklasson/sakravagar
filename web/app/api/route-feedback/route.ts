@@ -1,4 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  parseFeedbackVote,
+  parseJsonObject,
+  parseRouteSharePayload,
+  parseUuid,
+} from "@/lib/routeShareSchema";
 import { jsonResponse, serverErrorResponse } from "../_utils";
 
 export const runtime = "nodejs";
@@ -9,41 +15,11 @@ const serviceKey = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERV
 const SNAPSHOT_MAX_BYTES = 300_000;
 const FEEDBACK_SNAPSHOT_TTL_DAYS = 90;
 
-type FeedbackVote = "up" | "down";
-
 type SnapshotRpcRow = {
   id: string;
   slug: string | null;
   expires_at: string;
 };
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function payloadByteLength(payload: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(payload)).length;
-}
-
-function normalizeVote(value: unknown): FeedbackVote | null {
-  return value === "up" || value === "down" ? value : null;
-}
-
-function normalizeUuid(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
-    ? value
-    : null;
-}
-
-function validateSnapshotPayload(payload: unknown): string | null {
-  if (!isObject(payload)) return "snapshot must be an object";
-  if (payload.version !== 1) return "unsupported snapshot version";
-  if (!isObject(payload.selectedRoute)) return "snapshot selectedRoute invalid";
-  if (!Array.isArray(payload.stops) || payload.stops.length < 2) return "snapshot stops invalid";
-  if (payloadByteLength(payload) > SNAPSHOT_MAX_BYTES) return "snapshot too large";
-  return null;
-}
 
 export async function POST(req: Request) {
   if (!url || !serviceKey) {
@@ -57,15 +33,18 @@ export async function POST(req: Request) {
     searchMeta?: unknown;
   } | null;
 
-  const vote = normalizeVote(body?.vote);
+  const vote = parseFeedbackVote(body?.vote);
   if (!vote) return jsonResponse({ error: "invalid vote" }, { status: 400 });
 
-  const snapshot = body?.snapshot;
-  const snapshotError = validateSnapshotPayload(snapshot);
-  if (snapshotError) return jsonResponse({ error: snapshotError }, { status: 400 });
+  const parsedSnapshot = parseRouteSharePayload(body?.snapshot, {
+    maxBytes: SNAPSHOT_MAX_BYTES,
+    label: "snapshot",
+  });
+  if (!parsedSnapshot.ok) return jsonResponse({ error: parsedSnapshot.error }, { status: 400 });
 
-  const routeMeta = isObject(body?.routeMeta) ? body.routeMeta : {};
-  const searchMeta = isObject(body?.searchMeta) ? body.searchMeta : {};
+  const snapshot = parsedSnapshot.value;
+  const routeMeta = parseJsonObject(body?.routeMeta) ?? {};
+  const searchMeta = parseJsonObject(body?.searchMeta) ?? {};
   const client = createClient(url, serviceKey, { auth: { persistSession: false } });
   const expiresAt = new Date(Date.now() + FEEDBACK_SNAPSHOT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
@@ -104,7 +83,7 @@ export async function DELETE(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const id = normalizeUuid(searchParams.get("id"));
+  const id = parseUuid(searchParams.get("id"));
   if (!id) return jsonResponse({ error: "invalid feedback id" }, { status: 400 });
 
   const client = createClient(url, serviceKey, { auth: { persistSession: false } });

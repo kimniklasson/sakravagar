@@ -10,6 +10,7 @@ Kort kontrakt för interna Next.js API-rutter i `web/app/api`. Alla svar är JSO
 - Publika svar ska inte exponera råa upstream-payloads.
 - Supabase-fel loggas serverside och returneras som generiskt `server error`.
 - Rate-limitade endpoints får `x-request-id` i svaren. Skicka med värdet vid felsökning så det går att hitta motsvarande serverlogg.
+- Delade rutt-snapshots valideras server-side via `web/lib/routeShareSchema.ts` innan de sparas eller används som SSR-prefetch-data.
 
 ## Kartdata
 
@@ -89,7 +90,7 @@ Observability-loggen innehåller `requestId`, filter, antal koordinatstopp, alte
 
 `POST /api/route-shares`
 
-Skapar en public route snapshot och returnerar `slug`, `url` och `expiresAt`. Payloaden valideras och får vara max 300 kB. Delningslänkar pekar på `/r/[slug]` och har 30 dagars TTL.
+Skapar en public route snapshot och returnerar `slug`, `url` och `expiresAt`. Payloaden valideras mot gemensamt route-share-schema och får vara max 300 kB. Delningslänkar pekar på `/r/[slug]` och har 30 dagars TTL.
 
 `GET /api/route-shares?slug=...`
 
@@ -103,7 +104,7 @@ Direkt tabellåtkomst är inte publik; API:t går via Supabase RPC.
 
 `POST /api/route-feedback`
 
-Skapar en feedbackröst (`up`/`down`) och sparar en privat route snapshot med metadata. Returnerar feedback-id och snapshot-expiry. Feedback-snapshots har 90 dagars TTL.
+Skapar en feedbackröst (`up`/`down`) och sparar en privat route snapshot med metadata. Snapshoten valideras med samma schema som publika delningar, men med 90 dagars TTL. Returnerar feedback-id och snapshot-expiry.
 
 `DELETE /api/route-feedback?id=...`
 
