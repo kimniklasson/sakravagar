@@ -76,7 +76,7 @@ Detaljerade endpoint-kontrakt finns i `docs/api.md`.
 
 Supabase `pg_cron` kör fortsatt Trafikverket-scrape via Edge Function. Riskrelaterade cronjobb är däremot pausade i produktion sedan 2026-05-13 efter Disk IO-budgetvarningar på Nano: `resnap-orphan-events`, `snap-event-segments` och `refresh-risk-mv`. Supabase-metriken var lugn under minst tre timmar efter pausen, vilket pekar på att dessa jobb var den praktiska IOPS-drivaren. De ska inte aktiveras igen utan nytt beslut om riskdelen och IO-budget.
 
-Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. Lokal routing utan GraphHopper-env faller tillbaka till OSRM och matchar inte production-routing. `/api/route` har ett per-instans concurrency cap för GraphHopper-skydd: default `ROUTE_MAX_CONCURRENT_TOTAL=8`, `ROUTE_MAX_CONCURRENT_PER_IP=3` och `ROUTE_CONCURRENCY_RETRY_AFTER_SECONDS=10` om env saknas.
+Vercel production behöver minst `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `GRAPHHOPPER_BASE_URL` och `GRAPHHOPPER_TOKEN`. Lokal routing utan GraphHopper-env faller tillbaka till OSRM och matchar inte production-routing. Cloudflare Free har en aktiv rate limiting-regel `Limit route API` för exakt `/api/route`: 10 requests / 10 seconds per IP, action `Block`, duration 10 seconds. `/api/route` har dessutom ett per-instans concurrency cap för GraphHopper-skydd: default `ROUTE_MAX_CONCURRENT_TOTAL=8`, `ROUTE_MAX_CONCURRENT_PER_IP=3` och `ROUTE_CONCURRENCY_RETRY_AFTER_SECONDS=10` om env saknas.
 
 Canonical domains:
 
@@ -101,7 +101,7 @@ Canonical domains:
 
 - Supabase PostGIS ligger i schemat `extensions`; `security definer` med explicit `search_path` behöver inkludera `extensions`.
 - Supabase Data API-exponering ska vara explicit i nya migrations. Alla nya `public`-tabeller, vyer, materialized views, funktioner och sekvenser behöver minsta nödvändiga `grant` i samma migration som objektet/RLS/policies; anta inte att default privileges gör objektet nåbart för `anon`, `authenticated` eller `service_role`.
-- Middleware och `/api/route` skickar `x-request-id`; route-observability loggar samma id. Middleware-rate-limit och route-concurrency är process-/instanslokala skydd, inte en distribuerad global spärr. Vid större publik trafik behövs Upstash/Vercel KV eller Cloudflare-rate-limit för verkligt global kvotering.
+- Middleware och `/api/route` skickar `x-request-id`; route-observability loggar samma id. Middleware-rate-limit och route-concurrency är process-/instanslokala skydd. Cloudflare-regeln för `/api/route` är yttre skydd på Free-planen, men räknare kan fortfarande vara Cloudflare-datacenterlokala och är inte exakt global concurrency-kontroll. Vid större publik trafik eller app-specifika kvoter behövs Upstash/Vercel KV eller annan delad state.
 - Lastkajen bulkimport ska använda Supabase session pooler på port `5432`, inte transaction pooler `6543`.
 - `Höga hastigheter` kräver att `scripts/import-large-roads.sh` körts efter 80+-ändringen; migrationen ensam skapar inte raderna.
 - GraphHopper custom model kräver `ch.disable: true`; snabbaste basrutten kan använda CH.

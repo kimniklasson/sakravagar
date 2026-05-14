@@ -82,6 +82,7 @@ Performance:
 - snabbaste/ofiltrerad routing timeoutar efter 20 s.
 - filtrerade alternativ timeoutar efter 55 s.
 - timeout returnerar `504` med användarcopy.
+- Cloudflare Free rate-limit skyddar exakt `/api/route` före Vercel: 10 requests / 10 seconds per IP, action `Block`, duration 10 seconds.
 - per-instans concurrency cap skyddar GraphHopper från för många samtidiga `/api/route`-anrop. Default är max 8 aktiva totalt och max 3 per klient-IP. Överskridning returnerar `429`, `Retry-After` och `x-request-id`.
 
 Observability-loggen innehåller `requestId`, filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Den ska inte logga koordinater, adresser eller geometrier.

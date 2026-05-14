@@ -43,6 +43,21 @@ GRAPHHOPPER_TOKEN=<värdet från serverns /root/routing-token.txt>
 
 Utan dessa variabler faller `web/app/api/route/route.ts` tillbaka till OSRM. Det är bra som utvecklingsfallback, men lokala tester matchar då inte production-routing.
 
+## Cloudflare rate limit
+
+`sakravagar.se` använder Cloudflare Free-planens enda rate limiting-regel som yttre skydd för routing-API:t:
+
+- Namn: `Limit route API`.
+- Matchning: `URI Path equals /api/route`.
+- Characteristic: `IP`.
+- Gräns: `10 requests / 10 seconds`.
+- Action: `Block`.
+- Duration: `10 seconds`.
+
+Syftet är att stoppa loopar, refresh-spam och enkel abuse innan trafiken når Vercel och GraphHopper. Regeln ska vara snäv mot exakt `/api/route`; använd inte `/api/route*`, eftersom `/api/route-shares` och `/api/route-feedback` inte ska få samma spärr.
+
+Detta ersätter inte appens egna skydd. `middleware.ts` och `/api/route` har fortfarande processlokala spärrar och `x-request-id` för felsökning. Cloudflare-regeln är första linjen vid inkommande trafik; appens concurrency cap är andra linjen nära GraphHopper.
+
 ## Snabb hälsokoll
 
 Utan token ska endpointen inte avslöja GraphHopper:
