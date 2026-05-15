@@ -425,6 +425,11 @@
   outline: none;
 }
 
+.routeAvoidPill:not(.routeAvoidPillOn) {
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
 .routeAvoidPillOn {
   background: #555555;
   color: var(--color-white);
@@ -504,5 +509,43 @@
   .routeInputRow {
     padding-top: 12px;
     padding-bottom: 12px;
+  }
+
+  .routeAvoidSection {
+    margin-top: 12px;
+  }
+
+  .routeAvoidHeading {
+    margin-bottom: 6px;
+  }
+
+  .routeAvoidList {
+    width: calc(100% + 48px);
+    margin-left: -24px;
+    margin-right: -24px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 0 24px 2px;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+
+  .routeAvoidList::-webkit-scrollbar {
+    display: none;
+  }
+
+  .routeAvoidPill {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .routeAvoidTooltip {
+    display: none;
   }
 }

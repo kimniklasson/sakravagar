@@ -10,11 +10,13 @@ import {
   routeCityTrafficDetailExposureMeters,
   routeEnvironmentDetailExposureMeters,
   routeHighSpeedDetailExposureMeters,
+  routeMultilaneDetailExposureMeters,
 } from "./routeDetails";
 import type { OsrmRoute } from "./types";
 
 const ROUTE_SEMANTIC_DUPLICATE_HIGH_SPEED_DIFF_METERS = 700;
 const ROUTE_SEMANTIC_DUPLICATE_ENVIRONMENT_DIFF_METERS = 120;
+const ROUTE_SEMANTIC_DUPLICATE_MULTILANE_DIFF_METERS = 700;
 const ROUTE_PRESENTATION_DUPLICATE_DISTANCE_METERS = 2_500;
 const ROUTE_PRESENTATION_DUPLICATE_SAMPLE_DISTANCE_METERS = 180;
 const ROUTE_PRESENTATION_DUPLICATE_SHARE = 0.9;
@@ -85,6 +87,11 @@ function routesHaveMeaningfullyDifferentAvoidDetails(a: OsrmRoute, b: OsrmRoute)
       routeCityTrafficDetailExposureMeters(a),
       routeCityTrafficDetailExposureMeters(b),
       ROUTE_SEMANTIC_DUPLICATE_ENVIRONMENT_DIFF_METERS,
+    ) ||
+    exposureDiffAboveThreshold(
+      routeMultilaneDetailExposureMeters(a),
+      routeMultilaneDetailExposureMeters(b),
+      ROUTE_SEMANTIC_DUPLICATE_MULTILANE_DIFF_METERS,
     )
   );
 }

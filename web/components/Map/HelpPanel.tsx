@@ -180,7 +180,7 @@ export function HelpPanel({
       className={`${styles.helpPanel} ${open ? styles.helpPanelOpen : ""}`}
       aria-hidden={!open}
       aria-label="Data och kartlager"
-      inert={!open}
+      inert={open ? undefined : true}
     >
       <button
         type="button"

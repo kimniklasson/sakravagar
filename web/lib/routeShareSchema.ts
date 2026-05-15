@@ -194,6 +194,18 @@ function parseNullableNumber(value: unknown): number | null | undefined {
   return isFiniteNumber(value) ? value : undefined;
 }
 
+function isOptionalString(value: unknown, maxLength: number): boolean {
+  return value === undefined || value === null || (typeof value === "string" && value.length <= maxLength);
+}
+
+function optionalStringValue(value: unknown): string | null | undefined {
+  return value === undefined ? undefined : value as string | null;
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
+}
+
 function parseRouteMetricRecord(value: unknown): RouteLine["avoidScores"] | null {
   if (!isPlainObject(value)) return null;
   const entries = ROUTE_AVOID_KEYS.map((key) => [
@@ -255,10 +267,41 @@ function parseRouteAnnotations(value: unknown): RouteLine["annotations"] | null 
       ) {
         return null;
       }
+      if (
+        !isOptionalString(point.id, 160) ||
+        !isOptionalString(point.icon_id, 160) ||
+        !isOptionalString(point.message_type, 160) ||
+        !isOptionalString(point.road_number, 80) ||
+        !isOptionalString(point.message, 2_000) ||
+        !isOptionalString(point.severity, 160) ||
+        !isOptionalString(point.first_seen, 80) ||
+        !isOptionalString(point.last_seen, 80) ||
+        !isOptionalBoolean(point.is_live)
+      ) {
+        return null;
+      }
+      const id = optionalStringValue(point.id);
+      const iconId = optionalStringValue(point.icon_id);
+      const messageType = optionalStringValue(point.message_type);
+      const roadNumber = optionalStringValue(point.road_number);
+      const message = optionalStringValue(point.message);
+      const severity = optionalStringValue(point.severity);
+      const firstSeen = optionalStringValue(point.first_seen);
+      const lastSeen = optionalStringValue(point.last_seen);
+      const isLive = point.is_live as boolean | undefined;
       return {
         kind: key,
         coordinates,
         ...(point.category ? { category: point.category as DisturbanceCategory } : {}),
+        ...(id !== undefined && id !== null ? { id } : {}),
+        ...(iconId !== undefined ? { icon_id: iconId } : {}),
+        ...(messageType !== undefined ? { message_type: messageType } : {}),
+        ...(roadNumber !== undefined ? { road_number: roadNumber } : {}),
+        ...(message !== undefined ? { message } : {}),
+        ...(severity !== undefined ? { severity } : {}),
+        ...(firstSeen !== undefined ? { first_seen: firstSeen } : {}),
+        ...(lastSeen !== undefined ? { last_seen: lastSeen } : {}),
+        ...(isLive !== undefined ? { is_live: isLive } : {}),
       };
     });
     return parsed.every(Boolean) ? [key, parsed] : null;

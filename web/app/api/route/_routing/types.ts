@@ -100,13 +100,25 @@ export type DisturbanceRow = {
   id: string;
   lng: number;
   lat: number;
+  icon_id?: string | null;
   message_type: string | null;
+  road_number?: string | null;
+  message?: string | null;
+  severity?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
 };
 
 export type EventRow = {
   id: string;
   lng: number;
   lat: number;
+  icon_id?: string | null;
+  road_number?: string | null;
+  message?: string | null;
+  severity?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
 };
 
 export type Bbox = {
@@ -135,6 +147,8 @@ export type RouteLanePenaltyRow = {
 export type RouteLanePenaltyRows = {
   largeRoundabouts: RouteLanePenaltyRow[];
   multilane: RouteLanePenaltyRow[];
+  largeRoundaboutsAvailable: boolean;
+  multilaneAvailable: boolean;
 };
 
 export type RouteRequestContext = {

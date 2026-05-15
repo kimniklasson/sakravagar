@@ -190,7 +190,11 @@ function buildHybridRoute(
 }
 
 export function buildHybridRoutes(routes: OsrmRoute[], activeOptions: RouteAvoidOption[]): OsrmRoute[] {
-  if (activeOptions.length < 2 && !activeOptions.includes("highSpeed")) return [];
+  if (
+    activeOptions.length < 2 &&
+    !activeOptions.includes("highSpeed") &&
+    !activeOptions.includes("multilane")
+  ) return [];
   const sourceRoutes = dedupeRoutes(routes)
     .slice(0, HYBRID_ROUTE_MAX_SOURCE_ROUTES);
   const hybrids: OsrmRoute[] = [];

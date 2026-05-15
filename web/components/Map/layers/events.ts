@@ -43,6 +43,7 @@ const SWEDEN_EVENTS_BBOX: Bbox = {
   north: 69.5,
 };
 const eventLayerCache = new WeakMap<MapLibreMap, EventsLayerCache>();
+const livePulseFrameByMap = new WeakMap<MapLibreMap, number>();
 
 function heatmapColorExpression(stops: HeatmapStop[]): ExpressionSpecification {
   const sorted = [...stops].sort((a, b) => a.density - b.density);
@@ -252,8 +253,6 @@ export async function addEventsLayer(
     },
   });
 
-  startLivePulse(map);
-
   return { liveCount };
 }
 
@@ -270,6 +269,8 @@ export function setEventsLayerVisible(map: MapLibreMap, visible: boolean): void 
       map.setLayoutProperty(id, "visibility", visibility);
     }
   }
+  if (visible) startLivePulse(map);
+  else stopLivePulse(map);
 }
 
 export async function fetchLiveEvents(): Promise<EventPoint[]> {
@@ -331,15 +332,27 @@ export async function focusLiveEvents(map: MapLibreMap): Promise<{ liveCount: nu
   return { liveCount: liveEvents.length };
 }
 
-// rAF-loop som pulserar halo-lagret. Klassiskt "radar-ping": radien expanderar
-// och opaciteten tonas ut, sen reset. Loopen avbryter sig själv när lagret
-// inte längre finns på kartan (efter map.remove()).
+// rAF-loop som pulserar halo-lagret. Den kör bara när live-lagret faktiskt är
+// synligt, så avstängda lager inte fortsätter sätta paint-properties på mobilen.
 function startLivePulse(map: MapLibreMap): void {
+  if (livePulseFrameByMap.has(map)) return;
   const start = performance.now();
   const PERIOD_MS = 1600;
   const easeInOut = (t: number) => 0.5 - Math.cos(Math.PI * t) / 2;
+
+  const schedule = () => {
+    livePulseFrameByMap.set(map, window.requestAnimationFrame(tick));
+  };
+
   const tick = () => {
-    if (!map.getLayer(LIVE_HALO_LAYER_ID)) return;
+    if (!map.getLayer(LIVE_HALO_LAYER_ID)) {
+      livePulseFrameByMap.delete(map);
+      return;
+    }
+    if (map.getLayoutProperty(LIVE_HALO_LAYER_ID, "visibility") === "none") {
+      livePulseFrameByMap.delete(map);
+      return;
+    }
     const phase = ((performance.now() - start) % PERIOD_MS) / PERIOD_MS;
     const rising = phase <= 0.5;
     const halfProgress = rising ? phase / 0.5 : (phase - 0.5) / 0.5;
@@ -349,7 +362,14 @@ function startLivePulse(map: MapLibreMap): void {
     const opacity = 0.3 * pulse;
     map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-radius", radius);
     map.setPaintProperty(LIVE_HALO_LAYER_ID, "circle-opacity", opacity);
-    requestAnimationFrame(tick);
+    schedule();
   };
-  requestAnimationFrame(tick);
+  schedule();
+}
+
+function stopLivePulse(map: MapLibreMap): void {
+  const frame = livePulseFrameByMap.get(map);
+  if (frame === undefined) return;
+  window.cancelAnimationFrame(frame);
+  livePulseFrameByMap.delete(map);
 }

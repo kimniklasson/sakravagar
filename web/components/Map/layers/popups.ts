@@ -1,5 +1,11 @@
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import type { SegmentDetail } from "@/app/api/segment/route";
+import {
+  ROUTE_ACCIDENT_HIT_LAYER_ID,
+  ROUTE_ACCIDENT_LAYER_ID,
+  ROUTE_DISTURBANCE_HIT_LAYER_ID,
+  ROUTE_DISTURBANCE_LAYER_ID,
+} from "./route";
 
 const RISK_LAYER_ID = "risk-lines";
 const RISK_HIT_LAYER_ID = "risk-lines-hit";
@@ -30,12 +36,23 @@ export function addPopupHandler(map: MapLibreMap): void {
   // signal för ett lager som främst ska läsas som blå trafikintensitet.
   // Risklagrets popupväg är kvar vilande tills riskfärgningen aktiveras igen.
   const segmentLayerIds = [RISK_HIT_LAYER_ID, RISK_LAYER_ID].filter((id) => map.getLayer(id));
-  const disturbanceLayerIds = [DISTURBANCE_LAYER_ID, DISTURBANCE_HIT_LAYER_ID];
+  const disturbanceLayerIds = [
+    ROUTE_DISTURBANCE_HIT_LAYER_ID,
+    ROUTE_DISTURBANCE_LAYER_ID,
+    DISTURBANCE_LAYER_ID,
+    DISTURBANCE_HIT_LAYER_ID,
+  ];
   const trafficFlowLayerIds = [TRAFFIC_FLOW_LAYER_ID, TRAFFIC_FLOW_HIT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ - klick går
   // igenom till core eller faller till segment). Hit-target sist: fångar
   // klick på historiska events vid låg zoom där CIRCLE_LAYER_ID inte renderas.
-  const eventLayerIds = [LIVE_CORE_LAYER_ID, CIRCLE_LAYER_ID, HIT_TARGET_LAYER_ID];
+  const eventLayerIds = [
+    ROUTE_ACCIDENT_HIT_LAYER_ID,
+    ROUTE_ACCIDENT_LAYER_ID,
+    LIVE_CORE_LAYER_ID,
+    CIRCLE_LAYER_ID,
+    HIT_TARGET_LAYER_ID,
+  ];
   const allLayerIds = [...eventLayerIds, ...disturbanceLayerIds, ...trafficFlowLayerIds, ...segmentLayerIds];
 
   for (const id of allLayerIds) {

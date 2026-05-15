@@ -34,8 +34,10 @@ const ROUTE_BRIDGE_LAYER_ID = "route-bridge-lines";
 const ROUTE_TUNNEL_LAYER_ID = "route-tunnel-lines";
 const ROUTE_LARGE_ROUNDABOUT_LAYER_ID = "route-large-roundabout-lines";
 const ROUTE_MULTILANE_LAYER_ID = "route-multilane-lines";
-const ROUTE_DISTURBANCE_LAYER_ID = "route-disturbance-points";
-const ROUTE_ACCIDENT_LAYER_ID = "route-accident-points";
+export const ROUTE_DISTURBANCE_LAYER_ID = "route-disturbance-points";
+export const ROUTE_DISTURBANCE_HIT_LAYER_ID = "route-disturbance-hit";
+export const ROUTE_ACCIDENT_LAYER_ID = "route-accident-points";
+export const ROUTE_ACCIDENT_HIT_LAYER_ID = "route-accident-hit";
 const ROUTE_DISTURBANCE_TRIANGLE_IMAGE_ID = "route-disturbance-triangle";
 const ROUTE_ANNOTATION_COLORS = {
   highSpeed: "#FF8C8C",
@@ -383,6 +385,34 @@ export function addRouteLayer(
   );
   map.addLayer(
     {
+      id: ROUTE_DISTURBANCE_HIT_LAYER_ID,
+      type: "circle",
+      source: ROUTE_ANNOTATION_POINT_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "disturbances"],
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 10, 12, 15, 16, 20],
+        "circle-color": "#000000",
+        "circle-opacity": 0,
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
+      id: ROUTE_ACCIDENT_HIT_LAYER_ID,
+      type: "circle",
+      source: ROUTE_ANNOTATION_POINT_SOURCE_ID,
+      filter: ["==", ["get", "kind"], "liveAccidents"],
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 10, 12, 15, 16, 20],
+        "circle-color": "#000000",
+        "circle-opacity": 0,
+      },
+    },
+    beforeId,
+  );
+  map.addLayer(
+    {
       id: ROUTE_PRIMARY_HIT_LAYER_ID,
       type: "line",
       source: ROUTE_SOURCE_ID,
@@ -445,7 +475,9 @@ export function addRouteLayer(
         ROUTE_LARGE_ROUNDABOUT_LAYER_ID,
         ROUTE_MULTILANE_LAYER_ID,
         ROUTE_DISTURBANCE_LAYER_ID,
+        ROUTE_DISTURBANCE_HIT_LAYER_ID,
         ROUTE_ACCIDENT_LAYER_ID,
+        ROUTE_ACCIDENT_HIT_LAYER_ID,
         ROUTE_PRIMARY_HIT_LAYER_ID,
         ROUTE_ENDPOINT_LAYER_ID,
       ]) {
@@ -544,6 +576,15 @@ export function setRouteLayerData(
       properties: {
         kind: annotation.kind,
         category: annotation.category ?? null,
+        id: annotation.id ?? null,
+        icon_id: annotation.icon_id ?? null,
+        message_type: annotation.message_type ?? null,
+        road_number: annotation.road_number ?? null,
+        message: annotation.message ?? null,
+        severity: annotation.severity ?? null,
+        first_seen: annotation.first_seen ?? null,
+        last_seen: annotation.last_seen ?? null,
+        is_live: annotation.is_live ?? false,
       },
     })),
   });

@@ -19,6 +19,15 @@ export type RouteAnnotationPoint = {
   kind: RouteAnnotationPointKind;
   coordinates: [number, number];
   category?: DisturbanceCategory;
+  id?: string;
+  icon_id?: string | null;
+  message_type?: string | null;
+  road_number?: string | null;
+  message?: string | null;
+  severity?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  is_live?: boolean;
 };
 
 export type RouteAnnotations = {

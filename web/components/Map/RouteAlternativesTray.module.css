@@ -15,8 +15,9 @@
   overscroll-behavior-x: contain;
   scrollbar-width: none;
   touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
   font-family: var(--font-univers);
-  pointer-events: none;
+  pointer-events: auto;
   user-select: none;
 }
 
@@ -35,7 +36,7 @@
 .routeAlternativeCard {
   position: relative;
   display: flex;
-  flex: 0 0 300px;
+  flex: 0 0 280px;
   flex-direction: column;
   padding: 16px;
   border: 0;
@@ -47,6 +48,7 @@
   font-family: var(--font-univers);
   text-align: left;
   cursor: pointer;
+  touch-action: pan-x;
   pointer-events: auto;
   opacity: 0;
   transform: translateY(28px);
@@ -65,12 +67,20 @@
 }
 
 .routeAlternativeCardSelected {
-  background: rgba(85, 85, 85, 0.6);
+  background: rgba(85, 85, 85, 0.7);
 }
 
 .routeAlternativeCardSelected:hover,
 .routeAlternativeCardSelected:focus-visible {
   background: rgba(85, 85, 85, 0.7);
+}
+
+.routeAlternativeCard:not(.routeAlternativeCardSelected) .routeAlternativeTitle {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.routeAlternativeCardSelected .routeAlternativeTime {
+  color: var(--color-white);
 }
 
 .routeAlternativeTop {

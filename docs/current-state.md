@@ -1,4 +1,4 @@
-# Current state — 2026-05-14
+# Current state — 2026-05-15
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt, `docs/routing-ops.md` för GraphHopper-drift och `docs/review-log.md` för reviewspåret. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
 
@@ -16,7 +16,7 @@ Aktiva UI-lager:
 
 Segmentrisk-färgning finns kvar i backend/kod som vilande infrastruktur men är pausad i UI tills olyckshistoriken är tillräckligt stor för att ge en rimlig riskbild. Olyckslagret visar därför punkter/heatmap, inte röd-orange risklinjer.
 
-Desktop har info/ruttplanerare i vänsterstacken, lagerknappar uppe till höger och zoom/location nere till höger. Mobil samlar lager bakom en `layers.svg`-knapp och visar hjälp som helskärm. Tyngre lager visar en liten spinner i lagerknappen medan bbox/tile-data hämtas. När användaren slår på `Trafikflöde`, `Trafikstörningar` eller `Höga hastigheter` från för låg zoomnivå zoomar kartan automatiskt in till lagrets miniminivå, så användaren inte möts av en tom karta utan feedback.
+Desktop har info/ruttplanerare i vänsterstacken, lagerknappar uppe till höger och zoom/location nere till höger. Mobil samlar lager bakom en `layers.svg`-knapp och visar hjälp som helskärm. Mobilens `Undvik om möjligt`-filter är en horisontellt scrollande rad för att spara kart-/ruttutrymme. Tyngre lager visar en liten spinner i lagerknappen medan bbox/tile-data hämtas. När användaren slår på `Trafikflöde`, `Trafikstörningar` eller `Höga hastigheter` från för låg zoomnivå zoomar kartan automatiskt in till lagrets miniminivå, så användaren inte möts av en tom karta utan feedback.
 
 ## Ruttplanerare
 
@@ -32,7 +32,11 @@ Ruttplaneraren finns i `web/components/Map/RoutePlannerBox.tsx`, med state/orche
 - `Stora rondeller`
 - `Flerfiligt`
 
-GraphHopper custom models påverkar vägkostnaden för dessa filter. `Stora rondeller` och `Flerfiligt` bygger på reducerat NVDB/Lastkajen-underlag från `korfalt_rondell_*.gpkg`; de importerar inte hela råpaketet utan bara segment som behövs för routing penalty areas och scoring. Olyckshistorik och trafikstörningar är kontrollager/route-notices, inte planeringsfilter. Vald rutt visar pågående störningar och liveolyckor ovanpå ruttlinjen även när motsvarande kartlager är avstängt.
+GraphHopper custom models påverkar vägkostnaden för dessa filter. `Stora rondeller` och `Flerfiligt` bygger på reducerat NVDB/Lastkajen-underlag från `korfalt_rondell_*.gpkg`; de importerar inte hela råpaketet utan bara segment som behövs för routing penalty areas och scoring. Lane-penalty-matchning är medvetet tight: stora rondeller och flerfiligt matchas nära ruttens faktiska segment, inte mot närliggande parallellvägar. `Flerfiligt` räknar motorväg/motorvägslänk som intrinsiskt flerfiligt och använder road class/speed-gating för att undvika att en vanlig väg bredvid motorvägen felklassas.
+
+`Stadstrafik` bygger på manuellt avgränsade stadszoner och road-class/speed-faktorer. Zonerna är nu tätare kring stadskärnor, men större/komplexa stadsvägar inne i zonen räknas fortfarande som stadstrafik. Snabba motorvägssträckor genom utkanten ska däremot inte ge stadstrafikexponering bara för att de passerar nära staden.
+
+Olyckshistorik och trafikstörningar är kontrollager/route-notices, inte planeringsfilter. Vald rutt visar pågående störningar och liveolyckor ovanpå ruttlinjen även när motsvarande kartlager är avstängt. Route-notices matchar bara punkter nära själva rutten, dedupar endast mycket nära dubbletter och är klickbara via osynliga hit-target-lager så användaren kan se beskrivning, väg och uppdateringstid.
 
 `POST /api/route` är uppdelad efter arkitektur-reviewen: publika ruttyper ligger i `web/lib/routeTypes.ts`, och rena serverhjälpare ligger i `web/app/api/route/_routing/` (`types`, `request`, `timeout`, `telemetry`, `geometry`, `customModels`, `providers`, `providerFanout`, `routeDetails`, `dedupe`, `hybrid`, `scoring`, `highSpeedSelection`). Själva `route.ts` är nu i princip request handler, deadline/logging och response mapping.
 
@@ -45,6 +49,7 @@ Viktiga beteenden:
 - Auto-routing startar först när båda stopp har koordinater.
 - Ruttlinjen är inte dragbar i MVP-flödet; via-punkter hanteras via stoppfältet.
 - Utan aktiva filter visas snabbaste rutten. Med aktiva filter visas relevanta kandidater och listan sorteras efter filtermatchning, därefter tid och distans.
+- Ruttkort visar `Undviker` bara när aktuell aktiv exponering praktiskt taget är noll. Låg men befintlig stadstrafik/trafikintensitet ska visas som `Låg`, inte som grön undvikelse.
 - Frontend har kort session-cache för route-svar: 2 min för statiska filter och 5 min när `Trafikintensiva vägar` är aktivt.
 - Delning skapar public route snapshots via `/api/route-shares` med 30 dagars TTL. Payloaden valideras via `web/lib/routeShareSchema.ts` både vid API-write och SSR-prefetch av `/r/[slug]`.
 - Tumme upp/ner sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal. Feedback-snapshots använder samma route-share-schema och sparas i 90 dagar.
@@ -109,6 +114,7 @@ Canonical domains:
 - Lastkajen bulkimport ska använda Supabase session pooler på port `5432`, inte transaction pooler `6543`.
 - `Höga hastigheter` kräver att `scripts/import-large-roads.sh` körts efter 80+-ändringen; migrationen ensam skapar inte raderna.
 - `Stora rondeller` och `Flerfiligt` kräver att `scripts/import-route-lane-penalties.sh` körts mot `korfalt_rondell_*.gpkg` innan `0032_route_lane_penalties.sql` appliceras i Supabase. Underlaget är importerat i prod per 2026-05-14. Om en route-smoke ger `largeRoundabouts`/`multilane` som `null`, kontrollera först att RPC:n `route_lane_penalties_in_bbox(...)` finns och att tabellraderna inte har skrivits över utan att migrationen körts om.
+- Mobil touch: om pan/scroll plötsligt känns slumpmässigt låst, kontrollera först osynliga overlay-knappar med `pointer-events`. Ett bekräftat fall var mobilens stängda lager-meny: items hade `opacity: 0` men barnknappar kunde ändå få touch-target. Stängda menyer ska därför även använda `visibility: hidden` och slå av pointer events på barnen.
 - GraphHopper custom model kräver `ch.disable: true`; snabbaste basrutten kan använda CH.
 - Efter domän-/env-ändringar i Vercel krävs redeploy för att `PUBLIC_SITE_ORIGIN`, `GRAPHHOPPER_BASE_URL`, redirects och CSP ska börja gälla i production.
 - Om GraphHopper-cache byggs om efter config/OSM-byte: stoppa service, flytta `/opt/graphhopper/graph-cache`, starta service och följ `journalctl -u graphhopper -f`.
@@ -119,7 +125,7 @@ Canonical domains:
 
 ## Nästa fokus
 
-- Kalibrera `Stadstrafik` och `Trafikintensiva vägar` mot verkliga ruttfall så omvägarna märks utan att bli orimliga.
+- Följ upp `Stadstrafik`, `Trafikintensiva vägar`, `Flerfiligt` och `Stora rondeller` mot fler verkliga ruttfall. Dagens kalibreringar känns bättre i testade case, men logik för road class, speed och parallellvägar behöver fortsatt verklighetskontroll.
 - Följ upp GraphHopper-fanout i prod-loggar, särskilt `highSpeed`, `trafficIntensity`, `cityTraffic` och kombinationer med bro/tunnel.
 - Kör `0028_route_feedback_update_delete.sql` i Supabase innan live-test av toggle-bort av tumme, om den inte redan är körd.
 - Följ upp verklig ruttfeedback när det finns tillräckligt många rader.

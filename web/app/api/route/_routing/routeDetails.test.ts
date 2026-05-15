@@ -6,6 +6,7 @@ import {
   routeGeneratedByForcedCorridor,
   routeHasOutAndBackSpur,
   routeHighSpeedDetailExposureMeters,
+  routeMultilaneDetailExposureMeters,
   routeSegmentSpeedLimit,
   speedLimitFromDetail,
 } from "./routeDetails";
@@ -47,30 +48,68 @@ describe("route detail helpers", () => {
     expect(routeEnvironmentDetailExposureMeters(candidate, "TUNNEL")).toBeGreaterThan(1_000);
   });
 
-  it("scores city traffic only inside configured city areas", () => {
-    const stockholmMotorway = route(
+  it("calculates intrinsic multilane exposure from motorway road class details", () => {
+    const candidate = route(
       [
-        [18.0, 59.3],
-        [18.02, 59.31],
+        [18, 59],
+        [18.02, 59],
+        [18.04, 59],
       ],
       {
-        maxSpeedDetails: [[0, 1, 80]],
-        roadClassDetails: [[0, 1, "MOTORWAY"]],
-      },
-    );
-    const outsideCity = route(
-      [
-        [14.0, 63.0],
-        [14.02, 63.01],
-      ],
-      {
-        maxSpeedDetails: [[0, 1, 80]],
-        roadClassDetails: [[0, 1, "MOTORWAY"]],
+        roadClassDetails: [[0, 1, "MOTORWAY"], [1, 2, "SECONDARY"]],
       },
     );
 
-    expect(cityTrafficFactorForSegment(stockholmMotorway, 0)).toBeCloseTo(1.15);
-    expect(cityTrafficFactorForSegment(outsideCity, 0)).toBe(0);
+    expect(routeMultilaneDetailExposureMeters(candidate)).toBeGreaterThan(1_000);
+    expect(routeMultilaneDetailExposureMeters(candidate)).toBeLessThan(1_300);
+  });
+
+  it("scores city traffic for central surface roads and urban major roads", () => {
+    const centralSurfaceRoad = route(
+      [
+        [12.935, 57.719],
+        [12.945, 57.722],
+      ],
+      {
+        maxSpeedDetails: [[0, 1, 50]],
+        roadClassDetails: [[0, 1, "RESIDENTIAL"]],
+      },
+    );
+    const centralUrbanMotorway = route(
+      [
+        [12.90, 57.70],
+        [12.95, 57.70],
+      ],
+      {
+        maxSpeedDetails: [[0, 1, 80]],
+        roadClassDetails: [[0, 1, "MOTORWAY"]],
+      },
+    );
+    const centralHighSpeedMotorway = route(
+      [
+        [12.90, 57.70],
+        [12.95, 57.70],
+      ],
+      {
+        maxSpeedDetails: [[0, 1, 100]],
+        roadClassDetails: [[0, 1, "MOTORWAY"]],
+      },
+    );
+    const hedaredPrimaryRoad = route(
+      [
+        [12.735, 57.805],
+        [12.750, 57.810],
+      ],
+      {
+        maxSpeedDetails: [[0, 1, 70]],
+        roadClassDetails: [[0, 1, "PRIMARY"]],
+      },
+    );
+
+    expect(cityTrafficFactorForSegment(centralSurfaceRoad, 0)).toBeGreaterThan(0.55);
+    expect(cityTrafficFactorForSegment(centralUrbanMotorway, 0)).toBeGreaterThan(0.55);
+    expect(cityTrafficFactorForSegment(centralHighSpeedMotorway, 0)).toBe(0);
+    expect(cityTrafficFactorForSegment(hedaredPrimaryRoad, 0)).toBe(0);
   });
 
   it("tracks forced-corridor sources and generated out-and-back spurs", () => {

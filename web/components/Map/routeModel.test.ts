@@ -212,6 +212,26 @@ describe("routeAlternativeCopy", () => {
       { kind: "multilane", label: "Flerfiligt", value: "300 m" },
     ]);
   });
+
+  it("does not call low city traffic avoided when exposure is still visible", () => {
+    const fastest = route("fastest", {
+      avoidScores: { ...route("x").avoidScores, cityTraffic: 0.02 },
+      exposure: { ...route("x").exposure, cityTrafficMeters: 900 },
+    });
+
+    const copy = routeAlternativeCopy(
+      fastest,
+      0,
+      fastest,
+      avoids({ cityTraffic: true }),
+      [fastest],
+      false,
+    );
+
+    expect(copy.rows).toEqual([
+      { kind: "cityTraffic", label: "Stadstrafik", value: "Låg" },
+    ]);
+  });
 });
 
 describe("route formatting", () => {

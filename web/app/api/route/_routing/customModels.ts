@@ -38,34 +38,43 @@ export const avoidTunnelCustomModel: GraphHopperCustomModel = {
   ],
 };
 
+export const avoidMultilaneRoadClassCustomModel: GraphHopperCustomModel = {
+  priority: [
+    { if: "road_class == MOTORWAY", multiply_by: "0.12" },
+  ],
+};
+
 const CITY_TRAFFIC_AREA_BBOX_PADDING = 0.18;
-export const CITY_TRAFFIC_SEGMENT_EXPOSURE_THRESHOLD = 0.62;
+export const CITY_TRAFFIC_SEGMENT_EXPOSURE_THRESHOLD = 0.55;
 
 export const CITY_TRAFFIC_AREAS: CityTrafficArea[] = [
-  { id: "city_stockholm", minLng: 17.65, minLat: 59.12, maxLng: 18.45, maxLat: 59.55 },
-  { id: "city_goteborg", minLng: 11.62, minLat: 57.52, maxLng: 12.25, maxLat: 57.90 },
-  { id: "city_malmo_lund", minLng: 12.70, minLat: 55.42, maxLng: 13.35, maxLat: 55.85 },
-  { id: "city_uppsala", minLng: 17.45, minLat: 59.75, maxLng: 17.95, maxLat: 60.02 },
-  { id: "city_vasteras", minLng: 16.30, minLat: 59.48, maxLng: 16.78, maxLat: 59.75 },
-  { id: "city_orebro", minLng: 14.88, minLat: 59.10, maxLng: 15.40, maxLat: 59.38 },
-  { id: "city_linkoping", minLng: 15.35, minLat: 58.30, maxLng: 15.85, maxLat: 58.55 },
-  { id: "city_norrkoping", minLng: 15.92, minLat: 58.50, maxLng: 16.35, maxLat: 58.72 },
-  { id: "city_jonkoping", minLng: 13.95, minLat: 57.62, maxLng: 14.35, maxLat: 57.90 },
-  { id: "city_helsingborg", minLng: 12.55, minLat: 55.98, maxLng: 12.88, maxLat: 56.18 },
-  { id: "city_boras", minLng: 12.72, minLat: 57.60, maxLng: 13.08, maxLat: 57.85 },
-  { id: "city_umea", minLng: 20.05, minLat: 63.68, maxLng: 20.45, maxLat: 63.95 },
-  { id: "city_gavle", minLng: 16.95, minLat: 60.55, maxLng: 17.35, maxLat: 60.82 },
-  { id: "city_eskilstuna", minLng: 16.32, minLat: 59.23, maxLng: 16.65, maxLat: 59.45 },
-  { id: "city_karlstad", minLng: 13.32, minLat: 59.25, maxLng: 13.70, maxLat: 59.50 },
-  { id: "city_halmstad", minLng: 12.75, minLat: 56.60, maxLng: 13.05, maxLat: 56.78 },
-  { id: "city_vaxjo", minLng: 14.65, minLat: 56.80, maxLng: 14.98, maxLat: 57.00 },
-  { id: "city_sundsvall", minLng: 17.10, minLat: 62.28, maxLng: 17.48, maxLat: 62.52 },
-  { id: "city_lulea", minLng: 22.00, minLat: 65.50, maxLng: 22.35, maxLat: 65.72 },
-  { id: "city_trollhattan_vanersborg", minLng: 12.15, minLat: 58.20, maxLng: 12.45, maxLat: 58.42 },
-  { id: "city_skovde", minLng: 13.75, minLat: 58.30, maxLng: 14.05, maxLat: 58.50 },
-  { id: "city_kalmar", minLng: 16.18, minLat: 56.60, maxLng: 16.45, maxLat: 56.75 },
-  { id: "city_kristianstad", minLng: 14.05, minLat: 55.95, maxLng: 14.35, maxLat: 56.12 },
-  { id: "city_falun_borlange", minLng: 15.25, minLat: 60.35, maxLng: 15.75, maxLat: 60.65 },
+  { id: "city_stockholm", minLng: 17.78, minLat: 59.20, maxLng: 18.20, maxLat: 59.43 },
+  { id: "city_goteborg", minLng: 11.82, minLat: 57.62, maxLng: 12.08, maxLat: 57.79 },
+  { id: "city_malmo", minLng: 12.92, minLat: 55.53, maxLng: 13.08, maxLat: 55.65 },
+  { id: "city_lund", minLng: 13.13, minLat: 55.66, maxLng: 13.28, maxLat: 55.75 },
+  { id: "city_uppsala", minLng: 17.55, minLat: 59.79, maxLng: 17.75, maxLat: 59.92 },
+  { id: "city_vasteras", minLng: 16.42, minLat: 59.55, maxLng: 16.66, maxLat: 59.66 },
+  { id: "city_orebro", minLng: 15.05, minLat: 59.20, maxLng: 15.27, maxLat: 59.33 },
+  { id: "city_linkoping", minLng: 15.50, minLat: 58.35, maxLng: 15.75, maxLat: 58.45 },
+  { id: "city_norrkoping", minLng: 16.05, minLat: 58.55, maxLng: 16.26, maxLat: 58.65 },
+  { id: "city_jonkoping", minLng: 14.05, minLat: 57.72, maxLng: 14.25, maxLat: 57.84 },
+  { id: "city_helsingborg", minLng: 12.62, minLat: 56.00, maxLng: 12.78, maxLat: 56.10 },
+  { id: "city_boras", minLng: 12.82, minLat: 57.66, maxLng: 13.02, maxLat: 57.77 },
+  { id: "city_umea", minLng: 20.15, minLat: 63.77, maxLng: 20.38, maxLat: 63.86 },
+  { id: "city_gavle", minLng: 17.05, minLat: 60.62, maxLng: 17.25, maxLat: 60.72 },
+  { id: "city_eskilstuna", minLng: 16.42, minLat: 59.31, maxLng: 16.58, maxLat: 59.40 },
+  { id: "city_karlstad", minLng: 13.42, minLat: 59.34, maxLng: 13.62, maxLat: 59.43 },
+  { id: "city_halmstad", minLng: 12.80, minLat: 56.64, maxLng: 12.95, maxLat: 56.72 },
+  { id: "city_vaxjo", minLng: 14.73, minLat: 56.83, maxLng: 14.90, maxLat: 56.93 },
+  { id: "city_sundsvall", minLng: 17.20, minLat: 62.36, maxLng: 17.38, maxLat: 62.44 },
+  { id: "city_lulea", minLng: 22.05, minLat: 65.55, maxLng: 22.22, maxLat: 65.64 },
+  { id: "city_trollhattan", minLng: 12.20, minLat: 58.24, maxLng: 12.36, maxLat: 58.34 },
+  { id: "city_vanersborg", minLng: 12.25, minLat: 58.35, maxLng: 12.38, maxLat: 58.41 },
+  { id: "city_skovde", minLng: 13.80, minLat: 58.36, maxLng: 14.00, maxLat: 58.46 },
+  { id: "city_kalmar", minLng: 16.26, minLat: 56.64, maxLng: 16.40, maxLat: 56.70 },
+  { id: "city_kristianstad", minLng: 14.10, minLat: 56.00, maxLng: 14.23, maxLat: 56.08 },
+  { id: "city_falun", minLng: 15.56, minLat: 60.56, maxLng: 15.70, maxLat: 60.66 },
+  { id: "city_borlange", minLng: 15.35, minLat: 60.43, maxLng: 15.50, maxLat: 60.52 },
 ];
 
 function degreesLat(meters: number): number {
@@ -119,12 +128,13 @@ export function buildCityTrafficCustomModel(routes: OsrmRoute[]): GraphHopperCus
   if (!features.length) return undefined;
 
   const priority = features.flatMap((feature): GraphHopperRule[] => [
-    { if: `in_${feature.id} && road_class == MOTORWAY`, multiply_by: "0.58" },
-    { if: `in_${feature.id} && road_class == TRUNK`, multiply_by: "0.62" },
-    { if: `in_${feature.id} && road_class == PRIMARY`, multiply_by: "0.72" },
-    { if: `in_${feature.id} && road_class == SECONDARY`, multiply_by: "0.88" },
-    { if: `in_${feature.id} && max_speed >= 80`, multiply_by: "0.82" },
-    { if: `in_${feature.id} && max_speed >= 60`, multiply_by: "0.9" },
+    { if: `in_${feature.id} && road_class == MOTORWAY`, multiply_by: "0.68" },
+    { if: `in_${feature.id} && road_class == TRUNK`, multiply_by: "0.70" },
+    { if: `in_${feature.id} && road_class == PRIMARY`, multiply_by: "0.70" },
+    { if: `in_${feature.id} && road_class == SECONDARY`, multiply_by: "0.74" },
+    { if: `in_${feature.id} && road_class == TERTIARY`, multiply_by: "0.78" },
+    { if: `in_${feature.id} && road_class == RESIDENTIAL`, multiply_by: "0.82" },
+    { if: `in_${feature.id} && road_class == UNCLASSIFIED`, multiply_by: "0.84" },
   ]);
 
   return {

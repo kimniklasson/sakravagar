@@ -52,4 +52,24 @@ describe("hybrid route helpers", () => {
       [18.08, 59.12],
     ]);
   });
+
+  it("builds hybrids for single multilane avoid searches", () => {
+    const prefixRoute = route("prefix", [
+      [18.0, 59.0],
+      [18.0, 59.025],
+      [18.02, 59.045],
+      [18.04, 59.06],
+      [18.02, 59.09],
+      [18.08, 59.12],
+    ]);
+    const suffixRoute = route("suffix", [
+      [18.0, 59.0],
+      [18.04, 59.02],
+      [18.04, 59.06],
+      [18.08, 59.085],
+      [18.08, 59.12],
+    ]);
+
+    expect(buildHybridRoutes([prefixRoute, suffixRoute], ["multilane"])).not.toEqual([]);
+  });
 });

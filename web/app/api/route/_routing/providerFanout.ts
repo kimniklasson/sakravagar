@@ -98,14 +98,15 @@ export async function fetchProviderRoutes(
   }
 
   let fastestRoutes: OsrmRoute[];
+  const includeCityTrafficDetails = avoid.cityTraffic || avoid.multilane;
   try {
     fastestRoutes = await fetchGraphHopperRoute(coordinates, {
       source: "fastest",
-      includeCityTrafficDetails: avoid.cityTraffic,
+      includeCityTrafficDetails,
     });
   } catch (err) {
-    if (!avoid.cityTraffic) throw err;
-    logApiWarning("graphhopper city traffic details unavailable for fastest route", err, {
+    if (!includeCityTrafficDetails) throw err;
+    logApiWarning("graphhopper route details unavailable for fastest route", err, {
       requestId: context?.requestId,
     });
     fastestRoutes = await fetchGraphHopperRoute(coordinates, { source: "fastest" });
@@ -165,7 +166,6 @@ export async function fetchProviderRoutes(
   }
 
   const trafficIntensityActive = avoid.trafficIntensity;
-  const includeCityTrafficDetails = avoid.cityTraffic;
   const highSpeedOnly =
     avoid.highSpeed &&
     !avoid.trafficIntensity &&
@@ -224,7 +224,7 @@ export async function fetchProviderRoutes(
       fetchGraphHopperRoute(coordinates, {
         source: `avoid-${source}`,
         customModel: preferenceModel,
-        includeCityTrafficDetails: avoid.cityTraffic,
+        includeCityTrafficDetails,
         timeoutMs: avoid.trafficIntensity ? GRAPHHOPPER_TRAFFIC_INTENSITY_TIMEOUT_MS : undefined,
       }),
     );
@@ -234,7 +234,7 @@ export async function fetchProviderRoutes(
         fetchGraphHopperRoute(coordinates, {
           source: `avoid-${source}-alternatives`,
           customModel: preferenceModel,
-          includeCityTrafficDetails: avoid.cityTraffic,
+          includeCityTrafficDetails,
           alternativeRoutes: highSpeedOnly ? Math.max(5, alternatives + 3) : pathCount,
           maxWeightFactor: highSpeedOnly
             ? Math.max(alternativeMaxWeightFactor, 2.8)

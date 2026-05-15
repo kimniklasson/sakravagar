@@ -420,7 +420,7 @@ function routeAlternativeMetricRow(
 
   if (option === "trafficIntensity" || option === "cityTraffic") {
     const score = routeScoreValue(route, option);
-    if (current <= 50 || (score !== null && score < 0.08)) {
+    if (current <= 50) {
       return { ...baseRow, value: "Undviker", tone: "positive" };
     }
     if (score === null) return { ...baseRow, value: formatRouteExposureDistance(current) };

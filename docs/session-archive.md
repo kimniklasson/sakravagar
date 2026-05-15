@@ -81,3 +81,11 @@ Komprimerad historik från tidigare sessionsloggar. Den här filen är arkiv och
 - Gjorde hjälppanelen mer användarorienterad: en ny ruttsektion förklarar hur undvik-filtren vägs, medan kartlagersektionen beskriver värdet av olyckor, trafikflöde, störningar och höga hastigheter.
 - Tog bort ikoner från rutt-accordions, minskade accordion-höjd och gjorde datakällor-copy mindre visuellt tung.
 - Uppdaterade popups för olyckor, trafikstörningar och liveflöde till ett enklare tooltip-format med badge, huvudinfo och uppdateringstid. Segmentrisk-/ÅDT-förklaringar visas inte i dessa popups.
+
+## 2026-05-15
+
+- Kalibrerade `Stora rondeller` och `Flerfiligt` mot verkliga route-case: tightare route-proximity, road-class/speed-gating och intrinsic motorway-multilane minskar falska träffar från parallella vägar men behåller motorväg som flerfilig.
+- Kalibrerade `Stadstrafik`: tätare stadszoner, större stadsvägar inne i zonen räknas in, snabba motorvägar i utkanten räknas inte bara för att de passerar nära staden. Ruttkorten visar inte längre grön `Undviker` för låg men befintlig stadstrafik/trafikintensitet.
+- Gjorde route-notices för störningar/liveolyckor striktare och klickbara: ungefär samma-väg-matchning, minimal närdubblett-dedupe och hit-target-lager på vald rutt.
+- Fixade mobil touch-låsning där osynliga lagerknappar fångade drag: stängd lager-meny är nu både `visibility: hidden` och utan pointer-events på barnknappar.
+- Mobil `Undvik om möjligt`-rad blev horisontellt scrollande för att frigöra kart- och ruttkortsyta.

@@ -123,6 +123,7 @@ export function useMapLibreLifecycle({
     map.on("dragend", () => setAtUserLocation(false));
     map.on("moveend", () => {
       if (!mapLoadedRef.current) return;
+      if (!accidentsOnRef.current) return;
       void addEventsLayer(map, {
         onLoadingChange: (loading) => setLayerLoadingSource("accidents", loading),
       });
@@ -161,10 +162,10 @@ export function useMapLibreLifecycle({
             );
             focusRoute(map, routeLinesRef.current);
           }
-          return Promise.all([
-            refreshDisturbancesLayer(map),
-            refreshTrafficFlowLayer(map),
-          ]);
+          const refreshes: Promise<unknown>[] = [];
+          if (disturbancesOnRef.current) refreshes.push(refreshDisturbancesLayer(map));
+          if (trafficOnRef.current) refreshes.push(refreshTrafficFlowLayer(map));
+          return Promise.all(refreshes);
         })
         .finally(() => {
           addPopupHandler(map);
@@ -216,12 +217,14 @@ export function useMapLibreLifecycle({
     const id = window.setInterval(() => {
       const map = mapRef.current;
       if (!map || !mapLoadedRef.current) return;
-      void addEventsLayer(map, {
-        force: true,
-        onLoadingChange: (loading) => setLayerLoadingSource("accidents", loading),
-      });
-      void refreshDisturbancesLayer(map);
-      void refreshTrafficFlowLayer(map);
+      if (accidentsOnRef.current) {
+        void addEventsLayer(map, {
+          force: true,
+          onLoadingChange: (loading) => setLayerLoadingSource("accidents", loading),
+        });
+      }
+      if (disturbancesOnRef.current) void refreshDisturbancesLayer(map);
+      if (trafficOnRef.current) void refreshTrafficFlowLayer(map);
     }, 60_000);
     return () => window.clearInterval(id);
   }, [mapLoadedRef, mapRef, setLayerLoadingSource]);

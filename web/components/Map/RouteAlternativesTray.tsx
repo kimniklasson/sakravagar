@@ -228,6 +228,7 @@ export function RouteAlternativesTray({
         e.preventDefault();
       }}
       onPointerDown={(e) => {
+        if (e.pointerType !== "mouse") return;
         if (e.button !== 0) return;
         setNoticeTooltip(null);
         dragRef.current = {
@@ -239,6 +240,7 @@ export function RouteAlternativesTray({
         wasDraggingRef.current = false;
       }}
       onPointerMove={(e) => {
+        if (e.pointerType !== "mouse") return;
         const drag = dragRef.current;
         if (!drag) return;
         const deltaX = e.clientX - drag.startX;
@@ -252,6 +254,7 @@ export function RouteAlternativesTray({
         e.currentTarget.scrollLeft = drag.scrollLeft - deltaX;
       }}
       onPointerUp={(e) => {
+        if (e.pointerType !== "mouse") return;
         const drag = dragRef.current;
         dragRef.current = null;
         if (drag?.captured && e.currentTarget.hasPointerCapture(drag.pointerId)) {
@@ -259,6 +262,7 @@ export function RouteAlternativesTray({
         }
       }}
       onPointerCancel={(e) => {
+        if (e.pointerType !== "mouse") return;
         const drag = dragRef.current;
         dragRef.current = null;
         if (drag?.captured && e.currentTarget.hasPointerCapture(drag.pointerId)) {

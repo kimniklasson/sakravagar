@@ -7,6 +7,17 @@ const scriptSrc = [
   "https://va.vercel-scripts.com",
 ];
 
+const connectSrc = [
+  "'self'",
+  ...(process.env.NODE_ENV === "production" ? [] : ["ws:", "wss:"]),
+  "https://tiles.openfreemap.org",
+  "https://nominatim.openstreetmap.org",
+  "https://router.project-osrm.org",
+  "https://*.supabase.co",
+  "https://routing.sakravagar.se",
+  "https://routing.xn--skravgar-0zae.se",
+];
+
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
@@ -16,14 +27,14 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://tiles.openfreemap.org",
       "font-src 'self' data: https://tiles.openfreemap.org",
-      "connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://*.supabase.co https://routing.sakravagar.se https://routing.xn--skravgar-0zae.se",
+      `connect-src ${connectSrc.join(" ")}`,
       "worker-src 'self' blob:",
       "child-src 'self' blob:",
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
       "frame-ancestors 'none'",
-      "upgrade-insecure-requests",
+      ...(process.env.NODE_ENV === "production" ? ["upgrade-insecure-requests"] : []),
     ].join("; "),
   },
   { key: "X-Frame-Options", value: "DENY" },

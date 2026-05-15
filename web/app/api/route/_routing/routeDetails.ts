@@ -190,24 +190,50 @@ function cityTrafficAreaForSegment(route: OsrmRoute, segmentIndex: number): City
   )) ?? null;
 }
 
+const CITY_TRAFFIC_URBAN_MAJOR_ROAD_CLASSES = new Set([
+  "MOTORWAY",
+  "MOTORWAY_LINK",
+  "TRUNK",
+  "TRUNK_LINK",
+]);
+
+const CITY_TRAFFIC_ROAD_FACTORS = new Map<string, number>([
+  ["MOTORWAY", 0.76],
+  ["MOTORWAY_LINK", 0.70],
+  ["TRUNK", 0.74],
+  ["TRUNK_LINK", 0.68],
+  ["PRIMARY", 0.74],
+  ["PRIMARY_LINK", 0.68],
+  ["SECONDARY", 0.68],
+  ["SECONDARY_LINK", 0.62],
+  ["TERTIARY", 0.62],
+  ["TERTIARY_LINK", 0.58],
+  ["RESIDENTIAL", 0.58],
+  ["LIVING_STREET", 0.62],
+  ["UNCLASSIFIED", 0.56],
+  ["SERVICE", 0.5],
+]);
+
 export function cityTrafficFactorForSegment(route: OsrmRoute, segmentIndex: number): number {
   if (!cityTrafficAreaForSegment(route, segmentIndex)) return 0;
 
   const roadClass = routeDetailStringForSegment(route, "roadClassDetails", segmentIndex);
   const speed = routeSegmentSpeedLimit(route, segmentIndex);
-  let factor = 0;
-
-  if (roadClass === "MOTORWAY") factor = 1;
-  else if (roadClass === "TRUNK") factor = 0.95;
-  else if (roadClass === "PRIMARY") factor = 0.78;
-  else if (roadClass === "SECONDARY") factor = 0.52;
-
-  if (speed !== null) {
-    if (speed >= 80) factor += 0.15;
-    else if (speed >= 60) factor += 0.08;
+  if (!roadClass) return 0;
+  if (CITY_TRAFFIC_URBAN_MAJOR_ROAD_CLASSES.has(roadClass) && speed !== null && speed >= 90) {
+    return 0;
   }
 
-  return Math.min(1.3, factor);
+  let factor = CITY_TRAFFIC_ROAD_FACTORS.get(roadClass) ?? 0;
+  if (speed !== null) {
+    if (speed <= 30) factor += 0.12;
+    else if (speed <= 50) factor += 0.08;
+    else if (speed <= 60) factor += 0.03;
+    else if (speed >= 80) factor -= 0.16;
+    else if (speed >= 70) factor -= 0.08;
+  }
+
+  return Math.max(0, Math.min(1.1, factor));
 }
 
 export function routeCityTrafficDetailExposureMeters(route: OsrmRoute): number | null {
@@ -225,6 +251,18 @@ export function routeCityTrafficDetailExposureMeters(route: OsrmRoute): number |
     meters += distanceBetweenCoordinatesMeters(start, end, originLat);
   }
   return Math.min(meters, route.distance);
+}
+
+const ROUTE_MULTILANE_DETAIL_ROAD_CLASSES = new Set([
+  "MOTORWAY",
+  "MOTORWAY_LINK",
+]);
+
+export function routeMultilaneDetailExposureMeters(route: OsrmRoute): number | null {
+  return routeDetailExposureMeters(route, "roadClassDetails", (value) => (
+    typeof value === "string" &&
+    ROUTE_MULTILANE_DETAIL_ROAD_CLASSES.has(value.toUpperCase())
+  ));
 }
 
 export function routeAvoidDetailSortCost(route: OsrmRoute, activeOptions: RouteAvoidOption[]): number {
@@ -251,6 +289,9 @@ export function routeAvoidDetailSortCost(route: OsrmRoute, activeOptions: RouteA
   }
   if (activeOptions.includes("cityTraffic")) {
     addCost(routeCityTrafficDetailExposureMeters(route), 4);
+  }
+  if (activeOptions.includes("multilane")) {
+    addCost(routeMultilaneDetailExposureMeters(route), 5);
   }
 
   return weightTotal > 0 ? weightedCost / weightTotal : 0;

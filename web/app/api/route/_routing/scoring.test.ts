@@ -3,13 +3,15 @@ import type { RouteAvoidState } from "@/lib/routeTypes";
 import {
   adtIntensityScore,
   buildPenaltyZoneCustomModel,
+  disturbancePoints,
   emptyRouteAnnotations,
   scoreCityTraffic,
+  scoreDisturbances,
   scoreRouteLanePenalty,
   scoreTrafficIntensity,
   trafficFlowIntensityScore,
 } from "./scoring";
-import type { AdtRow, OsrmRoute, RouteLanePenaltyRow, TrafficFlowRow } from "./types";
+import type { AdtRow, DisturbanceRow, OsrmRoute, RouteLanePenaltyRow, TrafficFlowRow } from "./types";
 
 const noAvoids: RouteAvoidState = {
   highSpeed: false,
@@ -55,6 +57,16 @@ function trafficFlowRow(overrides: Partial<TrafficFlowRow> = {}): TrafficFlowRow
     sample_count: 8,
     snap_distance_m: 12,
     geometry: { type: "LineString", coordinates: [[18, 59], [18.02, 59]] },
+    ...overrides,
+  };
+}
+
+function disturbanceRow(overrides: Partial<DisturbanceRow> = {}): DisturbanceRow {
+  return {
+    id: "disturbance-1",
+    lng: 18.01,
+    lat: 59,
+    message_type: "Vägarbete",
     ...overrides,
   };
 }
@@ -108,19 +120,50 @@ describe("route scoring helpers", () => {
   it("scores city traffic from road class details inside city areas", () => {
     const candidate = route(
       [
-        [18.0, 59.3],
-        [18.02, 59.31],
+        [12.935, 57.719],
+        [12.945, 57.722],
       ],
       {
-        maxSpeedDetails: [[0, 1, 80]],
-        roadClassDetails: [[0, 1, "MOTORWAY"]],
+        distance: 700,
+        maxSpeedDetails: [[0, 1, 50]],
+        roadClassDetails: [[0, 1, "RESIDENTIAL"]],
       },
     );
 
     const metric = scoreCityTraffic(candidate);
 
     expect(metric.score).toBeGreaterThan(0.5);
-    expect(metric.exposure).toBeGreaterThan(1_000);
+    expect(metric.exposure).toBeGreaterThan(500);
+  });
+
+  it("deduplicates disturbance annotations and scoring by location", () => {
+    const candidate = route([[18, 59], [18.02, 59]]);
+    const rows = [
+      disturbanceRow({ id: "SE_STA_TRISSID_1_1", message_type: "Vägarbete" }),
+      disturbanceRow({ id: "SE_STA_TRISSID_2_1", message_type: "Trafikmeddelande" }),
+      disturbanceRow({ id: "SE_STA_TRISSID_1_2", lng: 18.015 }),
+    ];
+
+    const annotations = disturbancePoints(candidate, rows);
+    const metric = scoreDisturbances(candidate, rows);
+
+    expect(annotations).toHaveLength(2);
+    expect(metric.exposure).toBe(2);
+  });
+
+  it("ignores disturbances that are merely near the route corridor", () => {
+    const candidate = route([[18, 59], [18.02, 59]]);
+    const rows = [
+      disturbanceRow({ id: "on-route", lng: 18.01, lat: 59.0003 }),
+      disturbanceRow({ id: "nearby-side-street", lng: 18.01, lat: 59.0006 }),
+    ];
+
+    const annotations = disturbancePoints(candidate, rows);
+    const metric = scoreDisturbances(candidate, rows);
+
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]?.coordinates).toEqual([18.01, 59.0003]);
+    expect(metric.exposure).toBe(1);
   });
 
   it("scores large roundabout and multilane exposure when rows overlap the route", () => {
@@ -130,16 +173,23 @@ describe("route scoring helpers", () => {
       routeLanePenaltyRow({ kind: "largeRoundabouts", lane_count: 3, length_m: 140 }),
     ]);
     const multilaneMetric = scoreRouteLanePenalty(candidate, [
-      routeLanePenaltyRow({ kind: "multilane", fid: 88, lane_count: 2, length_m: 900 }),
+      routeLanePenaltyRow({ kind: "multilane", fid: 88, lane_count: 3, length_m: 900 }),
     ]);
 
     expect(largeRoundaboutMetric.score).toBeGreaterThan(0);
     expect(largeRoundaboutMetric.exposure).toBe(140);
     expect(multilaneMetric.score).toBeGreaterThan(0);
-    expect(multilaneMetric.exposure).toBe(900);
+    expect(multilaneMetric.exposure).toBeGreaterThan(1_000);
   });
 
-  it("returns null lane exposure when no rows overlap the route", () => {
+  it("returns null lane exposure when no lane rows are available", () => {
+    const candidate = route([[18, 59], [18.02, 59]]);
+    const metric = scoreRouteLanePenalty(candidate, []);
+
+    expect(metric).toEqual({ score: null, exposure: null });
+  });
+
+  it("returns zero lane exposure when rows are available but none overlap the route", () => {
     const candidate = route([[18, 59], [18.02, 59]]);
     const metric = scoreRouteLanePenalty(candidate, [
       routeLanePenaltyRow({
@@ -147,7 +197,107 @@ describe("route scoring helpers", () => {
       }),
     ]);
 
-    expect(metric).toEqual({ score: null, exposure: null });
+    expect(metric).toEqual({ score: 0, exposure: 0 });
+  });
+
+  it("does not count nearby large roundabouts on adjacent roads", () => {
+    const candidate = route([[18, 59], [18.02, 59]]);
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        kind: "largeRoundabouts",
+        geometry: { type: "LineString", coordinates: [[18.01, 59.0007], [18.012, 59.0007]] },
+      }),
+    ]);
+
+    expect(metric).toEqual({ score: 0, exposure: 0 });
+  });
+
+  it("does not count nearby multilane segments on adjacent roads", () => {
+    const candidate = route([[18, 59], [18.02, 59]], {
+      roadClassDetails: [[0, 1, "RESIDENTIAL"]],
+    });
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        kind: "multilane",
+        lane_count: 3,
+        geometry: { type: "LineString", coordinates: [[18.01, 59.0002], [18.012, 59.0002]] },
+      }),
+    ]);
+
+    expect(metric).toEqual({ score: 0, exposure: 0 });
+  });
+
+  it("counts nearby multilane segments on major roads", () => {
+    const candidate = route([[18, 59], [18.02, 59]], {
+      roadClassDetails: [[0, 1, "MOTORWAY"]],
+    });
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        kind: "multilane",
+        lane_count: 3,
+        length_m: 900,
+        geometry: { type: "LineString", coordinates: [[18.01, 59.0002], [18.012, 59.0002]] },
+      }),
+    ]);
+
+    expect(metric.exposure).toBeGreaterThan(1_000);
+  });
+
+  it("counts motorway route details as multilane even without lane rows", () => {
+    const candidate = route([[18, 59], [18.02, 59]], {
+      roadClassDetails: [[0, 1, "MOTORWAY"]],
+    });
+    const metric = scoreRouteLanePenalty(candidate, [], "multilane");
+
+    expect(metric.exposure).toBeGreaterThan(1_000);
+    expect(metric.score).toBeGreaterThan(0.4);
+  });
+
+  it("does not count ordinary two-lane rows as multilane", () => {
+    const candidate = route([[18, 59], [18.02, 59]], {
+      roadClassDetails: [[0, 1, "PRIMARY"]],
+    });
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        kind: "multilane",
+        lane_count: 2,
+        geometry: { type: "LineString", coordinates: [[18.01, 59], [18.012, 59]] },
+      }),
+    ]);
+
+    expect(metric).toEqual({ score: 0, exposure: 0 });
+  });
+
+  it("does not apply multilane lane rows to low-speed secondary roads", () => {
+    const candidate = route([[18, 59], [18.02, 59]], {
+      maxSpeedDetails: [[0, 1, 50]],
+      roadClassDetails: [[0, 1, "SECONDARY"]],
+    });
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        kind: "multilane",
+        lane_count: 3,
+        geometry: { type: "LineString", coordinates: [[18.01, 59], [18.012, 59]] },
+      }),
+    ]);
+
+    expect(metric).toEqual({ score: 0, exposure: 0 });
+  });
+
+  it("allows multilane lane rows on higher-speed secondary roads", () => {
+    const candidate = route([[18, 59], [18.02, 59]], {
+      maxSpeedDetails: [[0, 1, 80]],
+      roadClassDetails: [[0, 1, "SECONDARY"]],
+    });
+    const metric = scoreRouteLanePenalty(candidate, [
+      routeLanePenaltyRow({
+        kind: "multilane",
+        lane_count: 3,
+        geometry: { type: "LineString", coordinates: [[18.01, 59], [18.012, 59]] },
+      }),
+    ]);
+
+    expect(metric.exposure).toBeGreaterThan(1_000);
   });
 
   it("builds traffic intensity penalty areas from overlapping high-intensity rows", () => {
@@ -185,6 +335,7 @@ describe("route scoring helpers", () => {
     const multilane = Array.from({ length: 50 }, (_, index) => routeLanePenaltyRow({
       kind: "multilane",
       fid: index + 100,
+      lane_count: 3,
       length_m: 100 + index,
     }));
     const model = buildPenaltyZoneCustomModel(
