@@ -1,9 +1,17 @@
+import type { Metadata } from "next";
 import styles from "../../page.module.css";
 import MapLoader from "@/components/Map/MapLoader";
 import { parseRouteSharePayload, parseSlug, type RouteSharePayload } from "@/lib/routeShareSchema";
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Delad rutt – Säkra vägar",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnon = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

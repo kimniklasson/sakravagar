@@ -5,9 +5,22 @@ import { Analytics } from "@vercel/analytics/next";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
-  title: "Trafik — olycksdata på svenska vägar",
+  metadataBase: new URL("https://sakravagar.se"),
+  title: "Säkra vägar – våga ut på vägarna",
   description:
-    "Historisk olycksdata som hjälper nervösa förare hitta tryggare rutter.",
+    "Hitta och jämför rutter, trafikläge och vägtyp så att du kan välja en väg som känns möjlig.",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "Säkra vägar – våga ut på vägarna",
+    description:
+      "Hitta och jämför rutter, trafikläge och vägtyp så att du kan välja en väg som känns möjlig.",
+    url: "/",
+    siteName: "Säkra vägar",
+    locale: "sv_SE",
+    type: "website",
+  },
   icons: {
     icon: "/logo/sakravagar_symbol.svg",
   },

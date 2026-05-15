@@ -147,3 +147,11 @@ Korta anteckningar över vägval. En post per icke-trivialt beslut — för futu
 **Varför:** ASCII-domänen ger stabilare delningslänkar än `säkravägar.se`, som ofta behöver punycode i tekniska system. Vercel får fortsatt sköta appens certifikat/deploys, medan Caddy sköter routing-subdomänens certifikat på Hetzner.
 
 **Konsekvens:** `sakravagar.se` är canonical. `www.sakravagar.se` redirectar till canonical. Den gamla IDN-domänen `säkravägar.se` / `xn--skravgar-0zae.se` behålls som legacy redirect till `sakravagar.se`. Caddy accepterar både `routing.sakravagar.se` och gamla `routing.xn--skravgar-0zae.se` under övergången. Vercel env ska vara `PUBLIC_SITE_ORIGIN=https://sakravagar.se` och `GRAPHHOPPER_BASE_URL=https://routing.sakravagar.se`.
+
+## 2026-05-15 — Integritet, kontakt och sökindexering
+
+**Valt:** Publicera en integritetssida på `/integritet`, länka den från kartans attribution-rad och använda `kontakt@sakravagar.se` som kontaktadress via Cloudflare Email Routing. Sajten får explicit `robots.txt`, `sitemap.xml`, canonical metadata och Open Graph-metadata. Delade ruttlänkar under `/r/[slug]` får `noindex,nofollow`.
+
+**Varför:** Tjänsten behandlar adresser/koordinater för geokodning och rutter, teknisk metadata för drift/säkerhet, Vercel Web Analytics för cookielös statistik och Supabase-data för delningslänkar/feedback. Det kräver tydlig information även om vi inte sätter egna spårningskakor eller behöver cookie-banner i nuläget. Sökindexering ska hjälpa Google hitta startsidan och integritetssidan, men temporära delningslänkar ska inte indexeras.
+
+**Konsekvens:** `robots.txt` tillåter crawl av publika sidor men blockerar `/api/`. `sitemap.xml` listar startsidan och `/integritet`. Om vi senare lägger till samtyckeskrävande tredjepartsspårning behöver både integritetstext och samtyckesflöde uppdateras innan sådan kod laddas.

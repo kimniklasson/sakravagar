@@ -115,7 +115,10 @@ export function useMapLibreLifecycle({
       style: "/styles/sakravagar_dark.json",
       center: SWEDEN_CENTER,
       zoom: SWEDEN_ZOOM,
-      attributionControl: { compact: false },
+      attributionControl: {
+        compact: false,
+        customAttribution: '<a href="/integritet">Integritet &amp; kakor</a>',
+      },
     });
 
     // dragend räcker som "användar-pan"-signal - zoom (knappar/scroll/pinch)

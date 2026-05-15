@@ -1104,7 +1104,7 @@ function InfoBox({
         <img
           className={styles.infoBoxLogo}
           src="/logo/sakravagar_logo.svg"
-          alt="SäkraVägar"
+          alt="Säkra vägar"
         />
         <button
           type="button"
@@ -1125,9 +1125,9 @@ function InfoBox({
         aria-hidden={compactClosed}
       >
         <div className={styles.infoBoxIntroInner}>
-          <p className={styles.infoBoxIntro}>
-            För dig som känner oro i trafiken och vill planera din resa med mer kontroll, lugn och tillit.
-          </p>
+          <h1 className={styles.infoBoxIntro}>
+            Våga ut på vägarna. Hitta och jämför rutter som passar dig.
+          </h1>
           <p className={styles.infoBoxUpdated}>{updatedText}</p>
         </div>
       </div>
@@ -1135,10 +1135,15 @@ function InfoBox({
         <div className={styles.expanderInner}>
           <div className={styles.infoBoxBody}>
             <p>
-              SäkraVägar finns för dig som vill känna mer kontroll innan du sätter dig bakom ratten. Genom att se rutter, trafikläge och vägarnas karaktär i lugn takt kan resan bli lättare att förstå innan den börjar.
+              Känner du oro, rädsla, panik eller ångest i trafiken?{" "}
+              Säkra vägar gör det tydligare vad en rutt innebär och vilka alternativ
+              som finns. Målet är inte att lova en riskfri väg, utan att ge ett
+              tryggare beslutsstöd när trafiken känns svår.
             </p>
             <p>
-              Målet är inte att lova en helt riskfri väg, utan att ge ett tryggare beslutsstöd: välj det alternativ som känns rimligt för dig, även när det inte alltid är det snabbaste.
+              Jag heter Kim och har själv haft ångest i trafiken. Har du frågor,
+              feedback eller vill bidra till tjänsten får du gärna skriva till{" "}
+              <a href="mailto:kontakt@sakravagar.se">kontakt@sakravagar.se</a>.
             </p>
           </div>
         </div>
