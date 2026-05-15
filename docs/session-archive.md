@@ -89,3 +89,8 @@ Komprimerad historik från tidigare sessionsloggar. Den här filen är arkiv och
 - Gjorde route-notices för störningar/liveolyckor striktare och klickbara: ungefär samma-väg-matchning, minimal närdubblett-dedupe och hit-target-lager på vald rutt.
 - Fixade mobil touch-låsning där osynliga lagerknappar fångade drag: stängd lager-meny är nu både `visibility: hidden` och utan pointer-events på barnknappar.
 - Mobil `Undvik om möjligt`-rad blev horisontellt scrollande för att frigöra kart- och ruttkortsyta.
+- Lade till integritetssida, canonical/robots/sitemap/metadata och Cloudflare Email Routing som kontaktväg via `kontakt@sakravagar.se`.
+- Förfinade infoboxens copy kring oro/rädsla/panik i trafiken, satte tydligare H1/title och gjorde expanderad infobox scrollbar vid låg viewport-höjd.
+- Förbättrade ruttkortens Google Maps-action: kortare `Visa i maps`-knapp med ikon, tooltip om ungefärlig rutt och upp till nio route-formade waypoints inom URL-längdsbudget.
+- Gjorde ruttplaneraren snabbare med tangentbord: startfältet fokuseras vid initial laddning och Tab går direkt till destinationfältet i huvudflödet.
+- Kalibrerade kartans ortsnamnshierarki i den mörka OpenFreeMap-stilen så större städer, towns/villages och mindre platsnamn är lättare att läsa utan att tappa visuell rangordning.

@@ -88,6 +88,10 @@
 
 .infoBoxOpen {
   cursor: default;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .infoBoxCompact {

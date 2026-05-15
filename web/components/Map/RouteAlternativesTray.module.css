@@ -310,9 +310,17 @@
 
 .routeActionTextBtn {
   width: auto;
-  padding: 8px;
+  gap: 6px;
+  padding: 6px 8px;
   color: rgba(255, 255, 255, 0.6);
   white-space: nowrap;
+}
+
+.routeActionProviderIcon {
+  display: block;
+  width: 9px;
+  height: 12px;
+  flex: 0 0 auto;
 }
 
 .routeActionGlyph {

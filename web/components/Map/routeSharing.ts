@@ -14,6 +14,8 @@ const SHARED_ROUTE_MAX_COORDINATES = 360;
 const SHARED_ROUTE_MAX_ANNOTATION_COORDINATES = 80;
 const SHARED_ROUTE_MAX_ANNOTATION_SEGMENTS = 80;
 const SHARED_ROUTE_MAX_ANNOTATION_POINTS = 160;
+const GOOGLE_MAPS_MAX_WAYPOINTS = 9;
+const GOOGLE_MAPS_MAX_URL_LENGTH = 2_048;
 
 export function routeStateKey(stops: RouteStop[]): string {
   return stops
@@ -70,9 +72,14 @@ export function buildGoogleMapsDirectionsUrl(route: RouteLine, stops: RouteStop[
     utm_campaign: "route_card",
   });
   const waypoints = routeGoogleWaypoints(route);
-  if (waypoints.length > 0) {
-    params.set("waypoints", waypoints.map(coordinateParam).join("|"));
+  let waypointCount = waypoints.length;
+  while (waypointCount > 0) {
+    params.set("waypoints", waypoints.slice(0, waypointCount).map(coordinateParam).join("|"));
+    const url = `https://www.google.com/maps/dir/?${params.toString()}`;
+    if (url.length <= GOOGLE_MAPS_MAX_URL_LENGTH) return url;
+    waypointCount -= 1;
   }
+  params.delete("waypoints");
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
@@ -205,8 +212,61 @@ function routeGoogleWaypoints(route: RouteLine): [number, number][] {
   ));
   if (coordinates.length < 5) return [];
 
-  return [0.25, 0.5, 0.75]
-    .map((fraction) => coordinates[Math.round((coordinates.length - 1) * fraction)])
+  return Array.from({ length: GOOGLE_MAPS_MAX_WAYPOINTS }, (_, index) => (
+    (index + 1) / (GOOGLE_MAPS_MAX_WAYPOINTS + 1)
+  ))
+    .map((fraction) => routeCoordinateAtFraction(coordinates, fraction))
     .filter((coord): coord is [number, number] => Boolean(coord))
-    .map(roundRouteCoordinate);
+    .map(roundRouteCoordinate)
+    .filter((coord, index, list) => (
+      index === 0 ||
+      coord[0] !== list[index - 1]?.[0] ||
+      coord[1] !== list[index - 1]?.[1]
+    ));
+}
+
+function routeCoordinateAtFraction(
+  coordinates: [number, number][],
+  fraction: number,
+): [number, number] | null {
+  const totalMeters = routeLineLengthMeters(coordinates);
+  if (totalMeters <= 0) return null;
+  const targetMeters = totalMeters * fraction;
+  let traveledMeters = 0;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const start = coordinates[index - 1];
+    const end = coordinates[index];
+    if (!start || !end) continue;
+    const segmentMeters = routeCoordinateDistanceMeters(start, end);
+    if (segmentMeters <= 0) continue;
+    if (traveledMeters + segmentMeters >= targetMeters) {
+      const segmentFraction = (targetMeters - traveledMeters) / segmentMeters;
+      return [
+        start[0] + (end[0] - start[0]) * segmentFraction,
+        start[1] + (end[1] - start[1]) * segmentFraction,
+      ];
+    }
+    traveledMeters += segmentMeters;
+  }
+
+  return coordinates.at(-2) ?? null;
+}
+
+function routeLineLengthMeters(coordinates: [number, number][]): number {
+  let meters = 0;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const start = coordinates[index - 1];
+    const end = coordinates[index];
+    if (!start || !end) continue;
+    meters += routeCoordinateDistanceMeters(start, end);
+  }
+  return meters;
+}
+
+function routeCoordinateDistanceMeters(start: [number, number], end: [number, number]): number {
+  const originLatRadians = (((start[1] + end[1]) / 2) * Math.PI) / 180;
+  const dx = (end[0] - start[0]) * 111_320 * Math.cos(originLatRadians);
+  const dy = (end[1] - start[1]) * 110_540;
+  return Math.hypot(dx, dy);
 }

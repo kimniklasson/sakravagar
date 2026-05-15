@@ -18,6 +18,8 @@ Segmentrisk-färgning finns kvar i backend/kod som vilande infrastruktur men är
 
 Desktop har info/ruttplanerare i vänsterstacken, lagerknappar uppe till höger och zoom/location nere till höger. Mobil samlar lager bakom en `layers.svg`-knapp och visar hjälp som helskärm. Mobilens `Undvik om möjligt`-filter är en horisontellt scrollande rad för att spara kart-/ruttutrymme. Tyngre lager visar en liten spinner i lagerknappen medan bbox/tile-data hämtas. När användaren slår på `Trafikflöde`, `Trafikstörningar` eller `Höga hastigheter` från för låg zoomnivå zoomar kartan automatiskt in till lagrets miniminivå, så användaren inte möts av en tom karta utan feedback.
 
+Kartstilen är en mörk OpenFreeMap/MapLibre-style i `web/public/styles/sakravagar_dark.json`. Ortsnamn har en avsiktlig kontrasttrappa för orientering: större städer är ljusare än towns/villages, `place_city_large` ligger kvar till zoom 14 så större städer inte blir mörkare vid inzoomning, och mindre place-/suburb-/village-/town-namn är försiktigt uppdragna så de går att läsa utan att konkurrera med större städer.
+
 ## Ruttplanerare
 
 Ruttplaneraren finns i `web/components/Map/RoutePlannerBox.tsx`, med state/orchestration i `Map.tsx` och route-hjälpare i `routeModel.ts`. Den geocodar via `/api/geocode`, reverse-geocodar GPS-positioner och räknar rutter via `POST /api/route`.
@@ -47,12 +49,14 @@ Hjälppanelen har en egen ruttsektion som förklarar vad varje undvik-filter fö
 Viktiga beteenden:
 
 - Auto-routing startar först när båda stopp har koordinater.
+- Startsidan fokuserar automatiskt på `Välj startpunkt...` när inget annat element redan har fokus. Första Tab från startfältet ska gå direkt till destinationfältet; små kringknappar och förslagsrader är klickbara men ligger inte i standard-tabbordningen. Förslag väljs via piltangenter + Enter medan fokus stannar i inputfältet.
 - Ruttlinjen är inte dragbar i MVP-flödet; via-punkter hanteras via stoppfältet.
 - Utan aktiva filter visas snabbaste rutten. Med aktiva filter visas relevanta kandidater och listan sorteras efter filtermatchning, därefter tid och distans.
 - Ruttkort visar `Undviker` bara när aktuell aktiv exponering praktiskt taget är noll. Låg men befintlig stadstrafik/trafikintensitet ska visas som `Låg`, inte som grön undvikelse.
 - Frontend har kort session-cache för route-svar: 2 min för statiska filter och 5 min när `Trafikintensiva vägar` är aktivt.
 - Delning skapar public route snapshots via `/api/route-shares` med 30 dagars TTL. Payloaden valideras via `web/lib/routeShareSchema.ts` både vid API-write och SSR-prefetch av `/r/[slug]`.
 - Tumme upp/ner sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal. Feedback-snapshots använder samma route-share-schema och sparas i 90 dagar.
+- Ruttkortens `Visa i maps` öppnar en extern Google Maps Directions-länk som verifierings-/satellitfallback snarare än egen satellitvy i appen. Länken skickar origin/destination plus upp till nio distansjämnt samplade waypoints längs vår geometri, med fallback till färre waypoints om URL:en annars blir längre än cirka 2048 tecken. Google kan fortfarande räkna om rutten, så tooltipen beskriver den som en ungefärlig rutt.
 
 ## Data och API
 

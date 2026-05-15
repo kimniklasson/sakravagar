@@ -402,9 +402,15 @@ export function RouteAlternativesTray({
                 className={`${styles.routeActionTextBtn} ${styles.routeActionBtn}`}
                 onClick={() => onOpenRouteInGoogleMaps(route.id)}
                 aria-label="Visa den här rutten i Google Maps"
-                data-tooltip="Visa den här rutten i Google Maps"
+                data-tooltip="Visa ungefärlig rutt i Google Maps"
               >
-                Visa i Google Maps
+                <img
+                  className={styles.routeActionProviderIcon}
+                  src="/icons/googlemaps.svg"
+                  alt=""
+                  aria-hidden="true"
+                />
+                <span>Visa i maps</span>
               </button>
               <span className={styles.routeFeedbackActions}>
                 <button

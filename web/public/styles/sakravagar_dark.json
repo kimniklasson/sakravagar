@@ -1010,7 +1010,7 @@
         "text-transform": "uppercase"
       },
       "paint": {
-        "text-color": "rgb(101,101,101)",
+        "text-color": "rgb(114,114,114)",
         "text-halo-blur": 1,
         "text-halo-color": "rgba(0,0,0,0.7)",
         "text-halo-width": 1
@@ -1042,7 +1042,7 @@
         "text-transform": "uppercase"
       },
       "paint": {
-        "text-color": "rgb(101,101,101)",
+        "text-color": "rgb(114,114,114)",
         "text-halo-blur": 1,
         "text-halo-color": "rgba(0,0,0,0.7)",
         "text-halo-width": 1
@@ -1076,7 +1076,7 @@
       },
       "paint": {
         "icon-opacity": 0.7,
-        "text-color": "rgb(101,101,101)",
+        "text-color": "rgb(122,122,122)",
         "text-halo-blur": 1,
         "text-halo-color": "rgba(0,0,0,0.7)",
         "text-halo-width": 1
@@ -1111,7 +1111,7 @@
       },
       "paint": {
         "icon-opacity": 0.7,
-        "text-color": "rgba(119, 119, 119, 1)",
+        "text-color": "rgba(132, 132, 132, 1)",
         "text-halo-blur": 1,
         "text-halo-color": "rgba(0,0,0,0.7)",
         "text-halo-width": 1
@@ -1147,7 +1147,12 @@
       },
       "paint": {
         "icon-opacity": 0.7,
-        "text-color": "rgba(119, 119, 119, 1)",
+        "text-color": [
+          "case",
+          ["<=", ["to-number", ["get", "rank"], 99], 6],
+          "rgba(190, 190, 190, 1)",
+          "rgba(160, 160, 160, 1)"
+        ],
         "text-halo-blur": 1,
         "text-halo-color": "rgba(0,0,0,0.7)",
         "text-halo-width": 1
@@ -1158,7 +1163,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "place",
-      "maxzoom": 12,
+      "maxzoom": 14,
       "filter": [
         "all",
         ["match", ["geometry-type"], ["MultiPoint", "Point"], true, false],
@@ -1183,7 +1188,7 @@
       },
       "paint": {
         "icon-opacity": 0.7,
-        "text-color": "rgba(153, 153, 153, 1)",
+        "text-color": "rgba(205, 205, 205, 1)",
         "text-halo-blur": 1,
         "text-halo-color": "rgba(0,0,0,0.7)",
         "text-halo-width": 1

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { GeocodeResult } from "@/app/api/geocode/route";
 import { LocationIcon, WarningIcon } from "./MapIcons";
@@ -52,6 +52,8 @@ export function RoutePlannerBox({
   const visibleStops = stops;
   const activeStop = visibleStops.find((stop) => stop.id === activeStopId) ?? null;
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null);
+  const firstRouteInputRef = useRef<HTMLInputElement | null>(null);
+  const initialFocusDoneRef = useRef(false);
 
   const activeStopLoading = activeStop
     ? loadingStopId === activeStop.id || geocodingStopId === activeStop.id
@@ -65,6 +67,25 @@ export function RoutePlannerBox({
   useEffect(() => {
     setActiveSuggestionIndex(null);
   }, [activeStopId, activeStop?.label, activeSuggestionCount]);
+
+  useEffect(() => {
+    if (initialFocusDoneRef.current) return;
+
+    const firstRouteInput = firstRouteInputRef.current;
+    if (!firstRouteInput) return;
+
+    const activeElement = document.activeElement;
+    if (
+      activeElement &&
+      activeElement !== document.body &&
+      activeElement !== document.documentElement
+    ) {
+      return;
+    }
+
+    initialFocusDoneRef.current = true;
+    firstRouteInput.focus();
+  }, []);
 
   const selectSuggestionByIndex = (
     stopId: string,
@@ -152,6 +173,7 @@ export function RoutePlannerBox({
                     />
                   )}
                   <input
+                    ref={isFirst ? firstRouteInputRef : undefined}
                     className={styles.routeInput}
                     value={stop.label}
                     onFocus={() => {
@@ -182,6 +204,7 @@ export function RoutePlannerBox({
                     <button
                       type="button"
                       className={styles.routeClearBtn}
+                      tabIndex={-1}
                       onClick={() => onClearStop(stop.id)}
                       aria-label={isCustomStop ? "Ta bort via-punkt" : `Rensa ${placeholder.toLowerCase()}`}
                     >
@@ -192,6 +215,7 @@ export function RoutePlannerBox({
                     <button
                       type="button"
                       className={styles.routeDragBtn}
+                      tabIndex={-1}
                       draggable
                       onDragStart={() => onDragStartStop(stop.id)}
                       onDragEnd={() => onDragStartStop("")}
@@ -208,6 +232,7 @@ export function RoutePlannerBox({
                     className={`${styles.routePositionSuggestion} ${
                       activeSuggestionIndex === 0 ? styles.routeSuggestionActive : ""
                     }`}
+                    tabIndex={-1}
                     disabled={activeStopLoading}
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseEnter={() => setActiveSuggestionIndex(0)}
@@ -232,6 +257,7 @@ export function RoutePlannerBox({
                         className={`${styles.routeSuggestion} ${
                           activeSuggestionIndex === optionIndex ? styles.routeSuggestionActive : ""
                         }`}
+                        tabIndex={-1}
                         onMouseDown={(e) => e.preventDefault()}
                         onMouseEnter={() => setActiveSuggestionIndex(optionIndex)}
                         onFocus={() => setActiveSuggestionIndex(optionIndex)}
