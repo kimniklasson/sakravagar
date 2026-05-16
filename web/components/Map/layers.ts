@@ -7,6 +7,11 @@ export {
 } from "./layers/events";
 export { addLargeRoadsLayer } from "./layers/largeRoads";
 export {
+  addTrafficCameraLayer,
+  refreshRouteTrafficCameraLayer,
+  refreshTrafficCameraLayer,
+} from "./layers/cameras";
+export {
   addDisturbancesLayer,
   addTrafficFlowLayer,
   refreshDisturbancesLayer,

@@ -1,5 +1,5 @@
-// Edge Function: scrapar Trafikverkets Situation/Deviation- och TrafficFlow-API
-// och upsertar olyckor, störningar och trafikläge. Schemaläggs via pg_cron +
+// Edge Function: scrapar Trafikverkets Situation/Deviation-, TrafficFlow- och Camera-API
+// och upsertar olyckor, störningar, trafikläge och vägkameror. Schemaläggs via pg_cron +
 // pg_net (se migration 0004_pg_cron_scrape.sql). Manuell trigger:
 //   curl -X POST "$SUPABASE_URL/functions/v1/scrape" \
 //        -H "Authorization: Bearer $SCRAPE_SHARED_SECRET"
@@ -15,9 +15,11 @@ const TRAFIKVERKET_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json";
 const SITUATION_QUERY_LIMIT = 10_000;
 const TRAFIKVERKET_REQUEST_TIMEOUT_MS = 20_000;
 const TRAFIKVERKET_TRAFFIC_FLOW_TIMEOUT_MS = 25_000;
+const TRAFIKVERKET_CAMERA_TIMEOUT_MS = 25_000;
 const EVENTS_UPSERT_BATCH_SIZE = 500;
 const DISTURBANCES_UPSERT_BATCH_SIZE = 250;
 const TRAFFIC_FLOW_UPSERT_BATCH_SIZE = 500;
+const TRAFFIC_CAMERA_UPSERT_BATCH_SIZE = 500;
 
 type Deviation = {
   Id: string;
@@ -45,6 +47,26 @@ type TrafficFlow = {
   DataQuality?: string;
   SpecificLane?: string;
   MeasurementSide?: string;
+  ModifiedTime?: string;
+};
+
+type TrafficCamera = {
+  Id: string;
+  Name?: string;
+  Type?: string;
+  Status?: string;
+  Description?: string;
+  Direction?: string;
+  CountyNo?: number | number[];
+  Active?: boolean;
+  Deleted?: boolean;
+  ContentType?: string;
+  IconId?: string;
+  PhotoUrl?: string;
+  PhotoTime?: string;
+  HasFullSizePhoto?: boolean;
+  HasSketchImage?: boolean;
+  Geometry?: { WGS84?: string };
   ModifiedTime?: string;
 };
 
@@ -79,6 +101,28 @@ type TrafficFlowUpsertRow = {
   deleted: boolean;
   specific_lane: string | null;
   measurement_side: string | null;
+  geom: string;
+  last_seen: string;
+  modified_time: string | null;
+  raw: unknown;
+};
+
+type TrafficCameraUpsertRow = {
+  id: string;
+  name: string | null;
+  camera_type: string | null;
+  status: string | null;
+  description: string | null;
+  direction: string | null;
+  county_no: number | null;
+  active: boolean;
+  deleted: boolean;
+  content_type: string | null;
+  icon_id: string | null;
+  photo_url: string | null;
+  photo_time: string | null;
+  has_full_size_photo: boolean | null;
+  has_sketch_image: boolean | null;
   geom: string;
   last_seen: string;
   modified_time: string | null;
@@ -237,6 +281,30 @@ async function fetchTrafficFlows(apiKey: string): Promise<TrafficFlow[]> {
     .filter((f) => f.Deleted !== true && f.VehicleType === "anyVehicle");
 }
 
+async function fetchTrafficCameras(apiKey: string): Promise<TrafficCamera[]> {
+  // Camera saknar namespace i Trafikverkets v2-query trots att Road.TrafficInfo
+  // används för övriga vägobjekt.
+  const body = `<REQUEST>
+  <LOGIN authenticationkey="${xmlAttribute(apiKey)}" />
+  <QUERY objecttype="Camera" schemaversion="1" limit="10000">
+    <FILTER>
+      <EQ name="Deleted" value="false" />
+    </FILTER>
+  </QUERY>
+</REQUEST>`;
+
+  const json = await fetchTrafikverketJson(
+    body,
+    "Trafikverket Camera API",
+    TRAFIKVERKET_CAMERA_TIMEOUT_MS,
+  );
+  const results: Array<{ Camera?: TrafficCamera[] }> =
+    (json as { RESPONSE?: { RESULT?: Array<{ Camera?: TrafficCamera[] }> } })?.RESPONSE?.RESULT ?? [];
+  return results
+    .flatMap((r) => r.Camera ?? [])
+    .filter((camera) => camera.Deleted !== true);
+}
+
 function parseWgs84(wkt: string | undefined): { lng: number; lat: number } | null {
   if (!wkt) return null;
   const m = wkt.match(/POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)/i);
@@ -260,18 +328,24 @@ function disturbanceToRow(d: Deviation, now: string): DisturbanceUpsertRow | nul
 function deviationToRow(d: Deviation, now: string): UpsertRow | null {
   const coord = parseWgs84(d.Geometry?.WGS84);
   if (!coord) return null;
-  const county = d.CountyNo && d.CountyNo.length > 0 ? d.CountyNo[0] ?? null : null;
   return {
     id: d.Id,
     icon_id: d.IconId ?? null,
     message: d.Message ?? null,
     road_number: d.RoadNumber ?? null,
-    county_no: county,
+    county_no: firstCountyNo(d.CountyNo),
     geom: `SRID=4326;POINT(${coord.lng} ${coord.lat})`,
     last_seen: now,
     modified_time: d.ModifiedTime ?? null,
     raw: d,
   };
+}
+
+function firstCountyNo(value: number | number[] | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const first = value[0];
+  return typeof first === "number" && Number.isFinite(first) ? first : null;
 }
 
 function trafficFlowToRow(f: TrafficFlow, now: string): TrafficFlowUpsertRow | null {
@@ -301,6 +375,33 @@ function trafficFlowToRow(f: TrafficFlow, now: string): TrafficFlowUpsertRow | n
   };
 }
 
+function trafficCameraToRow(camera: TrafficCamera, now: string): TrafficCameraUpsertRow | null {
+  if (!camera.Id) return null;
+  const coord = parseWgs84(camera.Geometry?.WGS84);
+  if (!coord) return null;
+  return {
+    id: camera.Id,
+    name: camera.Name ?? null,
+    camera_type: camera.Type ?? null,
+    status: camera.Status ?? null,
+    description: camera.Description ?? null,
+    direction: camera.Direction ?? null,
+    county_no: firstCountyNo(camera.CountyNo),
+    active: camera.Active ?? false,
+    deleted: camera.Deleted ?? false,
+    content_type: camera.ContentType ?? null,
+    icon_id: camera.IconId ?? null,
+    photo_url: camera.PhotoUrl ?? null,
+    photo_time: camera.PhotoTime ?? null,
+    has_full_size_photo: camera.HasFullSizePhoto ?? null,
+    has_sketch_image: camera.HasSketchImage ?? null,
+    geom: `SRID=4326;POINT(${coord.lng} ${coord.lat})`,
+    last_seen: now,
+    modified_time: camera.ModifiedTime ?? null,
+    raw: camera,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   const sharedSecret = (Deno.env.get("SCRAPE_SHARED_SECRET") ?? "").trim();
   if (!sharedSecret) {
@@ -325,9 +426,10 @@ Deno.serve(async (req: Request) => {
   const now = new Date().toISOString();
 
   try {
-    const [situationDeviations, trafficFlows] = await Promise.all([
+    const [situationDeviations, trafficFlows, trafficCameras] = await Promise.all([
       fetchSituationDeviations(apiKey),
       fetchTrafficFlows(apiKey),
+      fetchTrafficCameras(apiKey),
     ]);
     const { deviations, disturbances } = splitSituationDeviations(situationDeviations);
     const rows = deviations
@@ -339,6 +441,9 @@ Deno.serve(async (req: Request) => {
     const trafficFlowRows = trafficFlows
       .map((f) => trafficFlowToRow(f, now))
       .filter((r): r is TrafficFlowUpsertRow => r !== null);
+    const trafficCameraRows = trafficCameras
+      .map((camera) => trafficCameraToRow(camera, now))
+      .filter((r): r is TrafficCameraUpsertRow => r !== null);
 
     const client = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
@@ -362,6 +467,12 @@ Deno.serve(async (req: Request) => {
       trafficFlowRows,
       TRAFFIC_FLOW_UPSERT_BATCH_SIZE,
     );
+    const trafficCameraResult = await upsertInBatches(
+      client,
+      "traffic_cameras",
+      trafficCameraRows,
+      TRAFFIC_CAMERA_UPSERT_BATCH_SIZE,
+    );
 
     const summary = {
       ok: true,
@@ -377,6 +488,10 @@ Deno.serve(async (req: Request) => {
       traffic_flow_upserted: trafficFlowResult.attempted,
       traffic_flow_upsert_batches: trafficFlowResult.batches,
       traffic_flow_skipped_no_coord: trafficFlows.length - trafficFlowRows.length,
+      traffic_cameras_fetched: trafficCameras.length,
+      traffic_cameras_upserted: trafficCameraResult.attempted,
+      traffic_cameras_upsert_batches: trafficCameraResult.batches,
+      traffic_cameras_skipped_no_coord: trafficCameras.length - trafficCameraRows.length,
       elapsed_ms: Date.now() - start,
     };
     console.log("[scrape]", summary);

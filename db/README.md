@@ -1,6 +1,6 @@
 # db
 
-Databasschema för trafik-appen. Supabase Postgres + PostGIS, med migrations för events, NVDB/ÅDT, segmentrisk, störningar, TrafficFlow och publika RPC:er.
+Databasschema för trafik-appen. Supabase Postgres + PostGIS, med migrations för events, NVDB/ÅDT, segmentrisk, störningar, TrafficFlow, vägkameror och publika RPC:er.
 
 ## Applicera schema
 
@@ -82,6 +82,7 @@ Webbens serverkod använder typerna via `web/lib/supabaseServer.ts`. Kör `pnpm 
 - `0030_events_dedup_and_orphan_resnap.sql` — dedupad `events_in_bbox` för kartpunkter och timvis resnap av orphans. `resnap-orphan-events` är pausat i produktion sedan 2026-05-13; orphans visas fortsatt med vägnummer + geohash-fallback.
 - `0031_performance_indexes_disturbances_bbox.sql` — index för `events.first_seen` och GIST-baserad `disturbances_in_bbox`.
 - `0032_route_lane_penalties.sql` — index/RPC för reducerat Lastkajen-underlag till `Stora rondeller` och `Flerfiligt`. Kräver att `scripts/import-route-lane-penalties.sh` har importerat `route_large_roundabouts` och `route_multilane_segments` först.
+- `0033_traffic_cameras.sql` — Trafikverkets `Camera`-objekt, publik vy och `traffic_cameras_in_bbox`.
 
 ## Dataregler
 
@@ -89,7 +90,7 @@ Webbens serverkod använder typerna via `web/lib/supabaseServer.ts`. Kör `pnpm 
 - Kartpunkter dedupas via `events_in_bbox`; riskinfrastruktur och `segment_detail` dedupar logiska olyckor per `fid + message + road_number + first_seen-hour`.
 - Risk aggregeras per `fid`, inte `element_id`.
 - Riskrelaterade snap-/refresh-cronjobb är pausade i produktion; behandla `event_segments` och `risk_per_segment` som vilande data tills riskdelen återaktiveras.
-- `events.raw` ska inte exponeras publikt.
+- `events.raw`, `disturbances.raw`, `traffic_flow_measurements.raw` och `traffic_cameras.raw` ska inte exponeras publikt.
 - Publika, tunga RPC:er ska ha både bbox-filter och response-limit.
 - `route_lane_penalties_in_bbox(...)` returnerar max 4000 reducerade straffsegment och exponerar inte råtabellerna direkt till `anon`/`authenticated`.
 

@@ -18,6 +18,14 @@ const connectSrc = [
   "https://routing.xn--skravgar-0zae.se",
 ];
 
+const imgSrc = [
+  "'self'",
+  "data:",
+  "blob:",
+  "https://tiles.openfreemap.org",
+  "https://api.trafikinfo.trafikverket.se",
+];
+
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
@@ -25,7 +33,7 @@ const securityHeaders = [
       "default-src 'self'",
       `script-src ${scriptSrc.join(" ")}`,
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https://tiles.openfreemap.org",
+      `img-src ${imgSrc.join(" ")}`,
       "font-src 'self' data: https://tiles.openfreemap.org",
       `connect-src ${connectSrc.join(" ")}`,
       "worker-src 'self' blob:",

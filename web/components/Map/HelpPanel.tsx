@@ -12,6 +12,7 @@ export type HelpSectionId =
   | "routeMultilane"
   | "accidents"
   | "traffic"
+  | "cameras"
   | "disturbances"
   | "largeRoads";
 
@@ -25,7 +26,7 @@ type HelpLegendItem = {
   swatch: HelpLegendSwatch;
 };
 
-type HelpSectionIcon = "accidents" | "flow" | "disturbances" | "speed";
+type HelpSectionIcon = "accidents" | "flow" | "camera" | "disturbances" | "speed";
 
 type HelpSection = {
   id: HelpSectionId;
@@ -132,6 +133,18 @@ const layerHelpSections: HelpSection[] = [
     ],
   },
   {
+    id: "cameras",
+    icon: "camera",
+    title: "Kameror",
+    body: [
+      "Se Trafikverkets trafikflödes- och väglagskameror direkt i kartan.",
+      "Klicka på en kamera för att se den senaste bilden, kamerans namn och när bilden togs.",
+    ],
+    legend: [
+      { label: "Kamera med aktuell bild", swatch: { kind: "square", color: "#FFFFFF" } },
+    ],
+  },
+  {
     id: "disturbances",
     icon: "disturbances",
     title: "Trafikstörningar",
@@ -212,14 +225,14 @@ export function HelpPanel({
             <a href="https://api.trafikinfo.trafikverket.se/" target="_blank" rel="noreferrer">
               Trafikverket Open API
             </a>{" "}
-            för olyckor, störningar och liveflöde. NVDB via{" "}
+            för olyckor, störningar, liveflöde och kameror. NVDB via{" "}
             <a href="https://lastkajen.trafikverket.se/" target="_blank" rel="noreferrer">
               Lastkajen
             </a>{" "}
             för trafikmängd och hastigheter.
           </p>
           <p>
-            Olyckor, störningar och liveflöde hämtas från Trafikverket var 30:e minut.
+            Olyckor, störningar, liveflöde och kamerametadata hämtas från Trafikverket var 30:e minut.
             Kartan uppdaterar synliga lager ungefär varje minut medan sidan är öppen.
           </p>
           <p>

@@ -69,7 +69,7 @@ export function createBboxLoader(
     initialEnabled?: boolean;
     bboxPadding?: number;
     maxBboxAreaDeg2?: number;
-    fetchBbox: (b: Bbox) => Promise<void>;
+    fetchBbox: (b: Bbox) => Promise<boolean | void>;
     onLoadingChange?: LayerLoadingCallback;
   },
 ): BboxLoader {
@@ -106,8 +106,8 @@ export function createBboxLoader(
     inFlight = true;
     setLoading(true);
     try {
-      await opts.fetchBbox(padded);
-      cachedBbox = padded;
+      const didFetch = await opts.fetchBbox(padded);
+      if (didFetch !== false) cachedBbox = padded;
     } finally {
       inFlight = false;
       if (needsRefresh) {

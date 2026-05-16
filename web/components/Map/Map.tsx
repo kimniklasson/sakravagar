@@ -8,6 +8,7 @@ import styles from "./Map.module.css";
 import {
   focusRoute,
   focusLiveEvents,
+  refreshRouteTrafficCameraLayer,
   setRouteLayerData,
 } from "./layers";
 import type { GeocodeResult } from "@/app/api/geocode/route";
@@ -56,11 +57,13 @@ const mobileInfoBoxQuery = "(max-width: 767px)";
 const initialLayerLoading: MapLayerLoadingState = {
   accidents: false,
   traffic: false,
+  cameras: false,
   disturbances: false,
   largeRoads: false,
 };
 const LAYER_MIN_ZOOM = {
   traffic: 9,
+  cameras: 3,
   disturbances: 9,
   largeRoads: 8,
 } as const;
@@ -137,6 +140,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   const [activeHelpSectionId, setActiveHelpSectionId] = useState<HelpSectionId | null>("routeHighSpeed");
   const [accidentsOn, setAccidentsOn] = useState(false);
   const [trafficOn, setTrafficOn] = useState(false);
+  const [camerasOn, setCamerasOn] = useState(false);
   const [disturbancesOn, setDisturbancesOn] = useState(false);
   const [largeRoadsOn, setLargeRoadsOn] = useState(false);
   const [layerLoading, setLayerLoading] = useState<MapLayerLoadingState>(initialLayerLoading);
@@ -189,6 +193,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       const map = mapRef.current;
       if (map && mapLoadedRef.current) {
         setRouteLayerData(map, current, routeId, currentAvoids);
+        void refreshRouteTrafficCameraLayer(map, selectedRoute);
         focusRoute(map, [selectedRoute, ...current.filter((route) => route.id !== routeId)]);
       }
       setRouteNoticeText(null);
@@ -218,6 +223,13 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       return next;
     });
   }, [zoomToLayerMinZoom]);
+  const handleCamerasToggle = useCallback(() => {
+    setCamerasOn((current) => {
+      const next = !current;
+      if (next) zoomToLayerMinZoom(LAYER_MIN_ZOOM.cameras);
+      return next;
+    });
+  }, [zoomToLayerMinZoom]);
   const handleDisturbancesToggle = useCallback(() => {
     setDisturbancesOn((current) => {
       const next = !current;
@@ -237,6 +249,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   useRouteControlsBottom(routeControlsRef);
   useMapLibreLifecycle({
     accidentsOn,
+    camerasOn,
     containerRef,
     disturbancesOn,
     largeRoadsOn,
@@ -310,6 +323,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     const map = mapRef.current;
     if (map && mapLoadedRef.current) {
       setRouteLayerData(map, orderedRoutes, selectedRouteId, avoids);
+      void refreshRouteTrafficCameraLayer(map, selectedRoute);
       if (opts.focus) {
         focusRoute(
           map,
@@ -335,7 +349,10 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     setRouteCompareLoading(false);
     routeShareUrlsRef.current.clear();
     const map = mapRef.current;
-    if (map && mapLoadedRef.current) setRouteLayerData(map, []);
+    if (map && mapLoadedRef.current) {
+      setRouteLayerData(map, []);
+      void refreshRouteTrafficCameraLayer(map, null);
+    }
   };
   const routeSnapshotPayload = (route: RouteLine): RouteSharePayload => {
     return createRouteSharePayload({
@@ -461,6 +478,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
     const map = mapRef.current;
     if (map && mapLoadedRef.current) {
       setRouteLayerData(map, [selectedRoute], selectedRoute.id, routeAvoids);
+      void refreshRouteTrafficCameraLayer(map, selectedRoute);
       focusRoute(map, [selectedRoute]);
     }
   };
@@ -693,7 +711,10 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
       setRouteLines([]);
       setRouteProvider(null);
       const map = mapRef.current;
-      if (map && mapLoadedRef.current) setRouteLayerData(map, []);
+      if (map && mapLoadedRef.current) {
+        setRouteLayerData(map, []);
+        void refreshRouteTrafficCameraLayer(map, null);
+      }
       if (!opts.auto || err instanceof Error) {
         setRouteError(err instanceof Error ? err.message : "Kunde inte hitta en rutt.");
       }
@@ -990,6 +1011,13 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
             loading={trafficOn && layerLoading.traffic}
           />
           <LayerIconButton
+            label="Kameror"
+            icon="camera"
+            on={camerasOn}
+            onToggle={handleCamerasToggle}
+            loading={camerasOn && layerLoading.cameras}
+          />
+          <LayerIconButton
             label="Trafikstörningar"
             icon="disturbances"
             on={disturbancesOn}
@@ -1009,7 +1037,7 @@ export default function Map({ sharedRouteSlug, initialSharedRoutePayload = null 
   );
 }
 
-type LayerIconName = "layers" | "help" | "close" | "accidents" | "flow" | "disturbances" | "speed";
+type LayerIconName = "layers" | "help" | "close" | "accidents" | "flow" | "camera" | "disturbances" | "speed";
 
 function LayerIconButton({
   label,

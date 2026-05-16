@@ -1,5 +1,14 @@
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import maplibregl, {
+  type Map as MapLibreMap,
+  type MapGeoJSONFeature,
+} from "maplibre-gl";
 import type { SegmentDetail } from "@/app/api/segment/route";
+import {
+  ROUTE_TRAFFIC_CAMERA_HIT_LAYER_ID,
+  ROUTE_TRAFFIC_CAMERA_LAYER_ID,
+  TRAFFIC_CAMERA_HIT_LAYER_ID,
+  TRAFFIC_CAMERA_LAYER_ID,
+} from "./cameras";
 import {
   ROUTE_ACCIDENT_HIT_LAYER_ID,
   ROUTE_ACCIDENT_LAYER_ID,
@@ -42,6 +51,12 @@ export function addPopupHandler(map: MapLibreMap): void {
     DISTURBANCE_LAYER_ID,
     DISTURBANCE_HIT_LAYER_ID,
   ];
+  const cameraLayerIds = [
+    ROUTE_TRAFFIC_CAMERA_LAYER_ID,
+    ROUTE_TRAFFIC_CAMERA_HIT_LAYER_ID,
+    TRAFFIC_CAMERA_LAYER_ID,
+    TRAFFIC_CAMERA_HIT_LAYER_ID,
+  ];
   const trafficFlowLayerIds = [TRAFFIC_FLOW_LAYER_ID, TRAFFIC_FLOW_HIT_LAYER_ID];
   // Live-core ovanpå historisk circle, halo skippas (dekorativ - klick går
   // igenom till core eller faller till segment). Hit-target sist: fångar
@@ -53,7 +68,13 @@ export function addPopupHandler(map: MapLibreMap): void {
     CIRCLE_LAYER_ID,
     HIT_TARGET_LAYER_ID,
   ];
-  const allLayerIds = [...eventLayerIds, ...disturbanceLayerIds, ...trafficFlowLayerIds, ...segmentLayerIds];
+  const allLayerIds = [
+    ...eventLayerIds,
+    ...disturbanceLayerIds,
+    ...cameraLayerIds,
+    ...trafficFlowLayerIds,
+    ...segmentLayerIds,
+  ];
 
   for (const id of allLayerIds) {
     map.on("mouseenter", id, () => {
@@ -81,6 +102,12 @@ export function addPopupHandler(map: MapLibreMap): void {
       return;
     }
 
+    const cameraFeature = features.find((f) => cameraLayerIds.includes(f.layer.id));
+    if (cameraFeature) {
+      openTrafficCameraPopup(map, featurePointLngLat(cameraFeature) ?? e.lngLat, cameraFeature.properties);
+      return;
+    }
+
     const trafficFlowFeature = features.find((f) => trafficFlowLayerIds.includes(f.layer.id));
     if (trafficFlowFeature) {
       openTrafficFlowPopup(map, e.lngLat, trafficFlowFeature.properties);
@@ -101,6 +128,34 @@ export function addPopupHandler(map: MapLibreMap): void {
     if (!Number.isFinite(fid)) return;
     openSegmentPopup(map, e.lngLat, fid);
   });
+}
+
+function featurePointLngLat(feature: MapGeoJSONFeature): maplibregl.LngLatLike | null {
+  if (feature.geometry.type !== "Point") return null;
+  const [lng, lat] = feature.geometry.coordinates;
+  return typeof lng === "number" && typeof lat === "number" ? [lng, lat] : null;
+}
+
+function openTrafficCameraPopup(
+  map: MapLibreMap,
+  lngLat: maplibregl.LngLatLike,
+  props: Record<string, unknown> | null,
+): void {
+  const html = renderTrafficCamera(props ?? {});
+  if (!html) return;
+
+  const popup = new maplibregl.Popup({
+    anchor: "bottom",
+    closeButton: false,
+    closeOnClick: true,
+    maxWidth: "none",
+    offset: [0, -30],
+    className: "traffic-camera-popup",
+  })
+    .setLngLat(lngLat)
+    .setHTML(html)
+    .addTo(map);
+  void popup;
 }
 
 function openTrafficFlowPopup(
@@ -438,4 +493,14 @@ function renderTrafficFlow(props: Record<string, unknown>): string {
       ${updatedLine}
     </div>
   `;
+}
+
+function renderTrafficCamera(props: Record<string, unknown>): string {
+  const name = typeof props.name === "string" && props.name.trim()
+    ? props.name.trim()
+    : "Trafikkamera";
+  const photoUrl = typeof props.photo_url === "string" ? props.photo_url : "";
+  if (!photoUrl) return "";
+
+  return `<img class="traffic-camera-popup-image" src="${escapeHtml(photoUrl)}" alt="${escapeHtml(name)}" loading="lazy" referrerpolicy="no-referrer" />`;
 }

@@ -1,6 +1,6 @@
 # Trafiksäkerhets-app — projektanteckningar
 
-Senast uppdaterad: 2026-05-10
+Senast uppdaterad: 2026-05-16
 
 ## Idén
 
@@ -10,7 +10,7 @@ Säkravägar.se visar historisk och aktuell trafikdata på svenska vägar för a
 
 **Kartbaserade kontrollager + trygghetsrouting.**
 
-MVP:n visar olyckor, trafikflöde, trafikstörningar och höga hastigheter som kontrollager. Ruttplaneraren använder self-hostad GraphHopper för `Undvik om möjligt`-filter där höga hastigheter, trafikintensiva vägar, stadstrafik, broar och tunnlar påverkar vägkostnaden. Olyckor och störningar visas som lager/route-notices, inte som planeringsfilter.
+MVP:n visar olyckor, trafikflöde, vägkameror, trafikstörningar och höga hastigheter som kontrollager. Ruttplaneraren använder self-hostad GraphHopper för `Undvik om möjligt`-filter där höga hastigheter, trafikintensiva vägar, stadstrafik, broar, tunnlar, stora rondeller och flerfiligt påverkar vägkostnaden. Olyckor och störningar visas som lager/route-notices, inte som planeringsfilter. Vägkameror visas både som fristående kartlager och längs aktiv rutt när kameran ligger inom 100 meter från ruttens geometri.
 
 Alla tunga kartlager ska skyddas med bbox-area, Sverige-bounds och SQL/RPC-limit.
 
@@ -20,7 +20,7 @@ Alla tunga kartlager ska skyddas med bbox-area, Sverige-bounds och SQL/RPC-limit
 
 - ❌ **STRADA** — kräver formell ansökan och är inte lämplig som MVP-källa för kommersiell app.
 - ❌ **Transportstyrelsens/Trafikanalys publika statistik** — nationell/länsnivå, för grovt för vägbaserad analys.
-- ✅ **Trafikverkets öppna API** — `Situation`/`Deviation` och `TrafficFlow`, med koordinater och CC0-licens.
+- ✅ **Trafikverkets öppna API** — `Situation`/`Deviation`, `TrafficFlow` och `Camera`, med koordinater och CC0-licens.
 - ✅ **NVDB/Lastkajen** — vägnät, ÅDT och hastighetsdata. Används för risknormalisering, flödeslager, höghastighetsbadges och routing-scoring.
 
 ### Juridik och marknad
@@ -59,7 +59,7 @@ Viktigt: fortsätt samla data löpande. Varje dag utan polling är en dag mindre
 Högst relevanta kompletteringar:
 
 - **Kommunal trafikmängdsdata för innerstäder** — framtidsidé. Lastkajen/NVDB täcker större/statliga leder bra men kan lämna luckor på kommunala innerstadsgator, t.ex. centrala Göteborg och Stockholm. Malmö och Stockholm har nedladdningsbara öppna geodata; Göteborg har publik Power BI-vy men behöver helst stabil export/API. Bör först berika `Trafikintensiva vägar` och Flöde-lagret, och eventuellt kalibrera `Stadstrafik` sekundärt. Import bör normalisera källa, licens, mätår, metric-typ (`ÅDT`, `MVD`, `ÅMVD`), råvärde, normaliserat värde och geometri i separat lager innan union med NVDB.
-- **`TrafficSafetyCamera`** — ATK-kameror som proxy för kända farliga sträckor.
+- **`TrafficSafetyCamera`** — ATK-kameror som proxy för kända farliga sträckor. Skilj från `Camera`, som redan används för trafikflödes-/väglagskameror med aktuell bild.
 - **`RoadCondition`** — halka/friktion som realtidslager snarare än historisk heatmap.
 - **Viltolyckor/viltstängsel** — relevant i skogsområden men kräver separat källa/integration.
 

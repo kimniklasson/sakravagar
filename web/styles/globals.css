@@ -359,6 +359,44 @@ a:hover {
   margin-top: 2px;
 }
 
+.maplibregl-popup.traffic-camera-popup {
+  pointer-events: none;
+}
+
+.maplibregl-popup.traffic-camera-popup .maplibregl-popup-content {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.maplibregl-popup.traffic-camera-popup .maplibregl-popup-tip {
+  display: none;
+}
+
+.traffic-camera-popup-image {
+  display: block;
+  width: 288px;
+  max-width: calc(100vw - 32px);
+  height: auto;
+  margin: 0;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.traffic-camera-popup-empty {
+  display: flex;
+  align-items: center;
+  min-height: 120px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: var(--type-m-small-size);
+  line-height: var(--type-m-small-line);
+}
+
 /* === Maplibre attribution override (bottom-right info-button) ===
    Maplibre 4 renderar compact attribution som <details><summary>…</summary>
    <div class="…-inner">…</div></details>. Vi piggyback:ar på det — hörn-
@@ -526,5 +564,10 @@ a:hover {
 
   .seg-popup-body {
     padding: 16px;
+  }
+
+  .traffic-camera-popup .seg-popup-body {
+    width: auto;
+    min-width: 0;
   }
 }

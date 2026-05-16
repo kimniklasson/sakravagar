@@ -1,15 +1,16 @@
-# Current state — 2026-05-15
+# Current state — 2026-05-16
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt, `docs/routing-ops.md` för GraphHopper-drift och `docs/review-log.md` för reviewspåret. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
 
 ## Produktläge
 
-Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar kontrollager för historiska olyckor, pågående olyckor, trafikflöde, trafikstörningar och höga hastigheter. Routing använder self-hostad GraphHopper när env finns och OSRM som lokal fallback.
+Säkravägar.se är en Next/MapLibre-karta för personer som känner oro i trafiken. MVP:n visar kontrollager för historiska olyckor, pågående olyckor, trafikflöde, vägkameror, trafikstörningar och höga hastigheter. Routing använder self-hostad GraphHopper när env finns och OSRM som lokal fallback.
 
 Aktiva UI-lager:
 
 - **Olyckor** — historiska och pågående olyckor. Default av. Klick på olyckspunkter öppnar en kompakt popup med live/historisk etikett, väg, beskrivning och uppdateringstid.
 - **Trafikflöde** — ÅDT från NVDB/Lastkajen plus liveflöde från Trafikverket där mätdata finns. Default av. ÅDT-segment är medvetet inte klickbara; blå nyanser ska läsas som bakgrundssignal, inte som exakt segmentanalys. Liveflöde är klickbart och visar en kompakt popup med läge, fordon/timme, snitthastighet och uppdateringstid.
+- **Kameror** — Trafikverkets trafikflödes- och väglagskameror med direkt bildlänk. Default av som fristående kartlager. Lagret hämtar Sveriges kamerametadata en gång när det slås på, visas från zoom 3 och klustras lokalt till zoom 12. Klick på kameraikon öppnar en bild-popup med senaste kamerabilden utan extra metadata.
 - **Trafikstörningar** — aktuella vägarbeten/köer/störningar. Default av. Klick på störningspunkter öppnar en kompakt popup med påverkan, väg, beskrivning och uppdateringstid.
 - **Höga hastigheter** — badges för 80 km/h och högre. Default av.
 - **Hjälp** — ruttförslagens filterlogik, kartlager, legender, datakällor och senaste uppdatering.
@@ -40,9 +41,11 @@ GraphHopper custom models påverkar vägkostnaden för dessa filter. `Stora rond
 
 Olyckshistorik och trafikstörningar är kontrollager/route-notices, inte planeringsfilter. Vald rutt visar pågående störningar och liveolyckor ovanpå ruttlinjen även när motsvarande kartlager är avstängt. Route-notices matchar bara punkter nära själva rutten, dedupar endast mycket nära dubbletter och är klickbara via osynliga hit-target-lager så användaren kan se beskrivning, väg och uppdateringstid.
 
+Vald rutt visar även Trafikverkets kameror som ligger inom 100 meter från ruttens faktiska polyline. Detta ruttkamera-lager är separat från det globala kamera-lagret: det visas utan klustring och utan att användaren behöver slå på fristående `Kameror`. Kamerorna hämtas via samma `/api/cameras`-bbox-endpoint och filtreras klient-side mot aktiv rutt.
+
 `POST /api/route` är uppdelad efter arkitektur-reviewen: publika ruttyper ligger i `web/lib/routeTypes.ts`, och rena serverhjälpare ligger i `web/app/api/route/_routing/` (`types`, `request`, `timeout`, `telemetry`, `geometry`, `customModels`, `providers`, `providerFanout`, `routeDetails`, `dedupe`, `hybrid`, `scoring`, `highSpeedSelection`). Själva `route.ts` är nu i princip request handler, deadline/logging och response mapping.
 
-MapLibre-lagren är uppdelade efter frontend cleanup. `web/components/Map/layers.ts` är bara export-yta, medan lagren ligger i `web/components/Map/layers/`: `route.ts` för ruttlinjer/annotationer, `adt.ts` för ÅDT, `largeRoads.ts` för hastighetsbadges, `risk.ts` för vilande risklager, `events.ts` för olycks-/live-lagret, `liveTraffic.ts` för störningar och trafikflöde, `bbox.ts` för delad viewport-loader och `popups.ts` för popup-interaktioner. `Map.tsx` har också börjat tunnas ut via `web/components/Map/hooks/`: MapLibre-livscykel, viewport-CSS-vars, route-controls-mått, live event summary, ruttstopp-sök och egna via-punktsmarkörer ligger där. Delnings-/feedback-payloads och Google Maps-länkbygge ligger i `web/components/Map/routeSharing.ts`. CSS för ruttplanerare, ruttalternativ, hjälppanel, loading-indikator och ikon-SVG:er är utbruten från `Map.module.css` till komponentnära CSS Modules.
+MapLibre-lagren är uppdelade efter frontend cleanup. `web/components/Map/layers.ts` är bara export-yta, medan lagren ligger i `web/components/Map/layers/`: `route.ts` för ruttlinjer/annotationer, `adt.ts` för ÅDT, `largeRoads.ts` för hastighetsbadges, `risk.ts` för vilande risklager, `events.ts` för olycks-/live-lagret, `liveTraffic.ts` för störningar och trafikflöde, `cameras.ts` för globalt kamera-lager och ruttkameror, `bbox.ts` för delad viewport-loader och `popups.ts` för popup-interaktioner. `Map.tsx` har också börjat tunnas ut via `web/components/Map/hooks/`: MapLibre-livscykel, viewport-CSS-vars, route-controls-mått, live event summary, ruttstopp-sök och egna via-punktsmarkörer ligger där. Delnings-/feedback-payloads och Google Maps-länkbygge ligger i `web/components/Map/routeSharing.ts`. CSS för ruttplanerare, ruttalternativ, hjälppanel, loading-indikator och ikon-SVG:er är utbruten från `Map.module.css` till komponentnära CSS Modules.
 
 Hjälppanelen har en egen ruttsektion som förklarar vad varje undvik-filter försöker ge användaren: lugnare hastigheter, mindre intensiv trafik, mindre stadskörning, färre broar/tunnlar samt färre stora rondeller och flerfiliga segment när rimliga alternativ finns. Den ligger före kartlagersektionen för att hjälpa användaren förstå ruttförslagen innan hen tolkar datalagren.
 
@@ -67,6 +70,7 @@ Scrapade Trafikverket-flöden:
 - `Situation`/`Deviation` med `MessageType=Olycka` -> `events`
 - övriga relevanta `Situation`/`Deviation` -> `disturbances`
 - `TrafficFlow` -> `traffic_flow_measurements`
+- `Camera` -> `traffic_cameras`
 
 Alla tunga bbox-API:er ska ha:
 
@@ -105,7 +109,7 @@ Canonical domains:
 - Riskrelaterade snap-/refresh-jobb är pausade i prod, så `event_segments` och `risk_per_segment` ska ses som vilande data snarare än live-sanning.
 - Risk aggregeras per `fid`, inte `element_id`.
 - `nvdb_trafik_latest` väljer senaste mätperiod per `element_id` men behåller syskon-`fid`.
-- `events.raw`, `disturbances.raw` och `traffic_flow_measurements.raw` ska inte exponeras publikt.
+- `events.raw`, `disturbances.raw`, `traffic_flow_measurements.raw` och `traffic_cameras.raw` ska inte exponeras publikt.
 - ÅDT-/hastighetslager och vilande riskinfrastruktur är bbox/tile-baserade för att undvika stora Supabase-svar.
 - Rondell-/körfältsfiltren använder reducerade tabeller `route_large_roundabouts` och `route_multilane_segments`, bbox-RPC:n `route_lane_penalties_in_bbox(...)`, max 4000 returnerade rader och capped GraphHopper penalty areas per request. Import + `0032_route_lane_penalties.sql` kördes i Supabase 2026-05-14: `route_multilane_segments` 20 132 rader och `route_large_roundabouts` 3 064 rader.
 

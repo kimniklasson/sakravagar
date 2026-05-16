@@ -518,6 +518,11 @@
   -webkit-mask-image: url("/icons/flow.svg");
 }
 
+.layerIconGlyph_camera {
+  mask-image: url("/icons/camera.svg");
+  -webkit-mask-image: url("/icons/camera.svg");
+}
+
 .layerIconGlyph_live {
   mask-image: url("/icons/live.svg");
   -webkit-mask-image: url("/icons/live.svg");

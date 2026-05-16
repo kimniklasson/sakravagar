@@ -8,10 +8,13 @@ import {
   addEventsLayer,
   addRouteLayer,
   addLargeRoadsLayer,
+  addTrafficCameraLayer,
   addTrafficFlowLayer,
   addPopupHandler,
   focusRoute,
   refreshDisturbancesLayer,
+  refreshRouteTrafficCameraLayer,
+  refreshTrafficCameraLayer,
   refreshTrafficFlowLayer,
   setEventsLayerVisible,
   setRouteLayerData,
@@ -26,13 +29,15 @@ type LayerControllers = {
   adt?: LayerController;
   disturbances?: LayerController;
   trafficFlow?: LayerController;
+  trafficCameras?: LayerController;
   largeRoads?: LayerController;
 };
-type LayerLoadingSource = "accidents" | "trafficAdt" | "trafficFlow" | "disturbances" | "largeRoads";
+type LayerLoadingSource = "accidents" | "trafficAdt" | "trafficFlow" | "trafficCameras" | "disturbances" | "largeRoads";
 
 export type MapLayerLoadingState = {
   accidents: boolean;
   traffic: boolean;
+  cameras: boolean;
   disturbances: boolean;
   largeRoads: boolean;
 };
@@ -40,6 +45,7 @@ export type MapLayerLoadingState = {
 const emptyLayerLoadingState = (): MapLayerLoadingState => ({
   accidents: false,
   traffic: false,
+  cameras: false,
   disturbances: false,
   largeRoads: false,
 });
@@ -48,12 +54,14 @@ const emptyLayerLoadingSources = (): Record<LayerLoadingSource, boolean> => ({
   accidents: false,
   trafficAdt: false,
   trafficFlow: false,
+  trafficCameras: false,
   disturbances: false,
   largeRoads: false,
 });
 
 export function useMapLibreLifecycle({
   accidentsOn,
+  camerasOn,
   containerRef,
   disturbancesOn,
   largeRoadsOn,
@@ -69,6 +77,7 @@ export function useMapLibreLifecycle({
   trafficOn,
 }: {
   accidentsOn: boolean;
+  camerasOn: boolean;
   containerRef: RefObject<HTMLDivElement | null>;
   disturbancesOn: boolean;
   largeRoadsOn: boolean;
@@ -85,6 +94,7 @@ export function useMapLibreLifecycle({
 }): void {
   const layerCtrlRef = useRef<LayerControllers>({});
   const accidentsOnRef = useRef(accidentsOn);
+  const camerasOnRef = useRef(camerasOn);
   const disturbancesOnRef = useRef(disturbancesOn);
   const largeRoadsOnRef = useRef(largeRoadsOn);
   const trafficOnRef = useRef(trafficOn);
@@ -97,12 +107,14 @@ export function useMapLibreLifecycle({
     setLayerLoading({
       accidents: sources.accidents,
       traffic: sources.trafficAdt || sources.trafficFlow,
+      cameras: sources.trafficCameras,
       disturbances: sources.disturbances,
       largeRoads: sources.largeRoads,
     });
   }, [setLayerLoading]);
 
   useEffect(() => { accidentsOnRef.current = accidentsOn; }, [accidentsOn]);
+  useEffect(() => { camerasOnRef.current = camerasOn; }, [camerasOn]);
   useEffect(() => { disturbancesOnRef.current = disturbancesOn; }, [disturbancesOn]);
   useEffect(() => { largeRoadsOnRef.current = largeRoadsOn; }, [largeRoadsOn]);
   useEffect(() => { trafficOnRef.current = trafficOn; }, [trafficOn]);
@@ -155,19 +167,28 @@ export function useMapLibreLifecycle({
             onLoadingChange: (loading) => setLayerLoadingSource("trafficFlow", loading),
           });
           layerCtrlRef.current.trafficFlow.setVisible(trafficOnRef.current);
+          layerCtrlRef.current.trafficCameras = addTrafficCameraLayer(map, {
+            onLoadingChange: (loading) => setLayerLoadingSource("trafficCameras", loading),
+          });
+          layerCtrlRef.current.trafficCameras.setVisible(camerasOnRef.current);
           addRouteLayer(map, selectRouteById);
           if (routeLinesRef.current.length > 0) {
+            const selectedRoute = routeLinesRef.current.find((route) => route.id === selectedRouteIdRef.current)
+              ?? routeLinesRef.current[0]
+              ?? null;
             setRouteLayerData(
               map,
               routeLinesRef.current,
               selectedRouteIdRef.current,
               routeAvoidsRef.current,
             );
+            void refreshRouteTrafficCameraLayer(map, selectedRoute);
             focusRoute(map, routeLinesRef.current);
           }
           const refreshes: Promise<unknown>[] = [];
           if (disturbancesOnRef.current) refreshes.push(refreshDisturbancesLayer(map));
           if (trafficOnRef.current) refreshes.push(refreshTrafficFlowLayer(map));
+          if (camerasOnRef.current) refreshes.push(refreshTrafficCameraLayer(map));
           return Promise.all(refreshes);
         })
         .finally(() => {
@@ -209,6 +230,10 @@ export function useMapLibreLifecycle({
   }, [trafficOn]);
 
   useEffect(() => {
+    layerCtrlRef.current.trafficCameras?.setVisible(camerasOn);
+  }, [camerasOn]);
+
+  useEffect(() => {
     layerCtrlRef.current.disturbances?.setVisible(disturbancesOn);
   }, [disturbancesOn]);
 
@@ -228,6 +253,7 @@ export function useMapLibreLifecycle({
       }
       if (disturbancesOnRef.current) void refreshDisturbancesLayer(map);
       if (trafficOnRef.current) void refreshTrafficFlowLayer(map);
+      if (camerasOnRef.current) void refreshTrafficCameraLayer(map);
     }, 60_000);
     return () => window.clearInterval(id);
   }, [mapLoadedRef, mapRef, setLayerLoadingSource]);

@@ -1,6 +1,6 @@
 # web
 
-Next.js App Router + MapLibre GL för Säkravägar. Visar kontrollager för olyckor, flöde, störningar och höga hastigheter samt ruttplanering med trygghetsfilter.
+Next.js App Router + MapLibre GL för Säkravägar. Visar kontrollager för olyckor, trafikflöde, vägkameror, störningar och höga hastigheter samt ruttplanering med trygghetsfilter.
 
 ## Köra lokalt
 
@@ -44,7 +44,7 @@ web/
 │   ├── routeModel.ts         # klientranking, labels, cache
 │   ├── routeSharing.ts       # delning, feedback och externa ruttlänkar
 │   ├── layers.ts             # export-yta för MapLibre-lager
-│   ├── layers/               # rutt, ÅDT, hastighet, risk, live/störningar, popup
+│   ├── layers/               # rutt, ÅDT, hastighet, risk, live/störningar, kameror, popup
 │   └── Map.module.css
 ├── lib/
 │   └── routeTypes.ts         # delade ruttsvarstyper
@@ -66,6 +66,7 @@ web/
 - `/api/risk` — vilande segmentrisk via `risk_in_bbox`; UI-lagret är pausat tills datan är mognare.
 - `/api/adt` — ÅDT/flöde via `adt_in_bbox`.
 - `/api/traffic-flow` — aktiva TrafficFlow-mätningar snappade till segment.
+- `/api/cameras` — aktiva Trafikverket-kameror inom bbox med direkt bildlänk. Används för både globalt kamera-lager och kameror inom 100 m från aktiv rutt.
 - `/api/disturbances` — aktiva vägarbeten/kö-/trafikstörningar inom bbox.
 - `/api/large-roads` — höghastighetssegment för 80+-badges.
 - `/api/geocode` — Nominatim-proxy för svensk search/reverse.
@@ -89,8 +90,12 @@ Server-side Supabase-klienter ska skapas via `web/lib/supabaseServer.ts`, som an
 - `Stadstrafik`
 - `Broar`
 - `Tunnlar`
+- `Stora rondeller`
+- `Flerfiligt`
 
 GraphHopper påverkar dessa filter via custom model när env finns. Trafikintensitet använder ÅDT som bas och liveflöde som förstärkning. Stadstrafik använder statiska stadszoner och `road_class`/`max_speed`, eftersom vår GraphHopper-cache inte exponerar `urban_density`. Olyckor och störningar är kontrollager/route-notices, inte planeringsfilter.
+
+Vald rutt visar Trafikverkets kameror som ligger inom 100 meter från ruttens geometri. Det är ett separat ruttlager utan klustring och är oberoende av om användaren har slagit på det globala kamera-lagret.
 
 ## Deploy
 

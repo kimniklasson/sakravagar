@@ -394,6 +394,75 @@ export type Database = {
         }
         Relationships: []
       }
+      traffic_cameras: {
+        Row: {
+          active: boolean
+          camera_type: string | null
+          content_type: string | null
+          county_no: number | null
+          deleted: boolean
+          description: string | null
+          direction: string | null
+          first_seen: string
+          geom: unknown
+          has_full_size_photo: boolean | null
+          has_sketch_image: boolean | null
+          icon_id: string | null
+          id: string
+          last_seen: string
+          modified_time: string | null
+          name: string | null
+          photo_time: string | null
+          photo_url: string | null
+          raw: Json
+          status: string | null
+        }
+        Insert: {
+          active?: boolean
+          camera_type?: string | null
+          content_type?: string | null
+          county_no?: number | null
+          deleted?: boolean
+          description?: string | null
+          direction?: string | null
+          first_seen?: string
+          geom: unknown
+          has_full_size_photo?: boolean | null
+          has_sketch_image?: boolean | null
+          icon_id?: string | null
+          id: string
+          last_seen?: string
+          modified_time?: string | null
+          name?: string | null
+          photo_time?: string | null
+          photo_url?: string | null
+          raw: Json
+          status?: string | null
+        }
+        Update: {
+          active?: boolean
+          camera_type?: string | null
+          content_type?: string | null
+          county_no?: number | null
+          deleted?: boolean
+          description?: string | null
+          direction?: string | null
+          first_seen?: string
+          geom?: unknown
+          has_full_size_photo?: boolean | null
+          has_sketch_image?: boolean | null
+          icon_id?: string | null
+          id?: string
+          last_seen?: string
+          modified_time?: string | null
+          name?: string | null
+          photo_time?: string | null
+          photo_url?: string | null
+          raw?: Json
+          status?: string | null
+        }
+        Relationships: []
+      }
       traffic_flow_measurements: {
         Row: {
           average_vehicle_speed: number | null
@@ -616,6 +685,75 @@ export type Database = {
         }
         Relationships: []
       }
+      traffic_cameras_public: {
+        Row: {
+          active: boolean | null
+          camera_type: string | null
+          content_type: string | null
+          county_no: number | null
+          deleted: boolean | null
+          description: string | null
+          direction: string | null
+          first_seen: string | null
+          has_full_size_photo: boolean | null
+          has_sketch_image: boolean | null
+          icon_id: string | null
+          id: string | null
+          last_seen: string | null
+          lat: number | null
+          lng: number | null
+          modified_time: string | null
+          name: string | null
+          photo_time: string | null
+          photo_url: string | null
+          status: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          camera_type?: string | null
+          content_type?: string | null
+          county_no?: number | null
+          deleted?: boolean | null
+          description?: string | null
+          direction?: string | null
+          first_seen?: string | null
+          has_full_size_photo?: boolean | null
+          has_sketch_image?: boolean | null
+          icon_id?: string | null
+          id?: string | null
+          last_seen?: string | null
+          lat?: never
+          lng?: never
+          modified_time?: string | null
+          name?: string | null
+          photo_time?: string | null
+          photo_url?: string | null
+          status?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          camera_type?: string | null
+          content_type?: string | null
+          county_no?: number | null
+          deleted?: boolean | null
+          description?: string | null
+          direction?: string | null
+          first_seen?: string | null
+          has_full_size_photo?: boolean | null
+          has_sketch_image?: boolean | null
+          icon_id?: string | null
+          id?: string | null
+          last_seen?: string | null
+          lat?: never
+          lng?: never
+          modified_time?: string | null
+          name?: string | null
+          photo_time?: string | null
+          photo_url?: string | null
+          status?: string | null
+        }
+        Relationships: []
+      }
       traffic_flow_public: {
         Row: {
           average_vehicle_speed: number | null
@@ -832,6 +970,35 @@ export type Database = {
       }
       segment_detail: { Args: { p_fid: number }; Returns: Json }
       snap_pending_events: { Args: { p_limit?: number }; Returns: number }
+      traffic_cameras_in_bbox: {
+        Args: {
+          max_lat: number
+          max_lng: number
+          min_lat: number
+          min_lng: number
+        }
+        Returns: {
+          active: boolean
+          camera_type: string
+          content_type: string
+          county_no: number
+          description: string
+          direction: string
+          first_seen: string
+          has_full_size_photo: boolean
+          has_sketch_image: boolean
+          icon_id: string
+          id: string
+          last_seen: string
+          lat: number
+          lng: number
+          modified_time: string
+          name: string
+          photo_time: string
+          photo_url: string
+          status: string
+        }[]
+      }
       traffic_flow_segments_in_bbox: {
         Args: {
           active_since?: string
