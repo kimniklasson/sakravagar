@@ -114,6 +114,15 @@ Status efter route- och layer-cleanup:
 - Första `web/components/Map/Map.module.css`-splitten är gjord: `RoutePlannerBox`, `RouteAlternativesTray`, `HelpPanel`, `RouteLoadingIndicator` och `MapIcons` har egna CSS Modules. `Map.module.css` är kvar som kartskal/styrpanel: info/live/time-box, lagerkontroller, högerkontroller, via-marker och mobil-attribution.
 - `_routing/scoring.ts`, `layers/route.ts` och `layers/largeRoads.ts` är accepterade specialistmoduler för nu. Dela först om ändringar i respektive område gör dem kognitivt tunga igen.
 
+## 2026-05-17 — Frontend filsplit: routeplanner-controller
+
+Åtgärdat/landat:
+
+- Flyttade routeplanner-orchestration från `web/components/Map/Map.tsx` till `web/components/Map/hooks/useRoutePlannerController.ts`: route state, vald rutt, shared-route loading, geokodning, auto-planering, cache/fetch, delningslänk, Google Maps-länk och feedback.
+- Flyttade `InfoBox` och `LayerIconButton` till egna komponentfiler.
+- Delad mobil viewport-check ligger i `web/components/Map/viewport.ts`; route stop-ersättning ligger som helper i `routeModel.ts`.
+- `Map.tsx` är efter detta cirka 390 rader och fungerar främst som kart-/kontrollkomposition.
+
 ## 2026-05-11 — Loadingstate-experiment
 
 Ett dev-only experiment byggdes för att animera synliga vägar med shimmer medan rutter beräknas. Effekten gick att justera via ett temporärt labb, men upplevdes för hetsig även vid långsammare tider.

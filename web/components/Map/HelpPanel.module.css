@@ -228,6 +228,13 @@
   margin: 0 0 12px;
 }
 
+.helpSourcesTitle {
+  composes: type-medium from global;
+  margin: 16px 0 8px;
+  color: var(--color-white);
+  font-weight: 400;
+}
+
 .helpSources p:last-child {
   margin-bottom: 0;
 }
@@ -235,6 +242,19 @@
 .helpSources a {
   color: inherit;
   text-decoration: underline;
+}
+
+.helpLimitations {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.helpLimitations li {
+  margin: 0 0 6px;
+}
+
+.helpLimitations li:last-child {
+  margin-bottom: 0;
 }
 
 .helpSourcesUpdated {

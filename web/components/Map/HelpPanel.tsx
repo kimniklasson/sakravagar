@@ -239,6 +239,14 @@ export function HelpPanel({
             {collectionText} Pågående olyckor räknas som live när de har setts inom de senaste 90 minuterna.
             Data är preliminär och bör ses som stöd, inte som enda underlag för vägval.
           </p>
+          <h3 className={styles.helpSourcesTitle}>Användning och begränsningar</h3>
+          <ul className={styles.helpLimitations}>
+            <li>Data kan vara försenad, saknas eller vara fel.</li>
+            <li>Trafikregler, skyltar och vägförhållanden går alltid före appen.</li>
+            <li>Rutterna är beslutsstöd, inte en garanti för hur vägen känns.</li>
+            <li>Använd inte appen aktivt medan du kör.</li>
+            <li>Tjänsten är inte medicinsk rådgivning eller behandling för oro eller panik.</li>
+          </ul>
           <p className={styles.helpSourcesUpdated}>{dataUpdatedText}</p>
         </div>
       </div>

@@ -177,6 +177,14 @@ export function isCustomRouteStop(stop: RouteStop): boolean {
   return stop.id.startsWith(customRouteStopIdPrefix);
 }
 
+export function replaceRouteStopById(
+  stops: RouteStop[],
+  id: string,
+  patch: Partial<Omit<RouteStop, "id">>,
+): RouteStop[] {
+  return stops.map((stop) => (stop.id === id ? { ...stop, ...patch } : stop));
+}
+
 export function dedupeRouteCoordinates(coordinates: [number, number][]): [number, number][] {
   return coordinates.filter((coord, index, list) => {
     const prev = list[index - 1];
