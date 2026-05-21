@@ -451,37 +451,75 @@ function routeAvoidedMetricCount(route: RouteLine, avoids: RouteAvoidState): num
   return routeAlternativeRows(route, avoids).filter((row) => row.tone === "positive").length;
 }
 
-function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: RouteAvoidOption): boolean {
-  const current = option === "trafficIntensity" || option === "cityTraffic"
+function routeTitleOptionValue(route: RouteLine, option: RouteAvoidOption): number | null {
+  return option === "trafficIntensity" || option === "cityTraffic"
     ? routeScoreValue(route, option)
     : routeCappedExposureValue(route, option);
-  if (current === null) return false;
+}
 
-  const values = routes
-    .map((candidate) => (
-      option === "trafficIntensity" || option === "cityTraffic"
-        ? routeScoreValue(candidate, option)
-        : routeCappedExposureValue(candidate, option)
-    ))
-    .filter((value): value is number => value !== null);
-  if (!values.length) return false;
-  return current <= Math.min(...values) + 0.001;
+function compareRoutesByTimeDistance(a: RouteLine, b: RouteLine, routes: RouteLine[]): number {
+  if (a.durationSeconds !== b.durationSeconds) return a.durationSeconds - b.durationSeconds;
+  if (a.distanceMeters !== b.distanceMeters) return a.distanceMeters - b.distanceMeters;
+  return routes.findIndex((route) => route.id === a.id) - routes.findIndex((route) => route.id === b.id);
+}
+
+function routeFastestTitleWinner(routes: RouteLine[]): RouteLine | null {
+  return [...routes].sort((a, b) => compareRoutesByTimeDistance(a, b, routes))[0] ?? null;
+}
+
+function routeShortestTitleWinner(routes: RouteLine[]): RouteLine | null {
+  return [...routes].sort((a, b) => {
+    if (a.distanceMeters !== b.distanceMeters) return a.distanceMeters - b.distanceMeters;
+    if (a.durationSeconds !== b.durationSeconds) return a.durationSeconds - b.durationSeconds;
+    return routes.findIndex((route) => route.id === a.id) - routes.findIndex((route) => route.id === b.id);
+  })[0] ?? null;
+}
+
+function routeBestForOption(routes: RouteLine[], option: RouteAvoidOption): RouteLine | null {
+  const ranked = routes
+    .map((candidate) => ({ route: candidate, value: routeTitleOptionValue(candidate, option) }))
+    .filter((candidate): candidate is { route: RouteLine; value: number } => candidate.value !== null)
+    .sort((a, b) => {
+      if (Math.abs(a.value - b.value) > 0.001) return a.value - b.value;
+      return compareRoutesByTimeDistance(a.route, b.route, routes);
+    });
+
+  return ranked[0]?.route ?? null;
+}
+
+function routeIsBestForOption(route: RouteLine, routes: RouteLine[], option: RouteAvoidOption): boolean {
+  return routeBestForOption(routes, option)?.id === route.id;
 }
 
 function routeImprovesOption(route: RouteLine, baseline: RouteLine, option: RouteAvoidOption): boolean {
-  const current = option === "trafficIntensity" || option === "cityTraffic"
-    ? routeScoreValue(route, option)
-    : routeCappedExposureValue(route, option);
-  const base = option === "trafficIntensity" || option === "cityTraffic"
-    ? routeScoreValue(baseline, option)
-    : routeCappedExposureValue(baseline, option);
+  const current = routeTitleOptionValue(route, option);
+  const base = routeTitleOptionValue(baseline, option);
   if (current === null || base === null) return false;
   if (option === "trafficIntensity" || option === "cityTraffic") return base - current > 0.025;
   return base - current > 25;
 }
 
-function routeIsBaseline(route: RouteLine, baseline: RouteLine): boolean {
-  return route.id === baseline.id || route.source === "fastest";
+function routeImprovesAnyOption(route: RouteLine, baseline: RouteLine, options: RouteAvoidOption[]): boolean {
+  return options.some((option) => routeImprovesOption(route, baseline, option));
+}
+
+function routeCalmTitleWinner(routes: RouteLine[], baseline: RouteLine, avoids: RouteAvoidState): RouteLine | null {
+  const activeOptions = activeAvoidOptionsForUi(avoids);
+  const minimumAvoidedCount = Math.max(2, activeOptions.length - 1);
+  if (activeOptions.length <= 1) return null;
+
+  const ranked = routes
+    .map((candidate) => ({ route: candidate, avoidedCount: routeAvoidedMetricCount(candidate, avoids) }))
+    .filter((candidate) => (
+      candidate.avoidedCount >= minimumAvoidedCount &&
+      routeImprovesAnyOption(candidate.route, baseline, activeOptions)
+    ))
+    .sort((a, b) => {
+      if (a.avoidedCount !== b.avoidedCount) return b.avoidedCount - a.avoidedCount;
+      return compareRoutesByTimeDistance(a.route, b.route, routes);
+    });
+
+  return ranked[0]?.route ?? null;
 }
 
 function routeAlternativeTitle(
@@ -495,13 +533,12 @@ function routeAlternativeTitle(
   if (isCustomRoute) return "Egen väg";
 
   const activeOptions = activeAvoidOptionsForUi(avoids);
-  if (!activeOptions.length || routeIsBaseline(route, baseline)) return "Snabbaste";
+  const fastestRoute = routeFastestTitleWinner(routes);
+  if (fastestRoute?.id === route.id) return "Snabbast";
+  if (!activeOptions.length) return "Alternativ rutt";
 
-  const shortestDistance = Math.min(...routes.map((candidate) => candidate.distanceMeters));
-  if (route.distanceMeters <= shortestDistance + 50) return "Kortast";
-
-  const avoidedCount = routeAvoidedMetricCount(route, avoids);
-  if (activeOptions.length > 1 && avoidedCount >= Math.max(2, activeOptions.length - 1)) {
+  const calmRoute = routeCalmTitleWinner(routes, baseline, avoids);
+  if (calmRoute?.id === route.id) {
     return "Mest lugn";
   }
 
@@ -539,8 +576,16 @@ function routeAlternativeTitle(
     return routeCappedExposureValue(route, "multilane") === 0 ? "Utan flerfiligt" : "Mindre flerfiligt";
   }
 
-  if (routeExtraMinutes(route, baseline) <= 10 && activeOptions.length > 1) return "Balanserad";
-  return index === 1 ? "Alternativ rutt" : "Mindre intensiv";
+  const improvesAnyActiveOption = routeImprovesAnyOption(route, baseline, activeOptions);
+  if (improvesAnyActiveOption && routeExtraMinutes(route, baseline) <= 10 && activeOptions.length > 1) {
+    return "Balanserad";
+  }
+  if (improvesAnyActiveOption) return "Lugnare alternativ";
+
+  const shortestRoute = routeShortestTitleWinner(routes);
+  if (shortestRoute?.id === route.id) return "Kortast";
+
+  return index === 1 ? "Alternativ rutt" : "Alternativ väg";
 }
 
 export function routeAlternativeCopy(

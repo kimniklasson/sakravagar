@@ -187,6 +187,127 @@ describe("routeAlternativeCopy", () => {
     ]);
   });
 
+  it("labels only the quickest presented route as fastest", () => {
+    const quickest = route("quickest", {
+      source: "fastest-alternatives",
+      durationSeconds: 600,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0.8 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 5_500 },
+    });
+    const originalBaseline = route("original-baseline", {
+      source: "fastest",
+      durationSeconds: 640,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0.7 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 4_800 },
+    });
+    const calm = route("calm", {
+      durationSeconds: 820,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0 },
+    });
+    const routes = [quickest, calm, originalBaseline];
+
+    expect(routeAlternativeCopy(quickest, 0, quickest, avoids({ highSpeed: true }), routes, false).title)
+      .toBe("Snabbast");
+    expect(routeAlternativeCopy(originalBaseline, 2, quickest, avoids({ highSpeed: true }), routes, false).title)
+      .not.toBe("Snabbast");
+  });
+
+  it("uses the high-speed title for one best matching route when several avoid it", () => {
+    const fastest = route("fastest", {
+      avoidScores: { ...route("x").avoidScores, highSpeed: 1 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 8_000 },
+    });
+    const calmFast = route("calm-fast", {
+      durationSeconds: 720,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0 },
+    });
+    const calmSlow = route("calm-slow", {
+      durationSeconds: 780,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0 },
+    });
+    const routes = [calmFast, calmSlow, fastest];
+
+    expect(routeAlternativeCopy(calmFast, 0, fastest, avoids({ highSpeed: true }), routes, false).title)
+      .toBe("Lägre hastigheter");
+    expect(routeAlternativeCopy(calmSlow, 1, fastest, avoids({ highSpeed: true }), routes, false).title)
+      .toBe("Lugnare alternativ");
+  });
+
+  it("prioritizes an active filter title over the shortest title", () => {
+    const fastest = route("fastest", {
+      distanceMeters: 10_000,
+      durationSeconds: 600,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 1 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 6_000 },
+    });
+    const shortAndCalm = route("short-and-calm", {
+      distanceMeters: 9_600,
+      durationSeconds: 720,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0 },
+    });
+    const routes = [shortAndCalm, fastest];
+
+    expect(routeAlternativeCopy(shortAndCalm, 0, fastest, avoids({ highSpeed: true }), routes, false).title)
+      .toBe("Lägre hastigheter");
+  });
+
+  it("does not use the calm title when a slower route does not improve active filters", () => {
+    const fastest = route("fastest", {
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0, trafficIntensity: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0, trafficIntensityMeters: 0 },
+    });
+    const sameExposure = route("same-exposure", {
+      durationSeconds: 720,
+      distanceMeters: 10_500,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0, trafficIntensity: 0 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0, trafficIntensityMeters: 0 },
+    });
+    const routes = [fastest, sameExposure];
+
+    expect(routeAlternativeCopy(
+      sameExposure,
+      1,
+      fastest,
+      avoids({ highSpeed: true, trafficIntensity: true }),
+      routes,
+      false,
+    ).title).toBe("Alternativ rutt");
+  });
+
+  it("uses balanced only when a multi-filter route improves an active filter", () => {
+    const fastest = route("fastest", {
+      durationSeconds: 600,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 1, trafficIntensity: 0.6 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 8_000, trafficIntensityMeters: 5_000 },
+    });
+    const bestCalm = route("best-calm", {
+      durationSeconds: 1_400,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0, trafficIntensity: 0.1 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 0, trafficIntensityMeters: 500 },
+    });
+    const balanced = route("balanced", {
+      durationSeconds: 900,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 0.45, trafficIntensity: 0.6 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 4_000, trafficIntensityMeters: 5_000 },
+    });
+    const noImprovement = route("no-improvement", {
+      durationSeconds: 900,
+      distanceMeters: 11_000,
+      avoidScores: { ...route("x").avoidScores, highSpeed: 1, trafficIntensity: 0.6 },
+      exposure: { ...route("x").exposure, highSpeedMeters: 8_000, trafficIntensityMeters: 5_000 },
+    });
+    const routeAvoids = avoids({ highSpeed: true, trafficIntensity: true });
+
+    expect(routeAlternativeCopy(balanced, 2, fastest, routeAvoids, [fastest, bestCalm, balanced], false).title)
+      .toBe("Balanserad");
+    expect(routeAlternativeCopy(noImprovement, 2, fastest, routeAvoids, [fastest, bestCalm, noImprovement], false).title)
+      .toBe("Alternativ väg");
+  });
+
   it("shows metrics for large roundabouts and multilane filters", () => {
     const fastest = route("fastest", {
       avoidScores: { ...route("x").avoidScores, largeRoundabouts: 0.3, multilane: 0.5 },

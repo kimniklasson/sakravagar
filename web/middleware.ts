@@ -3,6 +3,7 @@ import {
   CLIENT_IP_HEADER,
   REQUEST_ID_HEADER,
 } from "./app/api/_utils";
+import { ROUTE_RATE_LIMIT_MESSAGE } from "./lib/routeErrorMessages";
 
 type RateLimitRule = {
   id: string;
@@ -116,8 +117,11 @@ export function middleware(req: NextRequest) {
     const bucket = hitBucket(`${rule.id}:${ip}`, rule, now);
     if (bucket.count > rule.max) {
       const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+      const error = req.nextUrl.pathname === "/api/route"
+        ? ROUTE_RATE_LIMIT_MESSAGE
+        : "rate limit exceeded";
       return NextResponse.json(
-        { error: "rate limit exceeded" },
+        { error },
         {
           status: 429,
           headers: {

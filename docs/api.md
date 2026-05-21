@@ -87,6 +87,7 @@ Performance:
 - timeout returnerar `504` med användarcopy.
 - Cloudflare Free rate-limit skyddar exakt `/api/route` före Vercel: 10 requests / 10 seconds per IP, action `Block`, duration 10 seconds.
 - per-instans concurrency cap skyddar GraphHopper från för många samtidiga `/api/route`-anrop. Default är max 8 aktiva totalt och max 3 per klient-IP. Överskridning returnerar `429`, `Retry-After` och `x-request-id`.
+- `429`, `504` och generiska route-fel returnerar svensk användarcopy. Kapacitetsrelaterade fel hänvisar till `kontakt@sakravagar.se` för bidrag till stabilare drift.
 
 Route-observability loggas som `api_observation` och innehåller `requestId`, filter, antal koordinatstopp, alternativ-count, tidsbudget, provider/fallback, total tid, provider-tid, scoring-tid, GraphHopper request-/timeout-counts, kandidatantal och antal rutter tillbaka. Mjuka fallbackar i routing/scoring loggas som `api_warning`. Loggarna ska inte innehålla koordinater, adresser eller geometrier.
 

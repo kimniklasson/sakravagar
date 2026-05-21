@@ -302,8 +302,9 @@ export function RoutePlannerBox({
           </div>
         </div>
         {routeError && (
-          <div className={styles.routeStatus} aria-live="polite">
-            {routeError}
+          <div className={styles.routeStatus} aria-live="polite" role="status">
+            <WarningIcon className={styles.routeNoticeIcon} />
+            <span>{routeError}</span>
           </div>
         )}
         {routeNoticeText && (

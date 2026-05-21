@@ -1,4 +1,5 @@
 import type { RouteAvoidState } from "@/lib/routeTypes";
+import { ROUTE_TIMEOUT_MESSAGE } from "@/lib/routeErrorMessages";
 import { activeAvoidOptions } from "./request";
 
 const ROUTE_FASTEST_SERVER_TIMEOUT_MS = 20_000;
@@ -12,7 +13,7 @@ export class RouteDeadlineError extends Error {
 }
 
 export function routeTimeoutMessage(): string {
-  return "Tidsgränsen nåddes för sökningen. Prova igen senare, med en kortare resa eller med färre undvik-val.";
+  return ROUTE_TIMEOUT_MESSAGE;
 }
 
 export function routeRequestTimeoutMs(

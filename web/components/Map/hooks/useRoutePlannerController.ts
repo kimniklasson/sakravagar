@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { track } from "@vercel/analytics";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { GeocodeResult } from "@/app/api/geocode/route";
+import { routePlanningErrorMessage } from "@/lib/routeErrorMessages";
 import type { RouteLine } from "@/lib/routeTypes";
 import {
   focusRoute,
@@ -607,7 +608,7 @@ export function useRoutePlannerController({
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Kunde inte hitta en rutt.");
+        throw new Error(routePlanningErrorMessage(res.status, body?.error));
       }
       const { routes, provider } = (await res.json()) as {
         provider?: RouteProvider;

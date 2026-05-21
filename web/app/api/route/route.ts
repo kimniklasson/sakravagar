@@ -1,4 +1,5 @@
 import type { RouteLine } from "@/lib/routeTypes";
+import { ROUTE_BUSY_MESSAGE, ROUTE_GENERIC_FAILURE_MESSAGE } from "@/lib/routeErrorMessages";
 import {
   clientIpFromRequest,
   jsonResponse,
@@ -154,7 +155,7 @@ export async function POST(req: Request) {
         ...err.snapshot,
       }, { level: "warn" });
       return jsonResponse(
-        { error: "too many active route requests" },
+        { error: ROUTE_BUSY_MESSAGE },
         {
           status: 429,
           requestId,
@@ -176,6 +177,6 @@ export async function POST(req: Request) {
     if (isRouteTimeoutError(err)) {
       return jsonResponse({ error: routeTimeoutMessage() }, { status: 504, requestId });
     }
-    return jsonResponse({ error: "routing failed" }, { status: 502, requestId });
+    return jsonResponse({ error: ROUTE_GENERIC_FAILURE_MESSAGE }, { status: 502, requestId });
   }
 }

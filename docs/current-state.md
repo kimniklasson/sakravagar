@@ -1,4 +1,4 @@
-# Current state — 2026-05-16
+# Current state — 2026-05-21
 
 Kort projektminne för nya sessioner. Läs detta först, sedan `PROJECT.md` för produktidé/prioritering, `docs/decisions.md` för långlivade vägval, `docs/api.md` för API-kontrakt, `docs/routing-ops.md` för GraphHopper-drift och `docs/review-log.md` för reviewspåret. Historiska sessionsanteckningar ligger komprimerade i `docs/session-archive.md` och ska inte läsas som nuläge.
 
@@ -55,8 +55,10 @@ Viktiga beteenden:
 - Startsidan fokuserar automatiskt på `Välj startpunkt...` när inget annat element redan har fokus. Första Tab från startfältet ska gå direkt till destinationfältet; små kringknappar och förslagsrader är klickbara men ligger inte i standard-tabbordningen. Förslag väljs via piltangenter + Enter medan fokus stannar i inputfältet.
 - Ruttlinjen är inte dragbar i MVP-flödet; via-punkter hanteras via stoppfältet.
 - Utan aktiva filter visas snabbaste rutten. Med aktiva filter visas relevanta kandidater och listan sorteras efter filtermatchning, därefter tid och distans.
+- Ruttkortstitlar beräknas över hela den presenterade kandidatgruppen, inte isolerat per kort. Exakt en rutt får `Snabbast` utifrån faktisk lägst restid; filtertitlar som `Lägre hastigheter`, `Mindre trafik`, `Utan broar` osv vinner före `Kortast`; `Mest lugn` och `Balanserad` kräver faktisk förbättring mot snabbaste baslinjen.
 - Ruttkort visar `Undviker` bara när aktuell aktiv exponering praktiskt taget är noll. Låg men befintlig stadstrafik/trafikintensitet ska visas som `Låg`, inte som grön undvikelse.
 - Frontend har kort session-cache för route-svar: 2 min för statiska filter och 5 min när `Trafikintensiva vägar` är aktivt.
+- Route-fel från `429`, `504` och generiska serverfel mappas till svensk användarcopy i ruttpanelen. Kapacitetsrelaterade fel förklarar att många testar rutter just nu och hänvisar till `kontakt@sakravagar.se` för den som vill bidra till stabilare drift.
 - Delning skapar public route snapshots via `/api/route-shares` med 30 dagars TTL. Payloaden valideras via `web/lib/routeShareSchema.ts` både vid API-write och SSR-prefetch av `/r/[slug]`.
 - Tumme upp/ner sparas via `/api/route-feedback` som kalibreringsunderlag, inte som direkt ranking-signal. Feedback-snapshots använder samma route-share-schema och sparas i 90 dagar.
 - Ruttkortens `Visa i maps` öppnar en extern Google Maps Directions-länk som verifierings-/satellitfallback snarare än egen satellitvy i appen. Länken skickar origin/destination plus upp till nio distansjämnt samplade waypoints längs vår geometri, med fallback till färre waypoints om URL:en annars blir längre än cirka 2048 tecken. Google kan fortfarande räkna om rutten, så tooltipen beskriver den som en ungefärlig rutt.

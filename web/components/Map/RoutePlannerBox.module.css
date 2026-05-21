@@ -240,8 +240,16 @@
 
 .routeStatus {
   composes: type-small-x from global;
-  margin-top: 10px;
-  color: rgba(255, 255, 255, 0.72);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 4px;
+  background: var(--color-red);
+  color: var(--color-white);
+  line-height: 1.2;
 }
 
 .routeCompareStatus {
